@@ -1252,7 +1252,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (the run summary's binder count): 1943, listed.
     // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
     // (https://github.com/rrnewton/hermit/issues/4876, #4878): 1944.
-    ("test.regular_crates", 1944),
+    // And three hermit-replay units of the shared-file backing (replayer::mmap::tests): 1929 + 3 = 1932.
+    // And four more of them (the listed view, an incomplete listing, a named backing, the
+    // seccomp check) and recorder::mmap::tests::a_descriptors_access_mode_is_read_from_its_fdinfo: 1937.
+    // And two more (a read-only hand-off, a link into a chrooted root): 1954.
+    ("test.regular_crates", 1954),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3879,7 +3883,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And record_replay_keeps_the_ownership_recordings_were_made_with and
     // record_replay_keeps_the_receive_rules_recordings_were_made_with
     // (https://github.com/rrnewton/hermit/issues/4930): 226 + 2 = 228.
-    ("test.record_replay", 228),
+    // And record_replay_shares_memory_between_mappings_of_one_memfd: 227.
+    // And the ten shared-mapping shapes of tests/c/record_replay_shared_mappings.c
+    // (overlap both ways, adjacent span, head and tail unmap, a moved source,
+    // pwrite before a remap and before a read, a forked child, a full table): 237.
+    // And four more (a thread's own descriptor table, a new PID namespace, a read-only
+    // mprotect, a guest asking for a seccomp filter): 241.
+    // And a chrooted guest's new mapping: 242.
+    // And a replay under an inherited seccomp filter refusing by name: 245.
+    ("test.record_replay", 245),
     // Seven proc-fallback, warning, and record/replay tests retain all 80
     // selected identities under the unchanged shipped CLI skip filters.
     // The successful-exec POSIX timer regression retains all 87 prior CLI cases.
@@ -6419,7 +6431,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same desync-notes round-trip unit: 1928.
     // And the same binder-count summary test: 1929, listed.
     // And the same summary-JSON unit as test.regular_crates (#4878): 1930.
-    ("test.regular_crates_on_host", 1930),
+    // The three shared-file backing units: 1932 - 14 = 1918.
+    // And the same five more units: 1923.
+    // And the same two more: 1940.
+    ("test.regular_crates_on_host", 1940),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
