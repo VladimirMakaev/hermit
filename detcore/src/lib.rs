@@ -78,6 +78,7 @@ pub mod nonwaiting_write;
 mod page;
 mod pipe_wake;
 pub mod post_crash;
+mod port_allocator;
 #[cfg(test)]
 mod predicted_death_tests;
 mod procfs;
@@ -7487,7 +7488,7 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
                             s.addr().is_some() && s.addr_len() != 0,
                             s.flags() & libc::MSG_OOB as u32 != 0,
                         );
-                        let result = self.handle_sendrecv(guest, s).await;
+                        let result = self.handle_sendto(guest, s).await;
                         self.note_send_without_control(guest, send, &result);
                         result
                     }

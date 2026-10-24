@@ -2197,7 +2197,7 @@ mod tests {
             SyscallClassification::Determinized
         );
         // recvmmsg is the multi-message sibling of recvmsg and must stay
-        // Determinized (routed through handle_sendrecv); regression for #788.
+        // Determinized (routed through handle_recvmmsg); regression for #788.
         assert_eq!(
             classify_syscall(Sysno::recvmmsg),
             SyscallClassification::Determinized
