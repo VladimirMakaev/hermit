@@ -2066,7 +2066,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And --minimize's baseline search and minimization: phases::tests::the_baseline_search_knocks_out_the_replayed_record_until_a_replay_misses and
     // minimize::tests::a_failed_cut_of_a_threads_last_interventions_is_tested_again: 1381.
     // And rundata::tests::a_recorded_target_run_replays_a_workspace_copy_within_an_explicit_bound: 1382.
-    ("test.hermit_unit", 1382),
+    // And phases::tests::a_target_exit_code_is_the_one_hermit_run_exits_with: 1383.
+    ("test.hermit_unit", 1383),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6649,7 +6650,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two minimize tests: 1373.
     // And the same two --minimize tests: 1375.
     // And the same run1-preemptions test: 1376.
-    ("test.hermit_unit_on_host", 1376),
+    // And the same exit-code test: 1377.
+    ("test.hermit_unit_on_host", 1377),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
