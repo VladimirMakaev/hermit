@@ -2050,7 +2050,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // copy, shared content-named copies, a changed shared copy not joined,
     // the root and path-length refusals, stale and held copies) and
     // host_input_change's snapshot-copy unit: 1364, listed.
-    ("test.hermit_unit", 1364),
+    // And the prefix search's continuation timeslice: phases::tests::{auto_continuations_only_get_coarser,
+    // the_prefix_search_continues_at_the_first_usable_timeslice} and
+    // rundata::tests::a_continuation_timeslice_that_would_change_the_prefix_is_refused: 1367.
+    ("test.hermit_unit", 1367),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6625,7 +6628,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same --untrap-passthrough-syscalls CLI unit: 1346, listed.
     // And the same six property snapshot units: 1352.
     // And the same twelve property snapshot units: 1358.
-    ("test.hermit_unit_on_host", 1358),
+    // And the same three continuation-timeslice tests: 1361.
+    ("test.hermit_unit_on_host", 1361),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
