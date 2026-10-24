@@ -29,6 +29,7 @@ use super::BackgroundStart;
 use super::HostObservedCount;
 use super::HostObservedFlag;
 use super::PreemptionRecord;
+use super::RecordedTimedWaitSpread;
 use super::ReservedInputMetadata;
 use super::ThreadHistory;
 use super::TimeSkip;
@@ -69,6 +70,8 @@ struct RawRecord {
     post_crash_timeslice: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     post_crash: Option<Vec<crate::post_crash::PostCrashSwitch>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    timed_wait_spread: Option<RecordedTimedWaitSpread>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     callback_checkpoints: BTreeMap<DetTid, Vec<callback_history::Checkpoint>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

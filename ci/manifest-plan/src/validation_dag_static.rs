@@ -1303,7 +1303,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (--watch): 1958 + 2 = 1991.
     // The #4682 re-land's two detcore-model config units and hermit-verify's
     // interpolation unit: 1958 + 3 = 1994.
-    ("test.regular_crates", 1994),
+    // And detcore-model's two config::tests of --chaos-timed-wait-spread
+    // (legacy form, round trip): 1996.
+    ("test.regular_crates", 1996),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2027,7 +2029,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The #4682 re-land's eight hermit units (the sleep-registration admission
     // and loader-route refusals, its error class, metadata, and the run,
     // analyze and bisect plumbing): 1319 + 8 = 1349.
-    ("test.hermit_unit", 1349),
+    // And run::chaos_timed_wait_spread_parses_round_trips_and_is_refused_where_inert and
+    // run::a_replay_under_another_timed_wait_spread_is_refused: 1351.
+    ("test.hermit_unit", 1351),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3491,7 +3495,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // parked-sleep deadline and send time, the readable-state rule, the
     // controlled loop, the schedule prefix and the record envelope):
     // 3279 + 16 = 3520.
-    ("test.detcore_unit", 3520),
+    // And --chaos-timed-wait-spread: three scheduler::timed_wait_spread::tests, one
+    // timed_waiters test, two scheduler tests and one preemptions test: 3527.
+    ("test.detcore_unit", 3527),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4881,7 +4887,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The #4682 re-land's two sleep CLI tests,
     // an_ignored_or_blocked_sigchld_does_not_end_a_sleep and
     // a_signal_after_a_sleeps_deadline_does_not_interrupt_it: 763 + 2 = 787.
-    ("test.cli", 787),
+    // And chaos_timed_wait_spread_reorders_a_wait_against_work_and_keeps_the_clock_honest: 788.
+    ("test.cli", 788),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5501,7 +5508,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two synchronization edge tests, not excluded: 700.
     // And the same four --watch tests, not excluded: 704.
     // And the same two #4682 re-land tests: 682 + 2 = 706.
-    ("test.cli_on_host", 706),
+    // And the same --chaos-timed-wait-spread guest test: 707.
+    ("test.cli_on_host", 707),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5527,7 +5535,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's tests, as at this node's second entry below: 1975.
     // Kept equal to the second test.regular_crates_on_host entry below: 1977.
     // Kept equal to the second test.regular_crates_on_host entry below: 1980.
-    ("test.regular_crates_on_host", 1980),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1982.
+    ("test.regular_crates_on_host", 1982),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6110,7 +6119,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same non-leader exec test: 3498.
     // And the same six --watch units: 3504, listed.
     // And the same sixteen #4682 re-land units: 3279 + 16 = 3520.
-    ("test.detcore_unit_on_host", 3520),
+    // And the same seven --chaos-timed-wait-spread tests: 3527.
+    ("test.detcore_unit_on_host", 3527),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6525,7 +6535,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two skid-overshoot policy units: 1334, listed.
     // And the same --watch refusal test: 1335.
     // And the same eight #4682 re-land units: 1313 + 8 = 1343.
-    ("test.hermit_unit_on_host", 1343),
+    // And the same two --chaos-timed-wait-spread run tests: 1345.
+    ("test.hermit_unit_on_host", 1345),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6787,7 +6798,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two interpolation units: 1975.
     // And the same two --watch detcore-model tests: 1977.
     // And the same three #4682 re-land units: 1944 + 3 = 1980.
-    ("test.regular_crates_on_host", 1980),
+    // And the same two --chaos-timed-wait-spread config tests: 1982.
+    ("test.regular_crates_on_host", 1982),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
