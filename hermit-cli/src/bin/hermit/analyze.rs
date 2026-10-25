@@ -13,7 +13,9 @@ mod memory;
 mod minimize;
 mod phases;
 pub(crate) mod rundata;
+mod stop;
 mod types;
+mod workspace;
 
 pub use memory::MemoryBudget;
 pub use types::AnalyzeOpts;
