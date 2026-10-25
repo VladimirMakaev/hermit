@@ -621,6 +621,7 @@ pub(super) mod tests {
                 .with_pipe_wake_latency(Some(0))
                 .with_signal_state_copy(false)
                 .with_expired_wait_runs_charged_once(true)
+                .with_queued_sleeps_registered_at_first_pass(true)
                 .into_string(),
         )
         .unwrap();
@@ -1002,6 +1003,10 @@ pub(super) mod tests {
             );
             assert_eq!(
                 super::super::read_recorded_expired_wait_runs_charged_once(&output),
+                Ok(true)
+            );
+            assert_eq!(
+                super::super::read_recorded_queued_sleeps_registered_at_first_pass(&output),
                 Ok(true)
             );
             assert!(PreemptionReader::try_new(&output).is_err());
