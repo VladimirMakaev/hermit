@@ -1272,7 +1272,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (the run summary's binder count): 1972, listed.
     // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
     // (https://github.com/rrnewton/hermit/issues/4876, #4878): 1973.
-    ("test.regular_crates", 1973),
+    // And detcore-model's
+    // summary::tests::a_summary_of_a_run_the_timeout_stopped_is_marked_partial:
+    // 1974, listed.
+    ("test.regular_crates", 1974),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3351,7 +3354,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and scheduler::callback_history_scheduler_tests::desync_notes_collect_every_producers_note
     // (https://github.com/rrnewton/hermit/issues/4876, #4878): 3412.
     // And train 3's eight format-ladder units (the record-format resolution between #4845 and #4847): 3420.
-    ("test.detcore_unit", 3420),
+    // And tool_global::tests'
+    // a_run_the_timeout_stopped_is_summarized_before_its_recording_is_flushed
+    // and scheduler::boundary_controller::tests'
+    // only_a_finished_runs_summary_requires_its_replay_to_have_ended: 3422,
+    // listed.
+    ("test.detcore_unit", 3422),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4714,7 +4722,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // where the kernel has no binder filesystem: 748.
     // And a_schedule_replay_that_leaves_its_readmissions_ends_there_under_die_on_desync:
     // 773.
-    ("test.cli", 773),
+    // And run_timeout_prints_a_partial_summary_naming_the_deadline: 774,
+    // listed.
+    ("test.cli", 774),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5315,7 +5325,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same preemption-replay readmission test: 689.
     // And the same two strict binder tests: 668.
     // And the same --die-on-desync readmission test: 692.
-    ("test.cli_on_host", 692),
+    // And the same partial-summary test, not excluded: 693, listed.
+    ("test.cli_on_host", 693),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5327,7 +5338,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the cases added since, as this twin's entry further down counts: 1957.
     // And the cases added since, as this twin's entry further down counts: 1958.
     // And the cases added since, as this twin's entry further down counts: 1959.
-    ("test.regular_crates_on_host", 1959),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1960.
+    ("test.regular_crates_on_host", 1960),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5883,7 +5895,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same binder record-file unit: 3409.
     // And the same three summarized-desync units: 3412.
     // And train 3's eight format-ladder units (the record-format resolution between #4845 and #4847): 3420.
-    ("test.detcore_unit_on_host", 3420),
+    // And the same two partial-summary units: 3422, listed.
+    ("test.detcore_unit_on_host", 3422),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6540,7 +6553,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same desync-notes round-trip unit: 1957.
     // And the same binder-count summary test: 1958, listed.
     // And the same summary-JSON unit as test.regular_crates (#4878): 1959.
-    ("test.regular_crates_on_host", 1959),
+    // And the same partial-summary detcore-model test, not excluded: 1960,
+    // listed.
+    ("test.regular_crates_on_host", 1960),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
