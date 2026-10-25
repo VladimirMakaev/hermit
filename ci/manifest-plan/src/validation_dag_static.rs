@@ -1256,7 +1256,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And four more of them (the listed view, an incomplete listing, a named backing, the
     // seccomp check) and recorder::mmap::tests::a_descriptors_access_mode_is_read_from_its_fdinfo: 1937.
     // And two more (a read-only hand-off, a link into a chrooted root): 1954.
-    ("test.regular_crates", 1954),
+    // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1955.
+    ("test.regular_crates", 1955),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3304,7 +3305,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // preemptions::tests::callback_checkpoints_are_placed_at_the_event_ending_their_slice
     // and scheduler::callback_history_scheduler_tests::desync_notes_collect_every_producers_note
     // (https://github.com/rrnewton/hermit/issues/4876, #4878): 3158.
-    ("test.detcore_unit", 3158),
+    // And scheduler::tests::replay_stops_waiting_for_a_log_served_call_that_never_returns: 3001.
+    // And scheduler::tests::replay_refuses_a_call_that_never_returns_unless_it_is_a_background_call: 3160.
+    ("test.detcore_unit", 3160),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4666,7 +4669,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // where the kernel has no binder filesystem: 748.
     // And a_schedule_replay_that_leaves_its_readmissions_ends_there_under_die_on_desync:
     // 754.
-    ("test.cli", 754),
+    // And a_recording_that_ends_inside_a_blocked_call_replays: 743.
+    // And a_recording_cut_between_calls_is_refused_rather_than_parked: 744.
+    // And a_recording_killed_from_outside_is_refused_rather_than_parked: 757.
+    ("test.cli", 757),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5250,7 +5256,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same preemption-replay readmission test: 670.
     // And the same two strict binder tests: 667.
     // And the same --die-on-desync readmission test: 673.
-    ("test.cli_on_host", 673),
+    // And a_recording_that_ends_inside_a_blocked_call_replays: 662.
+    // And a_recording_cut_between_calls_is_refused_rather_than_parked: 663.
+    // And a_recording_killed_from_outside_is_refused_rather_than_parked: 676.
+    ("test.cli_on_host", 676),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6434,7 +6443,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The three shared-file backing units: 1932 - 14 = 1918.
     // And the same five more units: 1923.
     // And the same two more: 1940.
-    ("test.regular_crates_on_host", 1940),
+    // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1941.
+    ("test.regular_crates_on_host", 1941),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.

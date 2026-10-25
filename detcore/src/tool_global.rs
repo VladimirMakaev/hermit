@@ -3473,6 +3473,13 @@ impl GlobalState {
                 .publish_instruction_offset(dtid, request_mm, offset);
             return (None, R::PublishInstructionOffset(taken));
         }
+        // The replay tool's report that the sender's call never returned in
+        // the recording: like the messages above, it carries no logical time,
+        // and the scheduler only stops waiting for the call.
+        if let GlobalRequest::ReplayCallNeverReturns = request {
+            let verdict = self.sched.lock().unwrap().replay_call_never_returns(dtid);
+            return (None, R::ReplayCallNeverReturns(verdict));
+        }
         // A thread's mask from Detcore's copy
         // (`syscalls::signal_shadow::publish_mask`): the same kind of message.
         if let GlobalRequest::PublishSignalMask(mask) = request {
@@ -3826,6 +3833,9 @@ impl GlobalState {
             }
             GlobalRequest::PublishInstructionOffset(_) => {
                 unreachable!("a published instruction offset is answered before clock accounting")
+            }
+            GlobalRequest::ReplayCallNeverReturns => {
+                unreachable!("a call that never returns is answered before clock accounting")
             }
             GlobalRequest::PublishRuntimePrivateMemory(_) => {
                 unreachable!("private-memory publication precedes clock accounting")
@@ -7919,6 +7929,11 @@ pub enum GlobalRequest {
     /// (`Scheduler::publish_instruction_offset`). Answered before any clock or
     /// scheduler accounting. Appended last.
     PublishInstructionOffset(crate::resources::InstructionOffset),
+    /// From the replay tool: the recording ends inside the sender's call,
+    /// which never returned in it, because the thread died in the call
+    /// (`Scheduler::replay_call_never_returns`), which the scheduler accepts
+    /// or refuses. Answered before any clock accounting. Appended last.
+    ReplayCallNeverReturns,
 }
 
 /// Responses from the global object
@@ -8257,6 +8272,10 @@ pub enum GlobalResponse {
     /// answer, so a replay of a schedule without offsets answers as before.
     /// Appended last.
     WithReplayInstructionOffset(crate::resources::InstructionOffset, Box<GlobalResponse>),
+    /// The answer to `GlobalRequest::ReplayCallNeverReturns`: what to do with
+    /// the thread, or why it cannot be parked
+    /// (`Scheduler::replay_call_never_returns`). Appended last.
+    ReplayCallNeverReturns(Result<UnreturnedCall, String>),
 }
 
 /// Read only the mapping predicate through a backend's synchronous external
@@ -8306,6 +8325,42 @@ pub fn shared_open_file_request(control: OpenFileControl) -> (DetTime, MmId, Glo
         MmId::initial(DetTid::from_raw(0)),
         GlobalRequest::SharedOpenFile(control),
     )
+}
+
+/// The request the replay tool sends when the recording ends inside the
+/// sender's call (`GlobalRequest::ReplayCallNeverReturns`). Like
+/// [`shared_open_file_request`], it is answered before any clock accounting,
+/// so its clock and address-space fields are placeholders.
+pub fn replay_call_never_returns_request() -> (DetTime, MmId, GlobalRequest) {
+    (
+        DetTime::default(),
+        MmId::initial(DetTid::from_raw(0)),
+        GlobalRequest::ReplayCallNeverReturns,
+    )
+}
+
+/// What replay does with a thread whose recording ends inside its call
+/// (`Scheduler::replay_call_never_returns`).
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub enum UnreturnedCall {
+    /// A background call: park the thread until the exit ends it.
+    Park,
+    /// The scheduler has already removed the thread: an exit or another
+    /// thread's `execve` is ending it, and the backend drops the call with it.
+    Gone,
+}
+
+/// The scheduler's answer to a [`replay_call_never_returns_request`]: what to
+/// do with the thread, or why it cannot be parked.
+pub fn replay_call_never_returns_reply(
+    response: (Option<LogicalTime>, GlobalResponse),
+) -> Result<UnreturnedCall, String> {
+    match response {
+        (None, GlobalResponse::ReplayCallNeverReturns(verdict)) => verdict,
+        other => Err(format!(
+            "unexpected answer to a call that never returned: {other:?}"
+        )),
+    }
 }
 
 /// The request [`crate::guest_log`] sends through a runtime's
