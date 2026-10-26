@@ -2177,7 +2177,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_selfcheck_difference_is_replay_not_reproducing,
     // a_success_exit_code_that_means_something_else_is_refused} and
     // tests::analyze_conclusions_have_their_own_exit_codes_and_class_lines: 1505.
-    ("test.hermit_unit", 1505),
+    // And analyze::verdict::tests::
+    // a_verdict_under_timing_settings_says_what_the_trial_showed and
+    // analyze::phases::tests::a_trial_under_another_setting_drops_the_option and
+    // the_alternative_timing_trial_decides_the_cause_by_how_it_ends: 1508.
+    ("test.hermit_unit", 1508),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6780,7 +6784,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same six stack2 thread-choice tests: 1486.
     // And the same two port tests: 1488.
     // And the same eleven verdict and precondition tests: 1499.
-    ("test.hermit_unit_on_host", 1499),
+    // And the same three timing-semantics verdict tests: 1502.
+    ("test.hermit_unit_on_host", 1502),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
