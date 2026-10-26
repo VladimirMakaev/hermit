@@ -3178,7 +3178,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The KVM named refusals (NR) add thirty-seven detcore units, thirteen in review
     // round 1, six in round 2, three in round 3, ten in round 4 and five in round 5:
     // 3242 + 37 = 3279, listed by cargo nextest list --profile ci -p hermit-detcore --lib --bins.
-    ("test.detcore_unit", 3279),
+    // And preemptions::tests::poll_skips_are_recorded_after_their_events_and_version_the_record
+    // and replayer::tests::a_recorded_poll_skip_is_the_next_decision_after_the_events_it_follows: 3281.
+    // And replayer::tests::poll_skips_after_the_last_event_are_the_schedules_last_decisions,
+    // scheduler::test::a_schedule_replay_ends_after_the_poll_skips_that_follow_its_last_event
+    // and a_released_schedule_replay_is_over_despite_its_untaken_poll_skips: 3284.
+    ("test.detcore_unit", 3284),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4520,7 +4525,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The retry stack adds one cli case: 744 + 1 = 745.
     // The integrated chain adds eighteen cli cases: 745 + 18 = 763,
     // re-measured in the test.cli tight loop at 351565c0ae (763 passed).
-    ("test.cli", 763),
+    // And a_schedule_replay_takes_a_pollers_skipped_turns_where_its_recording_did: 764.
+    ("test.cli", 764),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5109,7 +5115,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same two SCM_RIGHTS queue cases: 661 + 2 = 663.
     // The same retry-stack cli case: 663 + 1 = 664.
     // The same eighteen integrated-chain cli cases: 664 + 18 = 682.
-    ("test.cli_on_host", 682),
+    // And the same poll-skip replay test: 683.
+    ("test.cli_on_host", 683),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     ("test.regular_crates_on_host", 1944),
@@ -5625,7 +5632,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // twin's pin stayed 3037, so the hosted/local count invariant failed
     // on main. 3037 -> 3242 to match that measured recount.
     // The same thirty-seven NR units: 3242 + 37 = 3279.
-    ("test.detcore_unit_on_host", 3279),
+    // And the same two poll-skip units: 3281.
+    // And the same three replay-horizon units: 3284.
+    ("test.detcore_unit_on_host", 3284),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).

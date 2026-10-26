@@ -5121,6 +5121,7 @@ impl Scheduler {
                             .iter()
                             .map(|(tid, points)| (*tid, points.clone().into()))
                             .collect();
+                        let poll_skips = record.poll_skips().to_vec();
                         let vec = record.into_global();
                         trace!("Trace loaded, length {}", vec.len());
                         // Indices are traced (observed) event counts, the same
@@ -5133,7 +5134,7 @@ impl Scheduler {
                             .iter()
                             .map(|(ix, path)| (*ix, None, path.clone()))
                             .collect();
-                        let mut replayer = Replayer::new(vec);
+                        let mut replayer = Replayer::new(vec).with_poll_skips(&poll_skips);
                         replayer.replay_exhausted_panic = cfg.replay_exhausted_panic;
                         replayer.die_on_desync = cfg.die_on_desync;
                         (Some(replayer), Some(toprint))
@@ -16650,6 +16651,40 @@ impl Scheduler {
         Err(SkipTurn)
     }
 
+    /// The scheduler just skipped the polling thread `dettid`
+    /// (`step4_resource_block`). A recording notes the skip after the events
+    /// recorded so far (`PreemptionWriter::insert_poll_skip`). A schedule
+    /// replay retires it if it is the recorded skip due next, and then hands
+    /// the foreground to the thread the schedule runs next, as a context
+    /// switch at an event does (`consume_schedevent`): the recording took the
+    /// skip there, and its next event follows it. A skip the recording took
+    /// after its last event is the schedule's last decision, so taking it ends
+    /// the replay as consuming the last event does
+    /// (`release_replay_priorities_if_exhausted`), once nothing would set the
+    /// replay's priorities again.
+    fn record_or_replay_poll_skip(&mut self, dettid: DetTid) {
+        if !self.has_schedule_replay()
+            && let Some(writer) = &mut self.preemption_writer
+        {
+            writer.insert_poll_skip(dettid);
+        }
+        let Some(replayer) = self.replayer.as_mut() else {
+            return;
+        };
+        if !replayer.take_poll_skip(dettid) {
+            return;
+        }
+        debug!("[dtid {}] took the recorded poll skip", dettid);
+        if let Some((next_tid, timeslice)) = replayer.next_resume()
+            && next_tid != dettid
+        {
+            self.requeue_with_new_priority(dettid, REPLAY_DEFERRED_PRIORITY);
+            self.requeue_with_new_priority(next_tid, REPLAY_FOREGROUND_PRIORITY);
+            self.timeslices.insert(next_tid, timeslice);
+        }
+        self.release_replay_priorities_if_exhausted();
+    }
+
     /// Simply advance the turn. This does NOT remove any threads from the
     /// runqueue; callers must maintain `run_queue`/`blocking` invariants.
     fn skip_turn(&mut self) -> Result<(), SkipTurn> {
@@ -16786,6 +16821,7 @@ impl Scheduler {
             );
             self.upgrade_polled_to_runnable(dettid, rs); // Indicate the thread gets to run next time
             self.note_poll_deadline(dettid, rs);
+            self.record_or_replay_poll_skip(dettid);
             self.skip_turn()
         } else {
             match rs.resources.len() {
@@ -19588,9 +19624,11 @@ impl Scheduler {
     /// for ever behind a foreground thread that never blocks, a thread the
     /// schedule readmitted at the deferred priority included
     /// (https://github.com/rrnewton/hermit/issues/4472). The point is the
-    /// consumption of the last recorded event, at the schedule's fixed final
-    /// position, or the replayer's release of the rest of the schedule after a
-    /// long run of events that match none of it (`Replayer::release_schedule`).
+    /// schedule's last decision, at its fixed final position: the consumption
+    /// of the last recorded event, or of a poll skip the recording took after
+    /// it (`record_or_replay_poll_skip`, `Replayer::has_events_left`), or the
+    /// replayer's release of the rest of the schedule after a long run of
+    /// events that match none of it (`Replayer::release_schedule`).
     /// A release can come at another event, or not at all, in another run: a
     /// polling retry that matches a recorded one ends that run, and how many
     /// retries the replay matches can be host-timed
@@ -19625,9 +19663,9 @@ impl Scheduler {
         self.replayer.as_ref().is_some_and(Replayer::released)
     }
 
-    /// Whether the replayed schedule is over: its last event was consumed, or
-    /// the replay released the rest (`release_replay_priorities_if_exhausted`,
-    /// at a scheduled event of a running thread). Each thread hears of it in
+    /// Whether the replayed schedule is over: its last decision was taken, its
+    /// last event or a poll skip recorded after it, or the replay released the
+    /// rest (`release_replay_priorities_if_exhausted`). Each thread hears of it in
     /// the reply to its next traced event and then runs, and creates threads,
     /// as a run without a schedule does
     /// (`ThreadState::follows_replayed_schedule`).
@@ -30858,6 +30896,155 @@ mod test {
             // Back in the queue as a poller for the next retry.
             scheduler.run_queue.remove_tid(poller);
             scheduler.runqueue_push_back(poller);
+        }
+    }
+
+    /// A scheduler replaying `events` and `poll_skips`, with dtids 3, 5 and 7
+    /// registered and queued: 3 in the replay's foreground, 5 and 7 deferred.
+    fn replaying_with_poll_skips(
+        events: Vec<SchedEvent>,
+        poll_skips: &[crate::preemptions::PollSkip],
+    ) -> Scheduler {
+        let mut scheduler = Scheduler::new(&Config::default());
+        for (raw, priority) in [
+            (3, REPLAY_FOREGROUND_PRIORITY),
+            (5, REPLAY_DEFERRED_PRIORITY),
+            (7, REPLAY_DEFERRED_PRIORITY),
+        ] {
+            let tid = DetTid::from_raw(raw);
+            register_known_thread(&mut scheduler, tid);
+            scheduler.priorities.insert(tid, priority);
+            scheduler.runqueue_push_back(tid);
+        }
+        scheduler.replayer = Some(replayer::Replayer::new(events).with_poll_skips(poll_skips));
+        scheduler
+    }
+
+    /// The scheduler selects polling thread `poller` and skips it
+    /// (`step4_resource_block` on a pending backoff).
+    fn skip_poller(scheduler: &mut Scheduler, poller: DetTid) {
+        let mut request = Resources::new(poller);
+        request.insert(ResourceID::InternalIOPolling, Permission::W);
+        request.poll_attempt = 1;
+        let turn = scheduler.next_turns.get(&poller).unwrap();
+        turn.req.put(Ok(request.clone()));
+        let response = turn.resp.clone();
+        assert_eq!(scheduler.run_queue.tentative_pop_tid(poller), Some(poller));
+        assert!(
+            scheduler
+                .step4_resource_block(poller, &request, &response)
+                .is_err(),
+            "a pending backoff grants no turn"
+        );
+        assert!(response.try_read().is_none());
+    }
+
+    /// Poll skips recorded after the last event of a schedule are its last
+    /// decisions: the replay hands the turn to each skipped poller in turn,
+    /// and is over, every thread back at the default priority, only once the
+    /// scheduler has taken the last of them. The replay's priorities are
+    /// released exactly once, after that decision, and nothing sets them
+    /// again, a further event included: when the release came at the last
+    /// event, taking the first of two such skips put the replay's priorities
+    /// back, and the second left them for the rest of the run. A schedule
+    /// with no skip after its last event is over at that event, as before.
+    #[test]
+    fn a_schedule_replay_ends_after_the_poll_skips_that_follow_its_last_event() {
+        use crate::preemptions::PollSkip;
+        let (runner, first, second) = (
+            DetTid::from_raw(3),
+            DetTid::from_raw(5),
+            DetTid::from_raw(7),
+        );
+        let entered = SchedEvent::syscall(runner, Sysno::getpid, SyscallPhase::Prehook)
+            .with_time(LogicalTime::from_nanos(10_000));
+        let last = SchedEvent::syscall(runner, Sysno::getpid, SyscallPhase::Posthook)
+            .with_time(LogicalTime::from_nanos(20_000));
+        let after_last = |thread| PollSkip { after: 2, thread };
+        for skipped in [vec![], vec![first], vec![first, second]] {
+            let skips: Vec<PollSkip> = skipped.iter().copied().map(after_last).collect();
+            let mut scheduler =
+                replaying_with_poll_skips(vec![entered.clone(), last.clone()], &skips);
+            // Whether the replay was over after each recorded decision.
+            let mut over = Vec::new();
+            let mut note = |scheduler: &Scheduler| {
+                assert_eq!(
+                    scheduler.schedule_replay_over(),
+                    !scheduler.replay_has_records_left(),
+                    "skips {skipped:?}: the replay is over exactly when it has no decision left"
+                );
+                over.push(scheduler.replay_priorities_released);
+            };
+            assert!(scheduler.consume_schedevent(&entered).keep_running);
+            note(&scheduler);
+            let at_last = scheduler.consume_schedevent(&last);
+            note(&scheduler);
+            if let Some(&next) = skipped.first() {
+                assert!(!at_last.keep_running, "skips {skipped:?}");
+                assert_eq!(scheduler.priorities[&runner], REPLAY_DEFERRED_PRIORITY);
+                assert_eq!(scheduler.priorities[&next], REPLAY_FOREGROUND_PRIORITY);
+            }
+            for (index, &poller) in skipped.iter().enumerate() {
+                skip_poller(&mut scheduler, poller);
+                note(&scheduler);
+                if let Some(&next) = skipped.get(index + 1) {
+                    assert_eq!(scheduler.priorities[&poller], REPLAY_DEFERRED_PRIORITY);
+                    assert_eq!(scheduler.priorities[&next], REPLAY_FOREGROUND_PRIORITY);
+                }
+            }
+            let mut expected = vec![false; skipped.len() + 2];
+            *expected.last_mut().unwrap() = true;
+            assert_eq!(over, expected, "skips {skipped:?}");
+            // A further event, past the schedule, changes nothing.
+            let past = SchedEvent::syscall(runner, Sysno::getppid, SyscallPhase::Prehook)
+                .with_time(LogicalTime::from_nanos(30_000));
+            assert!(scheduler.consume_schedevent(&past).keep_running);
+            assert!(scheduler.schedule_replay_over());
+            for tid in [runner, first, second] {
+                assert_eq!(
+                    scheduler.priorities[&tid], DEFAULT_PRIORITY,
+                    "skips {skipped:?}: dtid {tid}"
+                );
+                assert_eq!(
+                    scheduler.run_queue.queued_priority(tid),
+                    Some(DEFAULT_PRIORITY),
+                    "skips {skipped:?}: dtid {tid}"
+                );
+            }
+        }
+    }
+
+    /// A replay that released its schedule after a long unmatched run is over
+    /// at the release, every thread back at the default priority, though a
+    /// poll skip recorded after the events it dropped was never taken: the
+    /// release drops the skips with the events, so no skip keeps the replay
+    /// going.
+    #[test]
+    fn a_released_schedule_replay_is_over_despite_its_untaken_poll_skips() {
+        let (recorded, spinner) = (DetTid::from_raw(3), DetTid::from_raw(5));
+        let event = SchedEvent::syscall(recorded, Sysno::getpid, SyscallPhase::Posthook)
+            .with_time(LogicalTime::from_nanos(10_000));
+        let mut scheduler = replaying_with_poll_skips(
+            vec![event.clone(), event],
+            &[crate::preemptions::PollSkip {
+                after: 2,
+                thread: DetTid::from_raw(7),
+            }],
+        );
+        let spin = SchedEvent::syscall(spinner, Sysno::sched_yield, SyscallPhase::Posthook)
+            .with_time(LogicalTime::from_nanos(20_000));
+        for _ in 1..replayer::UNMATCHED_EVENTS_BEFORE_RELEASE {
+            let _ = scheduler.consume_schedevent(&spin);
+        }
+        assert!(!scheduler.schedule_released());
+        assert!(!scheduler.schedule_replay_over());
+        let _ = scheduler.consume_schedevent(&spin);
+        assert!(scheduler.schedule_released());
+        assert!(!scheduler.replay_has_records_left());
+        assert!(scheduler.schedule_replay_over());
+        for raw in [3, 5, 7] {
+            let tid = DetTid::from_raw(raw);
+            assert_eq!(scheduler.priorities[&tid], DEFAULT_PRIORITY, "dtid {tid}");
         }
     }
 
