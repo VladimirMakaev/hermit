@@ -175,6 +175,7 @@ impl BisectOpts {
             trial_runner: Default::default(),
             hermit_run: Default::default(),
             trial_sched_seed: Default::default(),
+            slowest_run: Default::default(),
         };
         // Before the schedules are read: a refused cap or counter reads and
         // starts nothing.

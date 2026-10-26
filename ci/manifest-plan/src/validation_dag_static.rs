@@ -2215,7 +2215,17 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And analyze::phases::tests::analyze_trials_take_the_targets_scheduler_seed_and_endpoints_their_own: 1548.
     // And analyze::phases' a_prefix_stack_trial_requests_its_stack_by_schedule_position
     // (https://github.com/rrnewton/hermit/issues/4917): 1549.
-    ("test.hermit_unit", 1549),
+    // And a trial analyze's wall-clock bound stops is no outcome:
+    // phases::tests::{a_trial_the_backstop_stopped_runs_again_and_does_not_change_the_answer,
+    // a_trial_stopped_again_ends_the_search_with_a_partial_report,
+    // a_stop_by_the_run_arguments_timeout_still_counts_as_not_meeting_the_target,
+    // a_bisection_trial_the_backstop_stopped_runs_again_and_does_not_change_the_pair,
+    // a_continuation_with_an_inconclusive_endpoint_trial_ends_the_search,
+    // a_baseline_run_the_backstop_stopped_runs_again}
+    // and rundata::tests::{the_auto_bound_grows_with_the_slowest_finished_run,
+    // a_backstop_stop_is_not_journaled_and_the_key_ignores_the_bound,
+    // a_rerun_lengthens_the_trial_bound}: 1558.
+    ("test.hermit_unit", 1558),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6853,7 +6863,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same trial scheduler-seed test: 1542.
     // And the same prefix stack trial unit of
     // https://github.com/rrnewton/hermit/issues/4917: 1543.
-    ("test.hermit_unit_on_host", 1543),
+    // And the same nine backstop tests: 1552.
+    ("test.hermit_unit_on_host", 1552),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
