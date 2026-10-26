@@ -1923,7 +1923,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_spliced_branch_batch_keeps_its_instruction_offset_with_its_end: 1294.
     // And bisect_replays_offset_schedules_without_chaos and
     // an_offset_batch_is_not_split: 1296.
-    ("test.hermit_unit", 1296),
+    // And fifteen for the aarch64 exclusive-loop rewrite: thirteen in
+    // hermit-cli/src/aarch64_lse (the decoder, the four idioms and their
+    // refusals), one for the packed-relative-relocation decoder, and one
+    // that the rewrite flags survive into a printed reproducer: 1311,
+    // listed. Derived with this node's own selection: `cargo nextest list
+    // -p hermit-run --features third-party-backends,kvm-native-test-support
+    // --lib --bins` lists 1310, of which this node's `--skip` patterns
+    // remove 5 and one `#[ignore]` test is listed but never executed.
+    ("test.hermit_unit", 1311),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
