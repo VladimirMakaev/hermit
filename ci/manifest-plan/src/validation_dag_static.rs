@@ -1247,7 +1247,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // rewrite_exclusives_overlay_never_enters_the_legacy_form: 1941.
     // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
     // (https://github.com/rrnewton/hermit/issues/4876): 1942.
-    ("test.regular_crates", 1942),
+    // And detcore-model's
+    // summary::tests::binder_external_calls_show_in_the_report_but_not_the_info_view
+    // (the run summary's binder count): 1943, listed.
+    ("test.regular_crates", 1943),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3284,7 +3287,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And format_version_round_trips_through_the_record_serde and
     // background_starts_round_trip_through_the_record_serde, for main's
     // record serde: 3152.
-    ("test.detcore_unit", 3152),
+    // And syscalls::binder's
+    // strict_refuses_binder_except_in_a_replay_with_readmissions and
+    // external_binder_calls_are_counted_and_each_process_is_warned_once
+    // (`--strict`'s binder policy, the per-process warning and count): 3154.
+    ("test.detcore_unit", 3154),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4633,7 +4640,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_preemption_replay_readmits_a_backgrounded_call_where_its_recording_did
     // (readmissions in a `hermit run` preemption record, replayed under a race
     // probe): 751.
-    ("test.cli", 751),
+    // And a_fresh_strict_run_refuses_binder_and_names_the_replay_route and
+    // a_strict_replay_of_a_record_with_readmissions_may_use_binder, which skip
+    // where the kernel has no binder filesystem: 748.
+    // And a_schedule_replay_that_leaves_its_readmissions_ends_there_under_die_on_desync:
+    // 754.
+    ("test.cli", 754),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5215,7 +5227,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Less #4740's tests, which main counts since train 10: 668.
     // And the same blocking binder read test: 669.
     // And the same preemption-replay readmission test: 670.
-    ("test.cli_on_host", 670),
+    // And the same two strict binder tests: 667.
+    // And the same --die-on-desync readmission test: 673.
+    ("test.cli_on_host", 673),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5749,7 +5763,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two untaken-background-start units: 3149.
     // And the same prefix-record unit: 3150.
     // And the same two record-serde round-trip units: 3152.
-    ("test.detcore_unit_on_host", 3152),
+    // And the same two binder policy units: 3154.
+    ("test.detcore_unit_on_host", 3154),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6391,7 +6406,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three store-exclusive cause units: 1926.
     // And the same overlay legacy-form unit: 1927.
     // And the same desync-notes round-trip unit: 1928.
-    ("test.regular_crates_on_host", 1928),
+    // And the same binder-count summary test: 1929, listed.
+    ("test.regular_crates_on_host", 1929),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
