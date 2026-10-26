@@ -69,6 +69,8 @@ struct RawRecord {
     store_exclusive_failures: HostObservedCount,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     format_version: Option<u32>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    rewrite_exclusives_in_memory: bool,
 }
 
 struct LegacyFields<'a>(&'a PreemptionRecord);
