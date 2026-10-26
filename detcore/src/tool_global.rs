@@ -2789,12 +2789,16 @@ impl GlobalState {
         // heuristic, or left them unchanged.
         summary.exclusive_rewrite_stripped_heuristic =
             self.cfg.rewrite_exclusives_stripped_heuristic;
-        summary.exclusive_rewrite_unmarked = self
-            .cfg
-            .rewrite_exclusives_unmarked
-            .iter()
-            .map(|path| path.display().to_string())
-            .collect();
+        // The overlay's files join those the in-memory rewrite named
+        // (`store_exclusive`'s `fill_summary`, above).
+        summary.exclusive_rewrite_unmarked.extend(
+            self.cfg
+                .rewrite_exclusives_unmarked
+                .iter()
+                .map(|path| path.display().to_string()),
+        );
+        summary.exclusive_rewrite_unmarked.sort();
+        summary.exclusive_rewrite_unmarked.dedup();
         //
         // Real time report:
         // N.B.: We don't have a job-level exit hook atm (T76248597), so we use the

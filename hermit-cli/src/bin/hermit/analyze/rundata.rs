@@ -1380,11 +1380,17 @@ impl AnalyzeOpts {
         Ok(())
     }
 
+    /// Whether the trials rewrite exclusive loops in the guest's memory.
+    pub fn trial_rewrite_exclusives_in_memory(&self) -> bool {
+        RunData::get_raw_runopts(self).rewrites_exclusives_in_memory()
+    }
+
     /// `record` stamped with the trials' `--pipe-wake-latency`, signal-state
-    /// copy setting, `--expired-wait-charge`, `--sleep-registration` and
-    /// stripped-file rewrite, as every record analyze writes must be: a
-    /// record that omitted one would be accepted, or refused, when replayed
-    /// under another value (<https://github.com/rrnewton/hermit/issues/4380>).
+    /// copy setting, `--expired-wait-charge`, `--sleep-registration`,
+    /// in-memory exclusive rewrite and stripped-file rewrite, as every record
+    /// analyze writes must be: a record that omitted one would be accepted,
+    /// or refused, when replayed under another value
+    /// (<https://github.com/rrnewton/hermit/issues/4380>).
     pub fn stamp_trial_record(&self, record: PreemptionRecord) -> PreemptionRecord {
         record
             .with_pipe_wake_latency(self.trial_pipe_wake_latency())
@@ -1396,6 +1402,7 @@ impl AnalyzeOpts {
             .with_queued_sleeps_registered_at_first_pass(
                 self.trial_sleep_registration() == SleepRegistration::FirstPass,
             )
+            .with_rewrite_exclusives_in_memory(self.trial_rewrite_exclusives_in_memory())
             .with_rewrite_exclusives_stripped_heuristic(self.trial_stripped_rewrite_heuristic())
     }
 
@@ -1492,9 +1499,10 @@ impl AnalyzeOpts {
     /// `--expired-wait-charge` ([`Self::adopt_expired_wait_charge`]), which a
     /// record without that field states as `each`, for the trials'
     /// `--sleep-registration` ([`Self::adopt_sleep_registration`]), which a
-    /// record without that field states as `when-chosen`, and for the trials'
-    /// `--rewrite-exclusives-stripped`, which a record without that field was
-    /// made without the heuristic.
+    /// record without that field states as `when-chosen`, for the in-memory
+    /// exclusive-loop rewrite, which a record without that field was made
+    /// without, and for the trials' `--rewrite-exclusives-stripped`, which a
+    /// record without that field was made without the heuristic.
     pub fn refuse_recordings_under_another_pipe_wake_latency(
         &self,
         recordings: &[(&str, &Path)],
@@ -1578,6 +1586,17 @@ impl AnalyzeOpts {
                     self.trial_stripped_rewrite_heuristic(),
                 )
             {
+                return Err(
+                    anyhow::Error::new(crate::app::container::PolicyRefusal).context(refusal)
+                );
+            }
+            let recorded = detcore::preemptions::read_recorded_rewrite_exclusives_in_memory(path)
+                .map_err(anyhow::Error::msg)?;
+            if let Some(refusal) = detcore::preemptions::rewrite_exclusives_in_memory_mismatch(
+                &format!("{option} {}", path.display()),
+                recorded,
+                self.trial_rewrite_exclusives_in_memory(),
+            ) {
                 return Err(
                     anyhow::Error::new(crate::app::container::PolicyRefusal).context(refusal)
                 );

@@ -5468,6 +5468,7 @@ impl Scheduler {
                 .with_chaos_timeslice(cfg.chaos_timeslice)
                 .with_guest_ids(cfg.guest_ids)
                 .with_queued_sleeps_registered_at_first_pass(queued_sleeps_registered_at_first_pass)
+                .with_rewrite_exclusives_in_memory(cfg.rewrite_exclusives_in_memory)
                 .with_rewrite_exclusives_stripped_heuristic(
                     cfg.rewrite_exclusives_stripped_heuristic,
                 );
@@ -21986,6 +21987,7 @@ impl Scheduler {
                 // store-exclusive sequences (aarch64).
                 exclusive_pairs: Default::default(),
                 counter_reads: Default::default(),
+                exclusive_rewrites: Default::default(),
                 store_exclusives: None,
                 store_exclusives_unavailable: None,
                 guest_deadlock,

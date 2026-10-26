@@ -175,6 +175,28 @@ fn refusal_detail(reason: &Refusal) -> String {
     }
 }
 
+/// One rewritten sequence of a file: where it is, and its bytes before and
+/// after. Same length, so applying it moves nothing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FilePatch {
+    /// File offset of the sequence's first instruction.
+    pub offset: u64,
+    /// The sequence as the file holds it.
+    pub original: Vec<u8>,
+    /// The replacement.
+    pub rewritten: Vec<u8>,
+}
+
+/// What [`plan_bytes`] decided for one file: the report, and every
+/// replacement it would make.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FilePlan {
+    /// The counts [`rewrite_bytes`] reports.
+    pub report: FileReport,
+    /// The replacements, in file order within each section.
+    pub patches: Vec<FilePatch>,
+}
+
 /// Rewrite the executable segments of `bytes` in place.
 ///
 /// Returns `Ok(None)` when the file is not an aarch64 ELF, which is not an
@@ -191,6 +213,23 @@ pub fn rewrite_bytes(
     stripped: StrippedRewrite,
 ) -> Result<Option<FileReport>, goblin::error::Error> {
     let _ = stripped; // only Refuse remains; see the scope cut above.
+    let Some(plan) = plan_bytes(bytes)? else {
+        return Ok(None);
+    };
+    for patch in &plan.patches {
+        let start = patch.offset as usize;
+        bytes[start..start + patch.rewritten.len()].copy_from_slice(&patch.rewritten);
+    }
+    Ok(Some(plan.report))
+}
+
+/// Decide the rewrite of `bytes` without applying it: the report
+/// [`rewrite_bytes`] gives, and each replacement as a [`FilePatch`]. A
+/// caller that applies the replacements somewhere other than the file (a
+/// process's mapped pages) gets exactly the bytes a rewritten file would
+/// hold. Like [`rewrite_bytes`], it rewrites only what mapping symbols
+/// prove is code.
+pub fn plan_bytes(bytes: &[u8]) -> Result<Option<FilePlan>, goblin::error::Error> {
     // A guest that is not an ELF image at all -- a `#!` script, say -- is not
     // an error: it simply has nothing to rewrite. A file that starts like an
     // ELF and then does not parse IS an error, because something is wrong
@@ -274,7 +313,10 @@ pub fn rewrite_bytes(
         let skip_file = |why: &str| {
             let mut report = FileReport::default();
             report.skipped_segments.push(why.into());
-            Ok(Some(report))
+            Ok(Some(FilePlan {
+                report,
+                patches: Vec::new(),
+            }))
         };
         if elf.section_headers.is_empty() {
             return skip_file("the file has no section headers, so code cannot be told from data");
@@ -401,11 +443,12 @@ pub fn rewrite_bytes(
         })
     });
     let mut report = FileReport::default();
+    let mut patches = Vec::new();
     if relr_unreadable {
         report
             .skipped_segments
             .push("a packed relative relocation section is truncated".into());
-        return Ok(Some(report));
+        return Ok(Some(FilePlan { report, patches }));
     }
     for (index, section) in sections.into_iter().enumerate() {
         let Section {
@@ -424,7 +467,7 @@ pub fn rewrite_bytes(
             .filter(|(other, _)| *other != index)
             .flat_map(|(_, targets)| targets.iter().copied())
             .collect();
-        let Some(mut words) = words else {
+        let Some(words) = words else {
             report.skipped_segments.push(format!(
                 "executable section at file offset {offset:#x} is truncated or unaligned"
             ));
@@ -517,13 +560,22 @@ pub fn rewrite_bytes(
                 .refused_sites
                 .push((refused.addr, refusal_detail(&refused.reason)));
         }
-        rewrite::apply(&mut words, vaddr, &plan);
+        // Each site replaces exactly its own words (`rewrite::apply`), so
+        // the patch is those words before and after.
         let start = offset as usize;
-        for (i, word) in words.iter().enumerate() {
-            bytes[start + 4 * i..start + 4 * i + 4].copy_from_slice(&word.to_le_bytes());
+        for site in &plan.patched {
+            let index = ((site.addr - vaddr) / 4) as usize;
+            let to_bytes = |words: &[u32]| -> Vec<u8> {
+                words.iter().flat_map(|word| word.to_le_bytes()).collect()
+            };
+            patches.push(FilePatch {
+                offset: (start + 4 * index) as u64,
+                original: to_bytes(&words[index..index + site.words.len()]),
+                rewritten: to_bytes(&site.words),
+            });
         }
     }
-    Ok(Some(report))
+    Ok(Some(FilePlan { report, patches }))
 }
 
 /// One executable section, as [`rewrite_bytes`] plans it.
@@ -1006,6 +1058,56 @@ mod tests {
         0x35ff_ffa9,
         0xd65f_03c0,
     ];
+
+    /// [`elf_image`] whose `.text` is all code.
+    fn elf_with_text(words: &[u32]) -> Vec<u8> {
+        elf_image(words, Some(&[(1, 0, true)]))
+    }
+
+    /// The plan names each rewritten sequence by file offset with its bytes
+    /// before and after, those bytes are the rewriter's, and applying the
+    /// plan is exactly what `rewrite_bytes` does to the file.
+    #[test]
+    fn the_plan_locates_each_sequence_and_matches_the_rewritten_file() {
+        // nop; ldaxr w8, [x0]; add w8, w8, #1; stlxr w9, w8, [x0];
+        // cbnz w9, <ldaxr>; ret
+        let words = [
+            0xd503_201f,
+            0x885f_fc08,
+            0x1100_0508,
+            0x8809_fc08,
+            0x35ff_ffa9,
+            0xd65f_03c0,
+        ];
+        let image = elf_with_text(&words);
+        let plan = plan_bytes(&image).unwrap().expect("an aarch64 ELF image");
+        let expected = rewrite::plan(&words, 0x100);
+        assert_eq!(expected.patched.len(), 1, "{expected:?}");
+        assert_eq!(plan.report.patched_total(), 1, "{:?}", plan.report);
+        assert_eq!(plan.patches.len(), 1);
+
+        let patch = &plan.patches[0];
+        assert_eq!(patch.offset, 0x104, "the loop starts after the nop");
+        let words_of = |bytes: &[u8]| -> Vec<u32> {
+            bytes
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .map(|word| u32::from_le_bytes(*word))
+                .collect()
+        };
+        assert_eq!(words_of(&patch.original), words[1..5].to_vec());
+        assert_eq!(words_of(&patch.rewritten), expected.patched[0].words);
+
+        let mut rewritten = image.clone();
+        let report = rewrite_bytes(&mut rewritten, StrippedRewrite::Refuse)
+            .unwrap()
+            .unwrap();
+        assert_eq!(report, plan.report);
+        let mut applied = image;
+        applied[0x104..0x104 + patch.rewritten.len()].copy_from_slice(&patch.rewritten);
+        assert_eq!(applied, rewritten);
+    }
 
     /// A relocation section's entries must be seen, including the packed
     /// relative ones the ELF reader does not report. The check here is on

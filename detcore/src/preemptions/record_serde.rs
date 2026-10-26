@@ -84,6 +84,8 @@ struct RawRecord {
     background_starts: Vec<BackgroundStart>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     rewrite_exclusives_stripped_heuristic: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    rewrite_exclusives_in_memory: bool,
 }
 
 struct LegacyFields<'a>(&'a PreemptionRecord);
