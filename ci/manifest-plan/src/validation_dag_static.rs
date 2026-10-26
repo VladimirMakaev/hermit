@@ -1952,7 +1952,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_trial_of_a_recording_with_instruction_offsets_keeps_its_own_jumps: 1299.
     // And a_prefix_trial_of_a_recording_with_offset_rows_keeps_its_offsets_format: 1329.
     // And minimize's a_minimize_record_states_no_format_and_keeps_its_rows: 1330.
-    ("test.hermit_unit", 1330),
+    // And fifteen for the aarch64 exclusive-loop rewrite: thirteen in
+    // hermit-cli/src/aarch64_lse (the decoder, the four idioms and their
+    // refusals), one for the packed-relative-relocation decoder, and one
+    // that the rewrite flags survive into a printed reproducer: 1345,
+    // listed. Derived with this node's own selection: `cargo nextest list
+    // -p hermit-run --features third-party-backends,kvm-native-test-support
+    // --lib --bins` lists 1339, of which this node's `--skip` patterns
+    // remove 5 and one `#[ignore]` test is listed but never executed.
+    ("test.hermit_unit", 1345),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
