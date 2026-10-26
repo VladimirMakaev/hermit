@@ -6118,7 +6118,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same offsets-trial unit: 1293.
     // And the same offset-rows prefix unit: 1323.
     // And the same minimize-record unit: 1324.
-    ("test.hermit_unit_on_host", 1324),
+    // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1339.
+    ("test.hermit_unit_on_host", 1339),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
