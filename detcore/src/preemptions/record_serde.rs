@@ -71,6 +71,8 @@ struct RawRecord {
     format_version: Option<u32>,
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     rewrite_exclusives_in_memory: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    rejoins: Vec<crate::scheduler::rejoin_log::Rejoin>,
 }
 
 struct LegacyFields<'a>(&'a PreemptionRecord);

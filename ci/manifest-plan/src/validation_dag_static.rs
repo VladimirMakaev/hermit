@@ -3241,7 +3241,22 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // the unwind table (aarch64_lse::mapping, aarch64_lse::elf and the
     // store-exclusive census): 3118, listed.
     // And a_binder_call_blocks_when_it_waits_for_another_process: 3119.
-    ("test.detcore_unit", 3119),
+    // And the eleven scheduler units for readmissions in a `hermit run`
+    // preemption record and their replay:
+    // a_preemption_record_carries_the_readmissions_a_replay_follows,
+    // a_record_whose_readmissions_go_backwards_is_refused,
+    // recording_preemptions_logs_hermit_runs_readmissions_without_changing_them,
+    // a_preemption_replay_readmits_at_the_recorded_point,
+    // a_preemption_replay_that_leaves_its_record_goes_on_as_a_fresh_run,
+    // a_preemption_replay_waits_where_its_recording_spun_and_goes_on_where_it_went_on,
+    // a_preemption_replay_off_its_record_leaves_it_where_nothing_else_moves,
+    // a_preemption_replay_readmits_a_vfork_child_at_its_recorded_turn,
+    // a_preemption_replay_off_its_record_at_step2a_rejoins_the_vfork_parent,
+    // a_preemption_replay_off_its_record_does_not_freeze_on_a_gated_vfork_child
+    // and
+    // a_preemption_replay_past_its_last_readmission_parks_a_finished_call_only_up_to_the_valve:
+    // 3130.
+    ("test.detcore_unit", 3130),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4587,7 +4602,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Less #4740's tests, which main counts since train 10: 749.
     // And a_blocking_binder_read_does_not_hold_the_guests_turn, which skips
     // the same way: 750.
-    ("test.cli", 750),
+    // And a_preemption_replay_readmits_a_backgrounded_call_where_its_recording_did
+    // (readmissions in a `hermit run` preemption record, replayed under a race
+    // probe): 751.
+    ("test.cli", 751),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5168,7 +5186,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same tests: 669.
     // Less #4740's tests, which main counts since train 10: 668.
     // And the same blocking binder read test: 669.
-    ("test.cli_on_host", 669),
+    // And the same preemption-replay readmission test: 670.
+    ("test.cli_on_host", 670),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5693,7 +5712,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two aarch64 exclusive-loop units: 3099.
     // And the same nineteen code-from-data units: 3118, listed.
     // And the same blocking-classification unit: 3119.
-    ("test.detcore_unit_on_host", 3119),
+    // And the same eleven readmission units: 3130.
+    ("test.detcore_unit_on_host", 3130),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
