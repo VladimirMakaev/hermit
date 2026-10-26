@@ -27,6 +27,7 @@ use serde::ser::SerializeMap;
 
 use super::BackgroundStart;
 use super::HostObservedCount;
+use super::HostObservedFlag;
 use super::PreemptionRecord;
 use super::ReservedInputMetadata;
 use super::ThreadHistory;
@@ -84,6 +85,8 @@ struct RawRecord {
     rejoins: Option<Vec<crate::scheduler::rejoin_log::Rejoin>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     background_starts: Vec<BackgroundStart>,
+    #[serde(default, skip_serializing_if = "HostObservedFlag::is_false")]
+    segment_store_exclusives: HostObservedFlag,
 }
 
 struct LegacyFields<'a>(&'a PreemptionRecord);

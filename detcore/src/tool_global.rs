@@ -2816,6 +2816,8 @@ impl GlobalState {
                         .unwrap()
                         .failures_for_recording(),
                 );
+                // And whether each of its segments carries its own.
+                writer.record_segment_store_exclusives(crate::store_exclusive::segments_counted());
             }
             scheduler_half(&mut sched, self.cfg.record_preemptions_to.as_ref())?
         };
@@ -22160,6 +22162,7 @@ mod tests {
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(1)),
             instruction_offset: None,
+            strex_fails: Default::default(),
         };
         let next_event = SchedEvent {
             dettid: next_tid,

@@ -547,3 +547,73 @@ pub enum Op {
     /// preceeded it, and just before the first instruction of the signal handler.
     SignalReceived(SigWrapper),
 }
+
+#[cfg(test)]
+mod strex_fails_wire_tests {
+    use super::*;
+
+    fn event(fails: u32) -> SchedEvent {
+        let mut event =
+            SchedEvent::branches(DetTid::from_raw(3), 35).with_time(LogicalDuration::from_nanos(9));
+        event.end_rip = InstructionPointer::new(0x1234);
+        event.strex_fails = HostObserved(fails);
+        event
+    }
+
+    /// A JSON record leaves a zero count out, byte-for-byte as the event was
+    /// written before the field existed, and reads either form back.
+    #[test]
+    fn json_leaves_out_only_a_zero_count() {
+        /// The event as it was before `strex_fails`.
+        #[derive(Serialize)]
+        struct Before {
+            dettid: DetTid,
+            op: Op,
+            count: u32,
+            start_rip: Option<InstructionPointer>,
+            end_rip: Option<InstructionPointer>,
+            end_time: Option<LogicalTime>,
+        }
+        let zero = event(0);
+        let before = Before {
+            dettid: zero.dettid,
+            op: zero.op,
+            count: zero.count,
+            start_rip: zero.start_rip,
+            end_rip: zero.end_rip,
+            end_time: zero.end_time,
+        };
+        let written = serde_json::to_string(&zero).unwrap();
+        assert_eq!(written, serde_json::to_string(&before).unwrap());
+        let back: SchedEvent = serde_json::from_str(&written).unwrap();
+        assert_eq!(back.strex_fails.0, 0);
+
+        let written = serde_json::to_string(&event(7)).unwrap();
+        assert!(written.ends_with(",\"strex_fails\":7}"), "{written}");
+        let back: SchedEvent = serde_json::from_str(&written).unwrap();
+        assert_eq!(back.strex_fails.0, 7);
+    }
+
+    /// Detcore's RPCs use bincode, which is positional: the count is always
+    /// written, zero or not, so an event, and the event inside a
+    /// `TraceSchedEvent` request's tuple, decodes whole in both configurations.
+    #[test]
+    fn bincode_always_carries_the_count() {
+        fn round_trip<C: bincode::config::Config>(config: C) {
+            for fails in [0, 7] {
+                let request = (event(fails), DetTid::from_raw(5), true);
+                let bytes = bincode::serde::encode_to_vec(&request, config).unwrap();
+                let (back, read): ((SchedEvent, DetTid, bool), usize) =
+                    bincode::serde::decode_from_slice(&bytes, config).unwrap();
+                assert_eq!(read, bytes.len());
+                assert_eq!(back.0.strex_fails.0, fails);
+                assert_eq!(back.0.count, 35);
+                assert_eq!(back.0.end_rip, InstructionPointer::new(0x1234));
+                assert_eq!(back.1, DetTid::from_raw(5));
+                assert!(back.2);
+            }
+        }
+        round_trip(bincode::config::legacy());
+        round_trip(bincode::config::standard());
+    }
+}
