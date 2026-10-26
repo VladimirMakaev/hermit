@@ -3443,7 +3443,23 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 3476, listed.
     // And scheduler::test::the_chaos_bounds_apply_past_the_end_of_a_replayed_schedule
     // (#4658's bounds past a replayed schedule's end): 3242 + 1 = 3477, listed.
-    ("test.detcore_unit", 3477),
+    // And the access trace's synchronization edges: access_trace's
+    // a_clone_starts_its_child_whichever_runs_first,
+    // an_exit_wake_ends_at_the_joiners_wait_return,
+    // a_reaped_childs_exit_orders_the_wait,
+    // a_failed_send_orders_no_delivery,
+    // two_sends_from_one_sender_order_two_deliveries_in_send_order,
+    // a_process_send_and_a_thread_send_each_order_one_delivery,
+    // overlapping_sends_from_two_threads_order_nothing,
+    // realtime_signal_deliveries_take_their_sends_in_order,
+    // a_timer_expiry_takes_its_oldest_live_arm,
+    // the_cap_evicts_sends_before_a_live_timers_arm,
+    // a_group_send_reaches_each_member_once and
+    // reaping_forgets_the_sends_waiting_for_the_child, and scheduler's
+    // a_futex_wake_edge_names_the_waiter_the_wake_took,
+    // a_requeue_edge_waits_for_the_moved_waiters_return and
+    // a_clear_child_tid_wake_is_a_join_edge: 3279 + 15 = 3492.
+    ("test.detcore_unit", 3492),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4824,7 +4840,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 780, listed.
     // Less the same test, which needs a PMU and runs in
     // privileged-test.pmu_cli_cases: 746 - 1 = 779.
-    ("test.cli", 779),
+    // And access_trace's a_futex_ping_pong_yields_alternating_wake_edges and
+    // signal_child_exit_and_join_edges_name_their_events: 763 + 2 = 781.
+    ("test.cli", 781),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5441,7 +5459,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same uncapped-slices replay test: 698.
     // And the same replayed-schedule first-turn test, not excluded: 699, listed.
     // Less the same test, skipped here by exact name: 665 - 1 = 698.
-    ("test.cli_on_host", 698),
+    // And the same two synchronization edge tests, not excluded: 700.
+    ("test.cli_on_host", 700),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
