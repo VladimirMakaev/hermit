@@ -6028,7 +6028,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset run units: 1285.
     // And the same three analyze offset units: 1288.
     // And the same bisect and splitting units: 1290.
-    ("test.hermit_unit_on_host", 1290),
+    // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1305.
+    ("test.hermit_unit_on_host", 1305),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
