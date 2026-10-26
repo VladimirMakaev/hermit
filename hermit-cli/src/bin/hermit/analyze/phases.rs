@@ -4186,6 +4186,7 @@ impl AnalyzeOpts {
         // First: a recording of a format this Hermit does not read is
         // refused before anything else is read from it.
         self.refuse_unread_record_formats(&recordings)?;
+        Self::refuse_recordings_numbered_apart(&recordings)?;
         self.adopt_recorded_epoch(&recordings)?;
         // Every trial charges expired timed waits as the target did.
         self.adopt_expired_wait_charge(run1.as_deref())?;
