@@ -1222,7 +1222,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The retry stack adds three: 1929 + 3 = 1932, re-measured 2026-10-31.
     // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
     // (https://github.com/rrnewton/hermit/issues/4876): 1933.
-    ("test.regular_crates", 1933),
+    // And detcore-model's
+    // summary::tests::binder_external_calls_show_in_the_report_but_not_the_info_view
+    // (the run summary's binder count): 1934, listed.
+    ("test.regular_crates", 1934),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3203,7 +3206,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and a_replay_re_records_a_background_starts_record_below_its_format
     // (the background-starts format above main's formats): 3278.
     // And a_format_this_hermit_does_not_read_survives_the_starts_cap: 3279.
-    ("test.detcore_unit", 3279),
+    // And syscalls::binder's
+    // strict_refuses_binder_except_in_a_replay_with_readmissions and
+    // external_binder_calls_are_counted_and_each_process_is_warned_once
+    // (`--strict`'s binder policy, the per-process warning and count): 3281.
+    ("test.detcore_unit", 3281),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4542,7 +4549,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_preemption_replay_readmits_a_backgrounded_call_where_its_recording_did
     // (readmissions in a `hermit run` preemption record, replayed under a race
     // probe): 747.
-    ("test.cli", 747),
+    // And a_fresh_strict_run_refuses_binder_and_names_the_replay_route and
+    // a_strict_replay_of_a_record_with_readmissions_may_use_binder, which skip
+    // where the kernel has no binder filesystem: 748.
+    // And a_schedule_replay_that_leaves_its_readmissions_ends_there_under_die_on_desync:
+    // 750.
+    ("test.cli", 750),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5117,11 +5129,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same retry-stack cli case: 663 + 1 = 664.
     // And the same blocking binder read test: 665.
     // And the same preemption-replay readmission test: 666.
-    ("test.cli_on_host", 666),
+    // And the same two strict binder tests: 668.
+    // And the same --die-on-desync readmission test: 669.
+    ("test.cli_on_host", 669),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1932 - 14 = 1918, re-measured 2026-10-31.
-    // And the cases added since, as this twin's entry further down counts: 1919.
-    ("test.regular_crates_on_host", 1919),
+    // And the cases added since, as this twin's entry further down counts: 1920.
+    ("test.regular_crates_on_host", 1920),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5641,7 +5655,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two record-serde round-trip units: 3276.
     // And the same two background-starts format units: 3278.
     // And the same unread-format cap unit: 3279.
-    ("test.detcore_unit_on_host", 3279),
+    // And the same two binder policy units: 3281.
+    ("test.detcore_unit_on_host", 3281),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6265,7 +6280,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Its detlog correction: the same one added case: 1929 - 14 = 1915.
     // The retry stack: the same three added cases: 1932 - 14 = 1918.
     // And the same desync-notes round-trip unit: 1919.
-    ("test.regular_crates_on_host", 1919),
+    // And the same binder-count summary test: 1920, listed.
+    ("test.regular_crates_on_host", 1920),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
