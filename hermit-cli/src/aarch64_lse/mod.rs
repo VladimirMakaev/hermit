@@ -21,15 +21,15 @@
 //! the same sense as e9patch (see `docs/E9PATCH_COMPATIBILITY.md`): it never
 //! loads Detcore as a Reverie tool and is not a backend.
 //!
-//! [`insn`] holds the decoder and the encoders; [`rewrite`] holds the idioms
-//! and the in-place replacement; [`elf`] applies them to the code of an ELF
-//! file's executable sections, which [`mapping`] tells from the data those
-//! sections can also hold.
+//! The decoder, the idioms and the rewrite of an ELF file's bytes are
+//! Detcore's ([`detcore::aarch64_lse`]), re-exported here; this module adds
+//! what only the overlay needs: the host check, the cache and the file
+//! writes.
 
 pub mod elf;
-pub mod insn;
-pub mod mapping;
-pub mod rewrite;
+pub use detcore::aarch64_lse::insn;
+pub use detcore::aarch64_lse::mapping;
+pub use detcore::aarch64_lse::rewrite;
 
 /// Bumped whenever the rewrite's output for the same input can change. It is
 /// part of the cache key, so a cached artifact from an older rewriter is
