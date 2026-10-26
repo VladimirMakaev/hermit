@@ -1262,6 +1262,10 @@ impl AnalyzeOpts {
     /// as every record analyze writes must be: a record that omitted one would
     /// be accepted, or refused, when replayed under another value
     /// (<https://github.com/rrnewton/hermit/issues/4380>).
+    /// It also carries the uncapped-slices mark of the schedules the trials
+    /// come from (`trial_schedules_uncapped`): a trial's schedule has no event
+    /// times, so without the mark its replay would end their long slices at
+    /// `--max-timeslice` and leave the schedule.
     pub fn stamp_trial_record(&self, record: PreemptionRecord) -> PreemptionRecord {
         record
             .with_pipe_wake_latency(self.trial_pipe_wake_latency())
@@ -1271,6 +1275,7 @@ impl AnalyzeOpts {
             )
             .with_cap_preemption_charge(self.trial_cap_preemption_charge())
             .with_rewrite_exclusives_in_memory(self.trial_rewrite_exclusives_in_memory())
+            .with_uncapped_slices(self.trial_schedules_uncapped.get())
     }
 
     /// Whether the trials cap preemption charges (`--cap-preemption-charge`
@@ -1280,6 +1285,19 @@ impl AnalyzeOpts {
             .det_opts
             .det_config
             .cap_preemption_charge
+    }
+
+    /// Take the uncapped-slices mark of the schedule files `paths` for the
+    /// trial schedules made from them: the latest time any of them states.
+    pub fn adopt_uncapped_slices(&self, paths: &[&Path]) -> anyhow::Result<()> {
+        let mut latest = None;
+        for path in paths {
+            let mark = detcore::preemptions::read_recorded_uncapped_slices(path)
+                .map_err(anyhow::Error::msg)?;
+            latest = latest.max(mark);
+        }
+        self.trial_schedules_uncapped.set(latest);
+        Ok(())
     }
 
     /// Write the schedule `events` for a trial to replay, stamped

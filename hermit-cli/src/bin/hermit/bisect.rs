@@ -145,6 +145,7 @@ impl BisectOpts {
             endpoints: Default::default(),
             time_skip_sources: Default::default(),
             replays_instruction_offsets: false,
+            trial_schedules_uncapped: Default::default(),
         };
         // Before the schedules are read: a refused cap or counter reads and
         // starts nothing.
@@ -189,6 +190,7 @@ impl BisectOpts {
             sources.validate_reserved_inputs()?;
         }
         analyzer.adopt_instruction_offsets(&[("--good", &self.good), ("--bad", &self.bad)])?;
+        analyzer.adopt_uncapped_slices(&[self.good.as_path(), self.bad.as_path()])?;
         let mut good = good.into_global();
         let mut bad = bad.into_global();
         // Analyze's trial outputs omit optional event timestamps. Put these
