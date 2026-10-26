@@ -1282,7 +1282,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And host_input::tests::the_root_is_known_by_its_mapped_image: 1978.
     // And host_input::tests::an_unknown_stdio_kind_is_never_compared: 1934.
     // And config::tests::launch_namespace_mounts_never_enters_the_legacy_form: 1980.
-    ("test.regular_crates", 1980),
+    // And detcore-model's
+    // summary::tests::skid_overshoots_mark_a_run_not_reproducible_from_its_seed
+    // (skid overshoots outside --strict): 1981, listed.
+    ("test.regular_crates", 1981),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -1998,7 +2001,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // strictly_typed plus verify::tests' three store-exclusive cause units (a
     // verify divergence names its store-exclusive retries): 1337.
     // And analyze::rundata::tests::a_trial_states_the_background_starts_format_only_with_its_starts: 1338.
-    ("test.hermit_unit", 1338),
+    // And two skid-overshoot policy units: the library's
+    // tests::a_warned_skid_overshoot_keeps_the_result_and_names_the_first_report
+    // and run's only_strict_runs_and_replays_refuse_a_skid_overshoot: 1340, listed.
+    ("test.hermit_unit", 1340),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -4830,7 +4836,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_fair_continuation_does_not_hand_a_spinner_a_timeslice_per_write,
     // which only a PMU preemption can end, joins them: 21 + 1 = 22,
     // re-measured at fd59b85c73 (22 passed).
-    ("privileged-test.pmu_cli_cases", 22),
+    // a_skid_overshoot_without_strict_warns_and_keeps_the_guest_status, the
+    // skid injector's run without --strict, joins them: 23, listed.
+    ("privileged-test.pmu_cli_cases", 23),
     // The six x86-64-v3 CLI cases that run a guest, with
     // HERMIT_TEST_REQUIRE_CPU_PROFILE_V3=1 so that a refusal fails
     // (https://github.com/rrnewton/hermit/issues/4243): 6, listed with this
@@ -5365,7 +5373,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1963.
     // Kept equal to the second test.regular_crates_on_host entry below: 1964.
     // Kept equal to the second test.regular_crates_on_host entry below: 1966.
-    ("test.regular_crates_on_host", 1966),
+    // And this change's tests, as at this node's second entry below: 1967.
+    ("test.regular_crates_on_host", 1967),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6337,7 +6346,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same unit tests as test.hermit_unit: 1327.
     // And the same four store-exclusive cause units: 1331.
     // And the same background-starts trial unit: 1332.
-    ("test.hermit_unit_on_host", 1332),
+    // And the same two skid-overshoot policy units: 1334, listed.
+    ("test.hermit_unit_on_host", 1334),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6590,7 +6600,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same mapped-image unit: 1964.
     // And the same never-compared unit: 1920.
     // And the same launch-namespace config unit: 1966.
-    ("test.regular_crates_on_host", 1966),
+    // And the same skid-overshoot summary test: 1967, listed.
+    ("test.regular_crates_on_host", 1967),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
