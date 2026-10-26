@@ -1314,7 +1314,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // guide's copy): 2001.
     // And detcore-model's untrap_passthrough_syscalls_is_opt_in_and_round_trips and
     // untrap_passthrough_syscalls_never_enters_the_legacy_form: 2003, listed.
-    ("test.regular_crates", 2003),
+    // And host_input::tests::host_file_identities_without_and_with_contents
+    // (a property snapshot copy is identified by its contents): 2004, listed.
+    ("test.regular_crates", 2004),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2041,7 +2043,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run::chaos_timed_wait_spread_parses_round_trips_and_is_refused_where_inert and
     // run::a_replay_under_another_timed_wait_spread_is_refused: 1351.
     // And run::untrap_passthrough_syscalls_is_an_opt_in_refused_where_its_calls_are_counted: 1352, listed.
-    ("test.hermit_unit", 1352),
+    // And property_snapshot.rs's five units (the Android property area
+    // copy, shared content-named copies, a changed shared copy not joined,
+    // the root and path-length refusals, stale and held copies) and
+    // host_input_change's snapshot-copy unit: 1358, listed.
+    ("test.hermit_unit", 1358),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3525,7 +3531,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // ports: 3279 + 20 = 3558.
     // And subscription_tests::untrap_passthrough_syscalls_unsubscribes_exactly_its_list and
     // untrapped_passthrough_syscalls_are_plain_passthroughs: 3560, listed.
-    ("test.detcore_unit", 3560),
+    // And the property snapshot's path rule, content identity and
+    // property-service address units: 3563, listed.
+    ("test.detcore_unit", 3563),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -3636,7 +3644,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // handler, a recovered handler followed by RDTSC traps, or a recovered
     // lineage beside another crash; each crashing trial switches; an abort
     // inside a fault handler switches at once): 218.
-    ("test.detcore_misc", 218),
+    // And property_snapshot's four tests (pure reads served from the copy,
+    // with metadata virtualization on and off; mappings that read no
+    // property file not refused; a file the area gained after its snapshot
+    // refused): 222.
+    ("test.detcore_misc", 222),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -5576,7 +5588,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1986.
     // Kept equal to the second test.regular_crates_on_host entry below: 1987.
     // Kept equal to the second test.regular_crates_on_host entry below: 1989.
-    ("test.regular_crates_on_host", 1989),
+    // And this change's tests, as at this node's second entry below: 1990.
+    ("test.regular_crates_on_host", 1990),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5664,7 +5677,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same tight-stack received-inotify test: 164.
     // And the same seventeen SCM_RIGHTS queue tests: 191 + 17 = 208.
     // And the same ten post-crash switch tests: 218.
-    ("test.detcore_misc_on_host", 218),
+    // And the four property snapshot tests: 222.
+    ("test.detcore_misc_on_host", 222),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).
@@ -6171,7 +6185,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And train 6's units: 3580 listed less main's own +42: 3538.
     // And the same twenty implicit-bind port units: 3279 + 20 = 3558.
     // And the same two --untrap-passthrough-syscalls subscription units: 3560, listed.
-    ("test.detcore_unit_on_host", 3560),
+    // And the same three property snapshot units: 3563.
+    ("test.detcore_unit_on_host", 3563),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6588,7 +6603,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same eight #4682 re-land units: 1313 + 8 = 1343.
     // And the same two --chaos-timed-wait-spread run tests: 1345.
     // And the same --untrap-passthrough-syscalls CLI unit: 1346, listed.
-    ("test.hermit_unit_on_host", 1346),
+    // And the same six property snapshot units: 1352.
+    ("test.hermit_unit_on_host", 1352),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6855,7 +6871,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three schedule replay options tests: 1986.
     // And the same four schedule replay options tests: 1987.
     // And the same two --untrap-passthrough-syscalls detcore-model units: 1989, listed.
-    ("test.regular_crates_on_host", 1989),
+    // And the same host_input identity unit: 1990.
+    ("test.regular_crates_on_host", 1990),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
