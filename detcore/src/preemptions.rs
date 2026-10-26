@@ -377,6 +377,12 @@ pub struct PreemptionRecord {
     /// opened and were read, and none was multiplexed. Absent where they were not, so a zero
     /// `strex_fails` then means "not counted" rather than "none failed".
     segment_store_exclusives: HostObservedFlag,
+    /// The `--sched-seed` of the run that produced this record (`--seed`
+    /// sets it too): the seed of the scheduler's own random choices, which a
+    /// replay makes too wherever the record does not decide them. `None` for
+    /// records written before the field existed, and for records synthesized
+    /// in memory.
+    sched_seed: Option<u64>,
 }
 
 /// A fact a record's run observed on its host, like [`HostObservedCount`]:
@@ -598,6 +604,7 @@ impl PreemptionRecord {
             store_exclusive_failures: HostObservedCount::default(),
             format_version: None,
             time_skips: None,
+            sched_seed: None,
             queued_sleeps_registered_at_first_pass: false,
             segment_store_exclusives: HostObservedFlag::default(),
             rejoins: None,
@@ -1328,6 +1335,7 @@ impl PreemptionRecord {
             background_starts: Vec::new(),
             segment_store_exclusives: HostObservedFlag::default(),
             queued_sleeps_registered_at_first_pass: self.queued_sleeps_registered_at_first_pass,
+            sched_seed: self.sched_seed,
         }
     }
 
@@ -1410,6 +1418,7 @@ impl PreemptionRecord {
             background_starts: Vec::new(),
             segment_store_exclusives: HostObservedFlag::default(),
             queued_sleeps_registered_at_first_pass: false,
+            sched_seed: None,
         }
     }
 
@@ -5644,6 +5653,13 @@ impl PreemptionWriter {
         self
     }
 
+    /// Store the seed of the scheduler's own random choices, so a replay can
+    /// make them as the recording did.
+    pub fn with_sched_seed(mut self, sched_seed: u64) -> Self {
+        self.inner.sched_seed = Some(sched_seed);
+        self
+    }
+
     /// Does the record have zero entries?
     pub fn is_empty(&self) -> bool {
         self.inner.per_thread.is_empty()
@@ -6119,6 +6135,18 @@ pub fn read_recorded_offsets(path: &Path) -> Result<RecordedOffsets, String> {
         rows,
         schedule,
     ))
+}
+
+/// Read only the `--sched-seed` stored in a preemption record file, as
+/// [`read_recorded_rng_seed`] reads the guest random seed. `Ok(None)` means the
+/// record predates the field.
+pub fn read_recorded_sched_seed(path: &Path) -> Result<Option<u64>, String> {
+    #[derive(Deserialize)]
+    struct SchedSeedOnly {
+        #[serde(default)]
+        sched_seed: Option<u64>,
+    }
+    Ok(boundary_recording::read_settings::<SchedSeedOnly>(path)?.sched_seed)
 }
 
 /// Read only the `--pipe-wake-latency` stored in a preemption record file, as

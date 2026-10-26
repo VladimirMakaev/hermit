@@ -96,6 +96,8 @@ struct RawRecord {
     background_starts: Vec<BackgroundStart>,
     #[serde(default, skip_serializing_if = "HostObservedFlag::is_false")]
     segment_store_exclusives: HostObservedFlag,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    sched_seed: Option<u64>,
 }
 
 struct LegacyFields<'a>(&'a PreemptionRecord);

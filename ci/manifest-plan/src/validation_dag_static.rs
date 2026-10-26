@@ -2204,7 +2204,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and analyze::phases::tests::analyze_replays_records_with_the_guest_random_seed_they_were_recorded_under
     // and analyze::phases::tests::analyze_trials_of_a_seeded_target_take_its_guest_random_seed
     // (https://github.com/rrnewton/hermit/issues/4868): 1544.
-    ("test.hermit_unit", 1544),
+    // And run::replay_takes_the_recorded_seeds_and_refuses_a_contradicting_seed
+    // (the scheduler seed too, and an explicit --seed checked): 1545, listed.
+    ("test.hermit_unit", 1545),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3702,7 +3704,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // an_error_queue_read_runs_once_only_where_its_protocol_never_waits:
     // 3570, listed.
     // And preemptions::tests::a_record_too_varied_to_renumber_keeps_its_priorities: 3571.
-    ("test.detcore_unit", 3571),
+    // And scheduler::test::a_recorded_schedule_stores_the_scheduler_seed: 3572,
+    // listed.
+    ("test.detcore_unit", 3572),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6366,7 +6370,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same timer_settime ESRCH unit: 3569, listed.
     // And the same error-queue decision unit: 3570, listed.
     // And the same normalize test: 3571.
-    ("test.detcore_unit_on_host", 3571),
+    // And the same recorded scheduler-seed unit: 3572, listed.
+    ("test.detcore_unit_on_host", 3572),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6821,7 +6826,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two: 1284 + 2 = 1534.
     // And the same trial-record stamping unit: 1286 + 1 = 1535.
     // And the same three trial-guest-random-seed units: 1538.
-    ("test.hermit_unit_on_host", 1538),
+    // And the same recorded-seeds replay test: 1539, listed.
+    ("test.hermit_unit_on_host", 1539),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.

@@ -1210,6 +1210,14 @@ pub struct Config {
     #[clap(skip)]
     pub standard_stream_aliases: Option<[u8; 3]>,
 
+    /// **Internal:** The seeds `hermit run` took from the recording a schedule
+    /// replay replays (`--replay-preemptions-from`, `--replay-schedule-from`),
+    /// because the run omitted them; the run's summary says so. The seeds
+    /// themselves are already in `rng_seed` and `sched_seed`.
+    #[serde(default)]
+    #[clap(skip)]
+    pub replay_adopted_seeds: Option<crate::summary::AdoptedSeeds>,
+
     /// **Internal:** Path to the replay data folder.
     #[clap(skip)]
     pub replay_data: Option<PathBuf>,
@@ -4100,6 +4108,8 @@ mod legacy_backend_json {
     /// `property_snapshot` came after it too, and only hermit-cli sets it, on
     /// Android, where DBT does not run; it is never written and reads as
     /// unset.
+    /// `replay_adopted_seeds` came after it too: only the run's summary reads
+    /// it, so it is never written and reads as unset.
     const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 58] = [
         "backend",
         "strict_schedule_boundaries",
@@ -4159,6 +4169,7 @@ mod legacy_backend_json {
         "watch_from",
         "untrap_passthrough_syscalls",
         "property_snapshot",
+        "replay_adopted_seeds",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -4357,7 +4368,8 @@ mod legacy_backend_json {
                     | "access_trace_max_bytes"
                     | "standard_stream_aliases"
                     | "post_crash_timeslice"
-                    | "property_snapshot",
+                    | "property_snapshot"
+                    | "replay_adopted_seeds",
                 ) => seed
                     .deserialize(serde_json::Value::Null)
                     .map(Some)
@@ -4680,7 +4692,8 @@ mod legacy_backend_json {
                 | "chaos_timeslice"
                 | "guest_ids"
                 | "detlog_anon"
-                | "standard_stream_aliases" => Ok(()),
+                | "standard_stream_aliases"
+                | "replay_adopted_seeds" => Ok(()),
                 "access_trace"
                 | "access_trace_from"
                 | "access_trace_max_records"
@@ -5666,7 +5679,8 @@ mod tests {
                 | "chaos_timeslice"
                 | "guest_ids"
                 | "detlog_anon"
-                | "standard_stream_aliases" => {}
+                | "standard_stream_aliases"
+                | "replay_adopted_seeds" => {}
                 "access_trace"
                 | "access_trace_from"
                 | "access_trace_max_records"

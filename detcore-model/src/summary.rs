@@ -504,6 +504,12 @@ pub struct RunSummary {
     /// `--verify` compares as it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watch: Option<WatchRunSummary>,
+    /// The seeds a schedule replay took from the recording it replays, for
+    /// the run that omitted them (`Config::replay_adopted_seeds`). Shown in
+    /// the full report, but not the INFO guest-behavior view used by
+    /// `--verify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted_seeds: Option<AdoptedSeeds>,
 }
 
 fn is_zero(count: &u64) -> bool {
@@ -749,6 +755,39 @@ impl fmt::Display for WatchRunSummary {
     }
 }
 
+/// The seeds a schedule replay adopted from its recording: each is `Some`
+/// when the run omitted it and the recording stored it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptedSeeds {
+    /// The guest's random seed (`--rng-seed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rng: Option<u64>,
+    /// The scheduler's seed (`--sched-seed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sched: Option<u64>,
+}
+
+impl AdoptedSeeds {
+    /// Whether the replay adopted any seed.
+    pub fn any(&self) -> bool {
+        self.rng.is_some() || self.sched.is_some()
+    }
+}
+
+impl fmt::Display for AdoptedSeeds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let seeds: Vec<String> = [("guest random", self.rng), ("scheduler", self.sched)]
+            .into_iter()
+            .filter_map(|(name, seed)| Some(format!("{name} seed {}", seed?)))
+            .collect();
+        write!(
+            f,
+            "Seeds adopted from the replayed recording: {}",
+            seeds.join(", ")
+        )
+    }
+}
+
 /// The full human-readable report, including recorded launch configuration.
 impl fmt::Display for RunSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -875,6 +914,7 @@ impl RunSummary {
             skid_overshoot_reports,
             seed_reproducible: _,
             watch,
+            adopted_seeds,
         } = self;
         if let Some(bound) = run_timeout_secs {
             writeln!(
@@ -955,6 +995,9 @@ impl RunSummary {
         }
         if include_report_metadata && let Some(watch) = watch {
             write!(f, "{watch}")?;
+        }
+        if include_report_metadata && let Some(adopted) = adopted_seeds {
+            writeln!(f, "{adopted}")?;
         }
 
         if include_report_metadata {
