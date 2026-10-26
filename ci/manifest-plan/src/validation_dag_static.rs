@@ -3336,7 +3336,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (3034): 3169, listed.
     // And scheduler::test's ten idle-poller deadlock units (a reader beside
     // a writer nothing can wake, and nine states that still poll on): 2748.
-    ("test.detcore_unit", 3176),
+    // And scheduler::test::a_trace_replay_grant_after_a_failed_attempt_is_no_attempt: 2749.
+    ("test.detcore_unit", 3177),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4706,7 +4707,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and a_parked_recording_without_its_terminal_evidence_is_refused: 747.
     // And a_recording_of_a_crash_while_a_thread_waits_replays_to_the_same_death: 760.
     // PR 4753 adds a_recording_from_before_readlinkat_was_recorded_is_refused_by_version: 742 + 1 = 761.
-    ("test.cli", 761),
+    // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 655.
+    ("test.cli", 762),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5296,7 +5298,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two terminal-record cli cases: 666.
     // And the same crash-recording cli case: 679.
     // The same PR 4753 case: 661 + 1 = 680.
-    ("test.cli_on_host", 680),
+    // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 574.
+    ("test.cli_on_host", 681),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5849,7 +5852,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same twelve units on main dc85ec16a, which has three of them
     // (3034): 3169, listed.
     // And the same ten idle-poller deadlock units: 2748.
-    ("test.detcore_unit_on_host", 3176),
+    // And the same TraceReplay-grant unit: 2749.
+    ("test.detcore_unit_on_host", 3177),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
