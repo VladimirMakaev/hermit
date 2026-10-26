@@ -3366,7 +3366,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and scheduler::boundary_controller::tests'
     // only_a_finished_runs_summary_requires_its_replay_to_have_ended: 3422,
     // listed.
-    ("test.detcore_unit", 3422),
+    // And the_uncapped_slices_mark_is_written_only_when_set, an_uncapped_records_backstop_outlasts_its_latest_event and an_uncapped_replay_ends_slices_at_its_backstop_while_the_record_lasts: 3425.
+    ("test.detcore_unit", 3425),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4735,7 +4736,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_verify_run_records_the_stdio_kinds_its_guest_was_given: 776.
     // And a_library_run_records_the_stdio_kinds_of_its_commands_descriptors: 777.
     // And a_containerized_run_records_the_stdio_kinds_it_inherits: 778.
-    ("test.cli", 778),
+    // And a_schedule_replay_keeps_the_long_slices_of_a_preemption_replay: 779.
+    ("test.cli", 779),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5341,7 +5343,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same captured-run stdio-kind test: 695.
     // And the same library-run stdio-kind test: 696.
     // And the same containerized-run stdio-kind test: 697.
-    ("test.cli_on_host", 697),
+    // And the same uncapped-slices replay test: 698.
+    ("test.cli_on_host", 698),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5916,7 +5919,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three summarized-desync units: 3412.
     // And train 3's eight format-ladder units (the record-format resolution between #4845 and #4847): 3420.
     // And the same two partial-summary units: 3422, listed.
-    ("test.detcore_unit_on_host", 3422),
+    // And the same three uncapped-slices units: 3425.
+    ("test.detcore_unit_on_host", 3425),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
