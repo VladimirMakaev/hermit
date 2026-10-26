@@ -6062,7 +6062,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // listed.
     // And the same unit for #4658's bounds past a replayed schedule's end:
     // 3477, listed.
-    ("test.detcore_unit_on_host", 3477),
+    // And the same fifteen sync-edge tests as test.detcore_unit: 3492.
+    ("test.detcore_unit_on_host", 3492),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
