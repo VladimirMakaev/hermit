@@ -1298,7 +1298,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And hermit-verify's schedule_trace
     // interpolate_refuses_schedules_recorded_under_different_cap_preemption_charges
     // and an_interpolated_schedule_carries_its_inputs_cap_and_charge_rule: 1989.
-    ("test.regular_crates", 1989),
+    // And detcore-model's watch::tests::a_watch_takes_an_address_a_length_and_an_access
+    // and config::tests::config_fingerprint_includes_the_watch_element_layout
+    // (--watch): 1958 + 2 = 1991.
+    ("test.regular_crates", 1991),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2017,7 +2020,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And two skid-overshoot policy units: the library's
     // tests::a_warned_skid_overshoot_keeps_the_result_and_names_the_first_report
     // and run's only_strict_runs_and_replays_refuse_a_skid_overshoot: 1340, listed.
-    ("test.hermit_unit", 1340),
+    // And run::watch_is_refused_where_it_could_not_arm_or_report (--watch):
+    // 1319 + 1 = 1341.
+    ("test.hermit_unit", 1341),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3469,7 +3474,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler's
     // a_nonleader_exec_keeps_the_callers_pending_sends_under_the_leader:
     // 3299 + 1 = 3498.
-    ("test.detcore_unit", 3498),
+    // And --watch's watch::tests::watches_become_reverie_specs_and_a_new_thread_starts_unarmed
+    // and a_hit_that_may_have_changed_the_guest_stops_the_run,
+    // access_trace::tests::watch_hits_are_capped_and_every_thread_is_summarized,
+    // watch_arming_tests' a_thread_arms_when_due_and_retries_while_it_blocks_sigtrap
+    // and a_watch_that_could_move_the_schedule_or_cannot_be_written_is_refused,
+    // and scheduler's
+    // a_peer_alive_when_watches_become_due_is_summarized_if_killed_parked:
+    // 3300 + 6 = 3504.
+    ("test.detcore_unit", 3504),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4852,7 +4865,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // privileged-test.pmu_cli_cases: 746 - 1 = 779.
     // And access_trace's a_futex_ping_pong_yields_alternating_wake_edges and
     // signal_child_exit_and_join_edges_name_their_events: 763 + 2 = 781.
-    ("test.cli", 781),
+    // And access_trace's watch_hits_name_both_writers_and_leave_the_run_unchanged,
+    // a_thread_that_blocks_sigtrap_never_arms_and_the_trace_says_so,
+    // a_hit_that_resets_an_ignored_sigtrap_stops_the_run and
+    // a_watch_survives_exec_into_an_image_that_stores_first (--watch): 765 + 4 = 785.
+    ("test.cli", 785),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5470,7 +5487,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same replayed-schedule first-turn test, not excluded: 699, listed.
     // Less the same test, skipped here by exact name: 665 - 1 = 698.
     // And the same two synchronization edge tests, not excluded: 700.
-    ("test.cli_on_host", 700),
+    // And the same four --watch tests, not excluded: 704.
+    ("test.cli_on_host", 704),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5494,7 +5512,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1971.
     // And this change's tests, as at this node's second entry below: 1973.
     // And this change's tests, as at this node's second entry below: 1975.
-    ("test.regular_crates_on_host", 1975),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1977.
+    ("test.regular_crates_on_host", 1977),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6075,7 +6094,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same fifteen sync-edge tests as test.detcore_unit: 3492.
     // And the same five edge-soundness tests: 3497.
     // And the same non-leader exec test: 3498.
-    ("test.detcore_unit_on_host", 3498),
+    // And the same six --watch units: 3504, listed.
+    ("test.detcore_unit_on_host", 3504),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6488,7 +6508,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four store-exclusive cause units: 1331.
     // And the same background-starts trial unit: 1332.
     // And the same two skid-overshoot policy units: 1334, listed.
-    ("test.hermit_unit_on_host", 1334),
+    // And the same --watch refusal test: 1335.
+    ("test.hermit_unit_on_host", 1335),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6748,7 +6769,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same post-crash option parse unit: 1945, listed.
     // And the same post-crash refusal unit: 1973, listed.
     // And the same two interpolation units: 1975.
-    ("test.regular_crates_on_host", 1975),
+    // And the same two --watch detcore-model tests: 1977.
+    ("test.regular_crates_on_host", 1977),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.

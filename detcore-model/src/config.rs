@@ -984,6 +984,27 @@ pub struct Config {
     #[clap(long, value_name = "bytes")]
     pub access_trace_max_bytes: Option<u64>,
 
+    /// Report each access to these guest bytes, through a hardware watchpoint, as a `watch_hit`
+    /// record in the access trace (`--record-access-trace-to`): the thread, the instruction after
+    /// the access, the event it follows and, for a thread's first 64 hits, its stack. Repeat it for
+    /// up to the backend's watchpoint count (4 on x86-64). ADDR is a guest virtual address (hex
+    /// with 0x, or decimal), LEN 1, 2, 4 or 8 bytes with ADDR aligned to it (8 by default), and w
+    /// reports writes (the default), rw reads and writes. Every thread arms its watches at its
+    /// first stop from `--watch-from` on at which it does not block SIGTRAP; the trace's
+    /// `watch_summary` lines say which threads armed, when, and how many hits each had. A hit stops
+    /// the thread in the tracer only: it adds no scheduler request and moves no virtual time, so
+    /// the schedule and the guest's results are those of the run without it. Needs the ptrace
+    /// backend's hardware watchpoints and a precise timer whose overflow records are mapped.
+    #[serde(default)]
+    #[clap(long = "watch", value_name = "addr[:len][:w|rw]")]
+    pub watch: Vec<crate::watch::WatchArg>,
+
+    /// With `--watch`, arm the watches only once the run has recorded this many schedule events
+    /// (0, the default, arms them from the start).
+    #[serde(default)]
+    #[clap(long, value_name = "event", default_value = "0")]
+    pub watch_from: u64,
+
     /// **Deprecated:** Print a stacktrace each time the program is preempted.  Only makes sense in `--chaos` mode
     /// and typically goes with preemption recording/replaying.
     #[clap(long)]
@@ -2339,6 +2360,12 @@ impl fmt::Display for Config {
         if let Some(bytes) = self.access_trace_max_bytes {
             write!(f, " --access-trace-max-bytes={}", bytes)?;
         }
+        for watch in &self.watch {
+            write!(f, " --watch={}", watch)?;
+        }
+        if self.watch_from != 0 {
+            write!(f, " --watch-from={}", self.watch_from)?;
+        }
         if self.preemption_stacktrace {
             write!(f, " --preemption-stacktrace")?;
         }
@@ -3067,6 +3094,9 @@ const CONFIG_DEFINITION_SOURCES: &[&[u8]] = &[
     include_bytes!("pid.rs"),
     include_bytes!("schedule.rs"),
     include_bytes!("time.rs"),
+    // `WatchArg`, the element of `Config::watch`. The encoded default holds
+    // no watch, so neither encoding of `Config` shows its layout.
+    include_bytes!("watch.rs"),
 ];
 
 /// A fingerprint of this build's [`Config`] payload and the configuration and
@@ -3787,7 +3817,9 @@ mod legacy_backend_json {
     /// `access_trace`, `access_trace_from`, `access_trace_max_records` and
     /// `access_trace_max_bytes` came after it too; the scheduler writes the
     /// trace, and `hermit run` refuses it on DBT, so they are never written
-    /// and read as unset, 0, unset and unset.
+    /// and read as unset, 0, unset and unset. So did `watch` and `watch_from`,
+    /// which need the trace and the ptrace backend's watchpoints: never
+    /// written, read as none and 0.
     // `chaos_timeslice_range` came after it too: the scheduler draws the
     // slices, not the runtime, so it is never written and reads as unset.
     // `chaos_timeslice_draw` and `chaos_timeslice` came with it, for the same
@@ -3870,6 +3902,8 @@ mod legacy_backend_json {
         "rewrite_exclusives_in_memory",
         "count_store_exclusives",
         "rewrite_exclusives_overlay",
+        "watch",
+        "watch_from",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -4028,8 +4062,16 @@ mod legacy_backend_json {
                     .map_err(<A::Error as de::Error>::custom),
                 // Empty, as its serde default is; and 0, the default.
                 Some(
-                    "in_guest_reserved_signals" | "access_trace_from" | "chaos_instruction_offset",
+                    "in_guest_reserved_signals"
+                    | "access_trace_from"
+                    | "chaos_instruction_offset"
+                    | "watch_from",
                 ) => seed.deserialize(U64Deserializer::new(0)).map(Some),
+                // None, as its serde default is.
+                Some("watch") => seed
+                    .deserialize(serde_json::Value::Array(Vec::new()))
+                    .map(Some)
+                    .map_err(<A::Error as de::Error>::custom),
                 // On, as its serde default is.
                 Some("signal_state_copy") => {
                     seed.deserialize(BoolDeserializer::new(true)).map(Some)
@@ -4384,7 +4426,9 @@ mod legacy_backend_json {
                 | "chaos_instruction_offset"
                 | "rewrite_exclusives_in_memory"
                 | "count_store_exclusives"
-                | "rewrite_exclusives_overlay" => Ok(()),
+                | "rewrite_exclusives_overlay"
+                | "watch"
+                | "watch_from" => Ok(()),
                 "replay_continue_fairly" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
@@ -5364,7 +5408,9 @@ mod tests {
                 | "chaos_instruction_offset"
                 | "rewrite_exclusives_in_memory"
                 | "count_store_exclusives"
-                | "rewrite_exclusives_overlay" => {}
+                | "rewrite_exclusives_overlay"
+                | "watch"
+                | "watch_from" => {}
                 "replay_continue_fairly" => {}
                 other => expected.push(other.to_owned()),
             }
@@ -6523,6 +6569,8 @@ mod tests {
             access_trace_from: 7586,
             access_trace_max_records: Some(40),
             access_trace_max_bytes: Some(4096),
+            watch: vec!["0x404010:4:rw".parse().unwrap()],
+            watch_from: 12,
             ..off.clone()
         };
         let json = to_legacy_backend_json(&on).unwrap();
@@ -6532,6 +6580,7 @@ mod tests {
         assert_eq!((decoded.access_trace, decoded.access_trace_from), (None, 0));
         assert_eq!(decoded.access_trace_max_records, None);
         assert_eq!(decoded.access_trace_max_bytes, None);
+        assert_eq!((decoded.watch, decoded.watch_from), (vec![], 0));
         let values: Vec<serde_json::Value> = ordered_entries(&json)
             .into_iter()
             .map(|(_, value)| value)
@@ -6562,13 +6611,18 @@ mod tests {
                 decoded.access_trace_max_bytes,
                 config.access_trace_max_bytes
             );
+            assert_eq!(
+                (decoded.watch, decoded.watch_from),
+                (config.watch.clone(), config.watch_from)
+            );
         }
 
         let spelled = on.to_string();
         assert!(
             spelled.contains(
                 " --record-access-trace-to='/var/run 1.access' --access-trace-from=7586 \
-                 --access-trace-max-records=40 --access-trace-max-bytes=4096"
+                 --access-trace-max-records=40 --access-trace-max-bytes=4096 \
+                 --watch=0x404010:4:rw --watch-from=12"
             ),
             "{spelled}"
         );
@@ -6579,11 +6633,14 @@ mod tests {
             "--access-trace-from=7586",
             "--access-trace-max-records=40",
             "--access-trace-max-bytes=4096",
+            "--watch=0x404010:4:rw",
+            "--watch-from=12",
         ]);
         assert_eq!(reparsed.access_trace, on.access_trace);
         assert_eq!(reparsed.access_trace_from, 7586);
         assert_eq!(reparsed.access_trace_max_records, Some(40));
         assert_eq!(reparsed.access_trace_max_bytes, Some(4096));
+        assert_eq!((reparsed.watch, reparsed.watch_from), (on.watch, 12));
     }
 
     /// Anonymous-memory logging is newer than the frozen DBT configuration.
@@ -8067,6 +8124,38 @@ mod tests {
             fingerprint_of_config_material(&wire, &named_shape, &changed_sources),
             current,
             "an inode-identity layout change must invalidate the fingerprint"
+        );
+    }
+
+    /// `Config::watch` is empty in the encoded default, so neither encoding
+    /// shows the layout of its element, `WatchArg`: a plugin built before a
+    /// change to it would decode a run's watches against another layout. A
+    /// change to its definition must invalidate the fingerprint.
+    #[test]
+    fn config_fingerprint_includes_the_watch_element_layout() {
+        let config = config_wire_default();
+        assert!(config.watch.is_empty(), "the default hides the element");
+        let wire = bincode::serde::encode_to_vec(&config, bincode::config::legacy()).unwrap();
+        let named_shape = serde_json::to_string(&config).unwrap();
+        let current = config_wire_fingerprint();
+        let watch_source = include_bytes!("watch.rs").as_slice();
+        assert!(CONFIG_DEFINITION_SOURCES.contains(&watch_source));
+        let without_len = include_str!("watch.rs").replacen("    pub len: u8,\n", "", 1);
+        assert_ne!(without_len.as_bytes(), watch_source);
+        let changed_sources: Vec<_> = CONFIG_DEFINITION_SOURCES
+            .iter()
+            .map(|source| {
+                if *source == watch_source {
+                    without_len.as_bytes()
+                } else {
+                    *source
+                }
+            })
+            .collect();
+        assert_ne!(
+            fingerprint_of_config_material(&wire, &named_shape, &changed_sources),
+            current,
+            "a watch element layout change must invalidate the fingerprint"
         );
     }
 
