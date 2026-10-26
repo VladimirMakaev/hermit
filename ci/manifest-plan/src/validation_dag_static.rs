@@ -3278,7 +3278,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the nineteen units that tell code from data by mapping symbols and
     // the unwind table (aarch64_lse::mapping, aarch64_lse::elf and the
     // store-exclusive census): 3365, listed.
-    ("test.detcore_unit", 3365),
+    // And a_binder_call_blocks_when_it_waits_for_another_process: 3366.
+    ("test.detcore_unit", 3366),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4631,7 +4632,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 770, listed.
     // And this branch's CLI tests: 769.
     // Less #4740's tests, which main counts since train 10: 768.
-    ("test.cli", 768),
+    // And a_blocking_binder_read_does_not_hold_the_guests_turn, which skips
+    // the same way: 769.
+    ("test.cli", 769),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5228,7 +5231,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 689, listed.
     // And the same tests: 688.
     // Less #4740's tests, which main counts since train 10: 687.
-    ("test.cli_on_host", 687),
+    // And the same blocking binder read test: 688.
+    ("test.cli_on_host", 688),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5774,7 +5778,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same test: 3344.
     // And the same two aarch64 exclusive-loop units: 3346.
     // And the same nineteen code-from-data units: 3365, listed.
-    ("test.detcore_unit_on_host", 3365),
+    // And the same blocking-classification unit: 3366.
+    ("test.detcore_unit_on_host", 3366),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
