@@ -1250,7 +1250,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's
     // summary::tests::binder_external_calls_show_in_the_report_but_not_the_info_view
     // (the run summary's binder count): 1943, listed.
-    ("test.regular_crates", 1943),
+    // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
+    // (https://github.com/rrnewton/hermit/issues/4876, #4878): 1944.
+    ("test.regular_crates", 1944),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3294,7 +3296,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And syscalls::binder's
     // a_current_record_without_backgrounded_calls_may_replay_binder_under_strict
     // (the record files that policy reads): 3155.
-    ("test.detcore_unit", 3155),
+    // And scheduler::callback_history_scheduler_tests::summarized_desyncs_name_their_recorded_event,
+    // preemptions::tests::callback_checkpoints_are_placed_at_the_event_ending_their_slice
+    // and scheduler::callback_history_scheduler_tests::desync_notes_collect_every_producers_note
+    // (https://github.com/rrnewton/hermit/issues/4876, #4878): 3158.
+    ("test.detcore_unit", 3158),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5768,7 +5774,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two record-serde round-trip units: 3152.
     // And the same two binder policy units: 3154.
     // And the same binder record-file unit: 3155.
-    ("test.detcore_unit_on_host", 3155),
+    // And the same three summarized-desync units: 3158.
+    ("test.detcore_unit_on_host", 3158),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
