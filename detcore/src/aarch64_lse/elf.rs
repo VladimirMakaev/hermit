@@ -1256,7 +1256,7 @@ fn decode_relr(section: &[u8]) -> Vec<(u64, u64)> {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     /// A minimal aarch64 ELF image: one read-and-execute `PT_LOAD` covering
@@ -1532,8 +1532,9 @@ mod tests {
         0xd65f_03c0,
     ];
 
-    /// [`elf_image`] whose `.text` is all code.
-    fn elf_with_text(words: &[u32]) -> Vec<u8> {
+    /// [`elf_image`] whose `.text` is all code. Shared with the in-memory
+    /// rewrite's runtime tests, which map such an image.
+    pub(crate) fn elf_with_text(words: &[u32]) -> Vec<u8> {
         elf_image(words, Some(&[(1, 0, true)]))
     }
 
