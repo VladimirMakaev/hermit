@@ -2239,7 +2239,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_round_that_left_its_schedule_and_then_stopped_never_decides} and
     // departure_note::tests::a_departure_noted_by_a_killed_child_reaches_its_parent_once: 1432.
     // And departure_note::tests::arming_installs_the_hook_that_writes_the_note: 1571.
-    ("test.hermit_unit", 1571),
+    // And a refused trial never being an outcome: refusal_note::tests::{
+    // arming_installs_the_hook_that_writes_the_note,
+    // a_refusal_reason_noted_by_an_exiting_child_reaches_its_parent_once} and
+    // phases::tests::{a_host_timed_refusal_runs_again_and_does_not_change_the_answer,
+    // a_refusal_refused_again_or_deterministic_ends_the_search_with_a_partial_report,
+    // a_refused_search_round_or_minimize_replay_is_never_an_end,
+    // a_refused_recheck_is_noted_in_the_report}: 1577.
+    ("test.hermit_unit", 1577),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3746,7 +3753,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (two replayer::tests, two scheduler::test): 3578.
     // And scheduler::replayer::tests::the_first_departure_from_the_schedule_is_kept
     // (where a replay first ran another thread than its schedule names): 3579.
-    ("test.detcore_unit", 3579),
+    // And tool_global::tests::stopping_refusal_tests::
+    // the_first_refusal_reason_is_handed_to_the_hook_once: 3580.
+    ("test.detcore_unit", 3580),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6420,7 +6429,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four schedule-position stack units of
     // https://github.com/rrnewton/hermit/issues/4917: 3578.
     // And the same schedule-departure unit: 3579.
-    ("test.detcore_unit_on_host", 3579),
+    // And the same refusal-hook unit: 3580.
+    ("test.detcore_unit_on_host", 3580),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6885,7 +6895,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three divergence tests: 1423.
     // And the same three dispatch, stopped-departure and note tests: 1426.
     // And the same arming test: 1565.
-    ("test.hermit_unit_on_host", 1565),
+    // And the same six refusal tests: 1571.
+    ("test.hermit_unit_on_host", 1571),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
