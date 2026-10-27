@@ -3300,7 +3300,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // serde: 3379.
     // And seven units for readmissions a schedule replay matches by the
     // timed events popped in their turn: 3386.
-    ("test.detcore_unit", 3386),
+    // And the scheduler units
+    // a_prehook_switch_hands_a_backgrounded_call_its_turn_before_deferred_threads
+    // and only_a_prehook_switch_leaves_its_thread_a_call_to_carry_out: 3388,
+    // listed.
+    ("test.detcore_unit", 3388),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5808,7 +5812,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same prefix-record unit: 3378.
     // And the same record-serde round-trip unit: 3379.
     // And the same seven popped-event readmission units: 3386.
-    ("test.detcore_unit_on_host", 3386),
+    // And the same two prehook-handoff scheduler units: 3388, listed.
+    ("test.detcore_unit_on_host", 3388),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
