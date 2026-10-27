@@ -2046,8 +2046,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And property_snapshot.rs's five units (the Android property area
     // copy, shared content-named copies, a changed shared copy not joined,
     // the root and path-length refusals, stale and held copies) and
-    // host_input_change's snapshot-copy unit: 1358, listed.
-    ("test.hermit_unit", 1358),
+    // host_input_change's snapshot-copy unit: 1364, listed.
+    ("test.hermit_unit", 1364),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3648,7 +3648,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // with metadata virtualization on and off; mappings that read no
     // property file not refused; a file the area gained after its snapshot
     // refused): 222.
-    ("test.detcore_misc", 222),
+    // And a file without a copy refused through an outside hard link: 223.
+    ("test.detcore_misc", 223),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -5678,7 +5679,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seventeen SCM_RIGHTS queue tests: 191 + 17 = 208.
     // And the same ten post-crash switch tests: 218.
     // And the four property snapshot tests: 222.
-    ("test.detcore_misc_on_host", 222),
+    // And the uncopied-file alias refusal: 223.
+    ("test.detcore_misc_on_host", 223),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).
@@ -6604,7 +6606,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-timed-wait-spread run tests: 1345.
     // And the same --untrap-passthrough-syscalls CLI unit: 1346, listed.
     // And the same six property snapshot units: 1352.
-    ("test.hermit_unit_on_host", 1352),
+    // And the same twelve property snapshot units: 1358.
+    ("test.hermit_unit_on_host", 1358),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
