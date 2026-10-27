@@ -5796,7 +5796,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two binder policy units: 3154.
     // And the same binder record-file unit: 3155.
     // And the same three summarized-desync units: 3158.
-    ("test.detcore_unit_on_host", 3158),
+    // And the same two in-flight-exit scheduler tests as test.detcore_unit: 3160.
+    ("test.detcore_unit_on_host", 3160),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
