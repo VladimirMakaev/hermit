@@ -13,6 +13,7 @@ mod memory;
 mod minimize;
 mod phases;
 mod race_report;
+mod race_watch;
 mod races;
 pub(crate) mod rundata;
 mod stop;
