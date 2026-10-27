@@ -2430,8 +2430,39 @@ impl AnalyzeOpts {
         position: usize,
         continuation: MaybeTimeslice,
     ) -> anyhow::Result<(bool, Option<PrettyBacktrace>)> {
-        let (mut run, stack_path) = self.prefix_stack_trial(runname, schedule, len, position)?;
-        let is_match = self.launch_prefix_trial(&mut run, RunData::launch)?;
+        let (is_match, stack, _) =
+            self.traced_prefix_stack(runname, schedule, len, position, continuation, None)?;
+        Ok((is_match, stack))
+    }
+
+    /// [`Self::prefix_stack`] for the target side of the report: with
+    /// `trace_from` set, the trial also records its schedule and an access
+    /// trace from that event.
+    fn traced_prefix_stack(
+        &self,
+        runname: &str,
+        schedule: &PreemptionRecord,
+        len: usize,
+        position: usize,
+        continuation: MaybeTimeslice,
+        trace_from: Option<u64>,
+    ) -> anyhow::Result<(bool, Option<PrettyBacktrace>, Option<TracedReplay>)> {
+        // A stack-trace replay that analyze's own bound stopped runs again
+        // once with a longer bound, as search trials do (`decisive_trial`).
+        // The access trace taken is the one of the run that completed.
+        let request = std::cell::RefCell::new(None);
+        let mut run = self.completed_trial(runname, |name| {
+            let run = self.prefix_trial(name, schedule, len, continuation)?;
+            let (mut run, traced) = self.request_trace(run, "target", trace_from);
+            let stack_path = run.root_path().with_extension("stack");
+            run.runopts.det_opts.det_config.stacktrace_event =
+                vec![(position as u64, Some(stack_path))];
+            *request.borrow_mut() = traced;
+            Ok(run)
+        })?;
+        let request = request.into_inner();
+        let stack_path = run.root_path().with_extension("stack");
+        let is_match = run.is_a_match();
         eprintln!(
             ":: {}\n{}",
             "Stack-trace run completed.  Repro command:".green().bold(),
