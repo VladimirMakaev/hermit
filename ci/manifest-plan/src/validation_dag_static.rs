@@ -4590,7 +4590,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (tests/c/branch_free_race.c, x86_64 only): 765.
     // And an_instruction_offset_record_replays_from_its_schedule_and_analyze_verifies_its_endpoints
     // (tests/c/branch_free_race.c, x86_64 only): 766.
-    ("test.cli", 766),
+    // And the --rewrite-exclusives refusal test under --no-namespace: 767.
+    ("test.cli", 767),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5181,7 +5182,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same eighteen integrated-chain cli cases: 664 + 18 = 682.
     // And the same two --chaos-instruction-offset tests, not excluded: 684.
     // And the same schedule-replay and analyze offset test, not excluded: 685.
-    ("test.cli_on_host", 685),
+    // And the same test: 686.
+    ("test.cli_on_host", 686),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
