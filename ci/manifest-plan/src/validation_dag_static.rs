@@ -1290,7 +1290,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1934 + 1 = 1984.
     // And hermit-verify's mixed_interpolation_keeps_no_segment_store_exclusive_counts:
     // 1935 + 1 = 1985.
-    ("test.regular_crates", 1985),
+    // And detcore-model's
+    // config::tests::post_crash_timeslice_parses_off_default_and_bounds:
+    // 1959, listed.
+    // And config::tests::a_post_crash_bound_is_refused_where_it_would_not_take_effect:
+    // 1987, listed.
+    ("test.regular_crates", 1987),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3401,7 +3406,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_replaced_schedule_keeps_no_store_exclusive_counts: 3247 + 3 = 3444.
     // And preemptions' an_interpolated_schedule_keeps_no_store_exclusive_counts:
     // 3250 + 1 = 3445.
-    ("test.detcore_unit", 3445),
+    // And post_crash's fourteen units (the crash-signal test and the state
+    // machine: off, default action, lineage exec, outside exec, handler
+    // return, recovered lineage beside another crash, a switch taking every
+    // crash armed in its process, a switch per crashing trial, a nested
+    // default-action crash, a nested caught crash, exited thread, lowest
+    // armed thread, replay transitions) and preemptions'
+    // the_post_crash_switch_round_trips_and_a_replay_takes_the_recorded_bound:
+    // 3460, listed.
+    ("test.detcore_unit", 3460),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -3505,7 +3518,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // received and read on a tight stack is recorded and renumbered: 164.
     // And the in-flight SCM_RIGHTS queue's seventeen scm_rights tests
     // (https://github.com/rrnewton/hermit/issues/4930): 191 + 17 = 208.
-    ("test.detcore_misc", 208),
+    // And post_crash's ten switch tests (a crash handler that execs
+    // switches, a resolved fault and a sent fault signal do not, a handler
+    // waiting in sigsuspend switches the same way every run, a handler that
+    // unblocks before a sibling execs does not, nor a pending realtime
+    // handler, a recovered handler followed by RDTSC traps, or a recovered
+    // lineage beside another crash; each crashing trial switches; an abort
+    // inside a fault handler switches at once): 218.
+    ("test.detcore_misc", 218),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -5402,7 +5422,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1969.
     // Kept equal to the second test.regular_crates_on_host entry below: 1970.
     // Kept equal to the second test.regular_crates_on_host entry below: 1971.
-    ("test.regular_crates_on_host", 1971),
+    // And this change's tests, as at this node's second entry below: 1973.
+    ("test.regular_crates_on_host", 1973),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5489,7 +5510,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four F0a readdir_order variants: 163.
     // And the same tight-stack received-inotify test: 164.
     // And the same seventeen SCM_RIGHTS queue tests: 191 + 17 = 208.
-    ("test.detcore_misc_on_host", 208),
+    // And the same ten post-crash switch tests: 218.
+    ("test.detcore_misc_on_host", 218),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).
@@ -5969,7 +5991,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same record_serde unit: 3441.
     // And the same three transformed-record units: 3444.
     // And the same interpolated-record unit: 3445.
-    ("test.detcore_unit_on_host", 3445),
+    // And the same fifteen post-crash units: 3460, listed.
+    ("test.detcore_unit_on_host", 3460),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6639,7 +6662,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same tests: 1969.
     // And the same split-branches test: 1970.
     // And the same interpolation test: 1971.
-    ("test.regular_crates_on_host", 1971),
+    // And the same post-crash option parse unit: 1945, listed.
+    // And the same post-crash refusal unit: 1973, listed.
+    ("test.regular_crates_on_host", 1973),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.

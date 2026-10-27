@@ -1257,6 +1257,16 @@ impl AnalyzeOpts {
         RunData::get_raw_runopts(self).rewrites_exclusives_in_memory()
     }
 
+    /// The post-crash bound in effect in the trials
+    /// (`Config::post_crash_timeslice_in_effect`; `None` for off).
+    pub fn trial_post_crash_timeslice(&self) -> Option<u64> {
+        RunData::get_raw_runopts(self)
+            .det_opts
+            .det_config
+            .post_crash_timeslice_in_effect()
+            .map(std::num::NonZeroU64::get)
+    }
+
     /// `record` stamped with the trials' `--pipe-wake-latency`, signal-state
     /// copy setting, `--expired-wait-charge` and in-memory exclusive rewrite,
     /// as every record analyze writes must be: a record that omitted one would
@@ -1276,6 +1286,7 @@ impl AnalyzeOpts {
             .with_cap_preemption_charge(self.trial_cap_preemption_charge())
             .with_rewrite_exclusives_in_memory(self.trial_rewrite_exclusives_in_memory())
             .with_uncapped_slices(self.trial_schedules_uncapped.get())
+            .with_post_crash_timeslice(self.trial_post_crash_timeslice())
     }
 
     /// Whether the trials cap preemption charges (`--cap-preemption-charge`
