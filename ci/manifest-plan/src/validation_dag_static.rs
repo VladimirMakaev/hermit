@@ -1251,7 +1251,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and split_branches_in_file_leaves_an_offset_batch_whole: 1934.
     // And hermit-verify's
     // interpolation_refuses_a_newer_record_before_reading_its_settings: 1964.
-    ("test.regular_crates", 1964),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1966, listed.
+    ("test.regular_crates", 1966),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -1960,7 +1963,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // -p hermit-run --features third-party-backends,kvm-native-test-support
     // --lib --bins` lists 1339, of which this node's `--skip` patterns
     // remove 5 and one `#[ignore]` test is listed but never executed.
-    ("test.hermit_unit", 1345),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1333, listed.
+    ("test.hermit_unit", 1333),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3243,7 +3249,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_format_this_hermit_does_not_read_survives_the_offsets_cap: 3270.
     // And a_writer_that_noted_an_instruction_offset_cannot_become_a_boundary_writer: 3271.
     // And a_priority_replay_of_an_unread_format_exits_with_the_policy_status: 3309.
-    ("test.detcore_unit", 3309),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 3353, listed.
+    ("test.detcore_unit", 3353),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4591,7 +4600,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And an_instruction_offset_record_replays_from_its_schedule_and_analyze_verifies_its_endpoints
     // (tests/c/branch_free_race.c, x86_64 only): 766.
     // And the --rewrite-exclusives refusal test under --no-namespace: 767.
-    ("test.cli", 767),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 770, listed.
+    ("test.cli", 770),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5183,11 +5195,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset tests, not excluded: 684.
     // And the same schedule-replay and analyze offset test, not excluded: 685.
     // And the same test: 686.
-    ("test.cli_on_host", 686),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 689, listed.
+    ("test.cli_on_host", 689),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
-    ("test.regular_crates_on_host", 1950),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1952.
+    ("test.regular_crates_on_host", 1952),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5715,7 +5731,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same unread-format cap unit: 3270.
     // And the same boundary-writer offsets unit: 3271.
     // And the same priority-installer refusal unit: 3309.
-    ("test.detcore_unit_on_host", 3309),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 3353, listed.
+    ("test.detcore_unit_on_host", 3353),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6121,7 +6140,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same offset-rows prefix unit: 1323.
     // And the same minimize-record unit: 1324.
     // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1339.
-    ("test.hermit_unit_on_host", 1339),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1286, listed.
+    ("test.hermit_unit_on_host", 1342),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6356,7 +6378,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same schedule-event offset unit: 1918.
     // And the same two hermit-verify splitting units: 1920.
     // And the same hermit-verify interpolation unit: 1950.
-    ("test.regular_crates_on_host", 1950),
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1952, listed.
+    ("test.regular_crates_on_host", 1952),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
