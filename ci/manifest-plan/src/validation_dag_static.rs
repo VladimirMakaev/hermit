@@ -5094,7 +5094,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And chaos_timed_wait_spread_reorders_a_wait_against_work_and_keeps_the_clock_honest: 788.
     // And a_schedule_replay_of_a_timed_wait_spread_recording_follows_it: 789.
     // And implicit_binds_take_the_same_ports_on_every_run: 763 + 1 = 790.
-    ("test.cli", 790),
+    // And no_namespace_bisect_replays_the_schedules_it_writes: 745 + 1 = 746.
+    // And no_namespace_minimize_replays_its_candidate_records: 746 + 1 = 792.
+    ("test.cli", 792),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5721,7 +5723,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same spread schedule-replay test: 708.
     // And implicit_binds_take_the_same_ports_on_every_run, which starts no
     // LiteInst guest: 682 + 1 = 709.
-    ("test.cli_on_host", 709),
+    // And the same --no-namespace bisect test, not excluded: 664 + 1 = 665.
+    // And the same --minimize test, not excluded: 665 + 1 = 711.
+    ("test.cli_on_host", 711),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
