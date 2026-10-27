@@ -34,7 +34,7 @@ mod posix_timer_coalesce_tests;
 pub(crate) mod process_signal_receiver;
 pub(crate) mod real_timer;
 pub(crate) mod rejoin_log;
-mod replayer;
+pub(crate) mod replayer;
 #[cfg(test)]
 mod reserved_input_tests;
 pub mod runqueue;
@@ -22453,6 +22453,7 @@ impl Scheduler {
                 // schedevent_desynced_at_context_switch: total_desyncs.at_context_switch,
                 desync_descrip,
                 desync_notes,
+                schedule_departure: self.replayer.as_ref().and_then(|r| r.first_departure),
                 reprio_descrip,
                 threads_descrip,
                 num_processes,
