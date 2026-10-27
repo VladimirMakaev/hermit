@@ -4543,7 +4543,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (tests/c/branch_free_race.c, x86_64 only): 746.
     // And an_instruction_offset_record_replays_from_its_schedule_and_analyze_verifies_its_endpoints
     // (tests/c/branch_free_race.c, x86_64 only): 747.
-    ("test.cli", 747),
+    // And the --rewrite-exclusives refusal test under --no-namespace: 748.
+    ("test.cli", 748),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5117,7 +5118,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same two SCM_RIGHTS queue cases: 661 + 2 = 663.
     // And the same two --chaos-instruction-offset tests, not excluded: 665.
     // And the same schedule-replay and analyze offset test, not excluded: 666.
-    ("test.cli_on_host", 666),
+    // And the same test: 667.
+    ("test.cli_on_host", 667),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
