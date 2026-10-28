@@ -3536,7 +3536,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // untrapped_passthrough_syscalls_are_plain_passthroughs: 3560, listed.
     // And the property snapshot's path rule, content identity and
     // property-service address units: 3563, listed.
-    ("test.detcore_unit", 3563),
+    // And the CPU-clock fix-forward's five units (cpu_clock's
+    // the_resolution_is_the_kernels_for_each_kind, cpu_clock::handler_tests'
+    // a_cpu_clock_sleep_that_would_wait_is_refused and
+    // timer_create_checks_the_task_a_cpu_clock_names, thread_cpu_time_tests'
+    // an_exited_leaders_clock_keeps_its_final_time and scheduler's
+    // a_cpu_clock_names_only_tasks_linux_still_has): 3247, listed.
+    // And cpu_clock::handler_tests'
+    // timer_settime_on_a_timer_whose_thread_exited_is_esrch: 3569, listed.
+    ("test.detcore_unit", 3569),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6192,7 +6200,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same twenty implicit-bind port units: 3279 + 20 = 3558.
     // And the same two --untrap-passthrough-syscalls subscription units: 3560, listed.
     // And the same three property snapshot units: 3563.
-    ("test.detcore_unit_on_host", 3563),
+    // And the same five CPU-clock fix-forward units: 3247, listed.
+    // And the same timer_settime ESRCH unit: 3569, listed.
+    ("test.detcore_unit_on_host", 3569),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
