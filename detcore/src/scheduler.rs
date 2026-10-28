@@ -21834,6 +21834,7 @@ impl Scheduler {
                 binder_external_calls: None,
                 // GlobalState marks a run its deadline stopped.
                 run_timeout_secs: None,
+                stdio_changed: Vec::new(),
             },
             info_reprio_descrip,
         ))
