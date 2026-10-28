@@ -967,6 +967,9 @@ mod tests {
             ..spinner.clone()
         };
         let held = ReplayAction::ContextSwitch(true, tid(3), None);
+        // A failed attempt goes on to its next attempt, as a prehook goes on
+        // to its call, so it is handed over without a scheduler pass.
+        let handed_over = ReplayAction::ContextSwitch(false, tid(3), None);
         let release_after = |retries: u64| {
             let mut replayer =
                 Replayer::new([recorded.clone(), recorded.clone(), recorded.clone()]);
@@ -974,7 +977,7 @@ mod tests {
                 assert_eq!(replayer.observe_event(&spinner), held);
             }
             for _ in 0..retries {
-                assert_eq!(replayer.observe_event(&retry), held);
+                assert_eq!(replayer.observe_event(&retry), handed_over);
             }
             assert!(!replayer.released());
             assert_eq!(
