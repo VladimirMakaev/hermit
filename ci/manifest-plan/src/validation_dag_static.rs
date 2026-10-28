@@ -1272,7 +1272,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Re-derived with the node's own selection at the head of the aarch64
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 1955, listed.
-    ("test.regular_crates", 1955),
+    // And detcore-model's config::tests::
+    // rewrite_exclusives_in_memory_never_enters_the_legacy_form: 1956.
+    ("test.regular_crates", 1956),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -5335,7 +5337,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Train 5 recount (same growth as test.regular_crates), composed on measured main: 1930 + 2 = 1932.
     // The same two stripped-file units: 1939, listed.
     // Kept equal to the second test.regular_crates_on_host entry below: 1941.
-    ("test.regular_crates_on_host", 1941),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1942.
+    ("test.regular_crates_on_host", 1942),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6572,7 +6575,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Re-derived with the node's own selection at the head of the aarch64
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 1941, listed.
-    ("test.regular_crates_on_host", 1941),
+    // And the same legacy-form unit: 1942.
+    ("test.regular_crates_on_host", 1942),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
