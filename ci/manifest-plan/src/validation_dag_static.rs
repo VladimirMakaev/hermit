@@ -1274,7 +1274,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // units, the unmarked files' legacy form and summary: 1957, listed.
     // And summary::tests::a_file_the_in_memory_rewrite_could_not_write_says_why:
     // 1958, listed.
-    ("test.regular_crates", 1958),
+    // And detcore-model's config::tests::
+    // rewrite_exclusives_overlay_never_enters_the_legacy_form: 1959, listed.
+    ("test.regular_crates", 1959),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -5354,7 +5356,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (dh-9r2mg) named losses: 1937 - 2 = 1935.
     // The same two detcore-model units: 1943, listed.
     // And the same not-written summary unit: 1944, listed.
-    ("test.regular_crates_on_host", 1944),
+    // And the same overlay legacy-form unit: 1945, listed.
+    ("test.regular_crates_on_host", 1945),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6594,7 +6597,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (dh-9r2mg) named losses: 1937 - 2 = 1935.
     // The same two detcore-model units: 1943, listed.
     // And the same not-written summary unit: 1944, listed.
-    ("test.regular_crates_on_host", 1944),
+    // And the same overlay legacy-form unit: 1945, listed.
+    ("test.regular_crates_on_host", 1945),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.

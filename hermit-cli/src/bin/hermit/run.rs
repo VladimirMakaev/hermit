@@ -2351,6 +2351,12 @@ pub struct RunOpts {
     #[clap(skip)]
     exclusive_rewrite_unmarked: Vec<PathBuf>,
 
+    /// Runtime-only: the guest path of every file the overlay rewrite was
+    /// given, rewritten or not (the executable and each
+    /// `--rewrite-exclusives-also` file), for `Config::rewrite_exclusives_overlay`.
+    #[clap(skip)]
+    exclusive_rewrite_covered: Vec<PathBuf>,
+
     /// Runtime-only: how many of the last `--mount`s and `--bind`s a backend
     /// adapter added to the caller's (`with_dbt_mounts`). They are installed
     /// as a backend's own mounts (`PlannedMount::backend`), which the guest's
@@ -2481,19 +2487,20 @@ pub(super) fn apply_base_environment(
     Ok(())
 }
 
-/// What one trial preparation made: its key, the overlays, the files it
-/// left unchanged for want of mapping symbols, and a fingerprint (path,
-/// bytes digest, mode) of every overlay artifact it made.
-type PreparedTrial = (
+/// One prepared analysis's key, its overlays, the files it left unchanged
+/// for want of mapping symbols, the guest paths of every file its overlay
+/// rewrite was given, and a fingerprint (path, bytes digest, mode) of every
+/// overlay artifact it made.
+type PreparedTrialPreprocessing = (
     String,
     Vec<ExecutableOverlayMount>,
     Vec<PathBuf>,
+    Vec<PathBuf>,
     Vec<(PathBuf, String, u32)>,
 );
-
 /// The overlays prepared for analyze trials in this process, by
 /// [`RunOpts::trial_preprocessing_key`].
-static PREPARED_TRIAL_PREPROCESSING: std::sync::Mutex<Vec<PreparedTrial>> =
+static PREPARED_TRIAL_PREPROCESSING: std::sync::Mutex<Vec<PreparedTrialPreprocessing>> =
     std::sync::Mutex::new(Vec::new());
 
 /// Where `--rewrite-exclusives` applies its rewrite.
@@ -3607,6 +3614,7 @@ fn analyze_trials_are_refused_before_the_rewrite_cache_is_consulted() {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .push((
                 trial.trial_preprocessing_key(),
+                Vec::new(),
                 Vec::new(),
                 Vec::new(),
                 Vec::new(),
@@ -13560,7 +13568,7 @@ impl RunOpts {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some(position) = prepared.iter().position(|(seen, ..)| *seen == key) {
-            let (_, overlays, unmarked, fingerprints) = &prepared[position];
+            let (_, overlays, unmarked, covered, fingerprints) = &prepared[position];
             // A remembered path is reused only while the artifact at that
             // path still holds exactly the bytes and mode the preparation
             // made. The cache directory stays writable by the invoking
@@ -13570,12 +13578,14 @@ impl RunOpts {
             if prepared_overlays_current(overlays, fingerprints) {
                 self.exclusive_rewrite_overlays = overlays.clone();
                 self.exclusive_rewrite_unmarked = unmarked.clone();
+                self.exclusive_rewrite_covered = covered.clone();
                 return Ok(());
             }
             prepared.remove(position);
         }
         self.exclusive_rewrite_overlays.clear();
         self.exclusive_rewrite_unmarked.clear();
+        self.exclusive_rewrite_covered.clear();
         self.prepare_exclusive_rewrite(self.selected_backend())?;
         let fingerprints = self
             .exclusive_rewrite_overlays
@@ -13589,6 +13599,7 @@ impl RunOpts {
             key,
             self.exclusive_rewrite_overlays.clone(),
             self.exclusive_rewrite_unmarked.clone(),
+            self.exclusive_rewrite_covered.clone(),
             fingerprints,
         ));
         Ok(())
@@ -13774,6 +13785,7 @@ impl RunOpts {
         // a custom mount must not hide the target or the cached artifact.
         self.validate_executable_overlay_mount_targets()?;
         let cache = hermit::aarch64_lse::cache_dir()?;
+        self.exclusive_rewrite_covered = files.iter().map(|(guest, _)| guest.clone()).collect();
         for (guest_path, host_path) in files {
             let input = fs::read(&host_path)
                 .with_context(|| format!("reading {} to rewrite", host_path.display()))?;
@@ -16855,6 +16867,14 @@ impl RunOpts {
         // A pure function of the flags, so every trial of an analysis and
         // both runs of a `--verify` pair rewrite alike.
         config.rewrite_exclusives_in_memory = self.rewrites_exclusives_in_memory();
+        // The files the overlay rewrite was given, so the run can name the
+        // mapped files it was not; empty without the overlay.
+        config.rewrite_exclusives_overlay =
+            if self.rewrite_exclusives && !config.rewrite_exclusives_in_memory {
+                self.exclusive_rewrite_covered.clone()
+            } else {
+                Vec::new()
+            };
         config
     }
 
