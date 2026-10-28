@@ -258,6 +258,16 @@ pub struct Config {
     #[serde(default)]
     pub count_store_exclusives: bool,
 
+    /// aarch64: the guest paths `--rewrite-exclusives` rewrote into
+    /// bind-mounted copies, or found nothing to rewrite in: the executable
+    /// and each `--rewrite-exclusives-also` file. Set by the CLI for a run
+    /// that rewrites with that overlay, empty otherwise, so that the run can
+    /// name the other mapped files whose load/store-exclusive loops it left;
+    /// never read from a recording.
+    #[clap(skip)]
+    #[serde(default)]
+    pub rewrite_exclusives_overlay: Vec<PathBuf>,
+
     /// The host facts a v3 guest's leaf 0xD and xstate answers come from, set
     /// by the CLI after the host qualifies; `None` under v2. Neither profile
     /// field enters the legacy form the DBT runtime reads (DBT refuses v3).
@@ -3623,6 +3633,9 @@ mod legacy_backend_json {
     /// `count_store_exclusives` came after it as well: the run's global state
     /// counts store-exclusives on aarch64 ptrace runs, not the runtime, so it
     /// is never written and reads as false.
+    /// `rewrite_exclusives_overlay` likewise: the run's global state names the
+    /// files the overlay rewrite left, so it is never written and reads as
+    /// empty.
     const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 47] = [
         // `chaos_timeslice_range` came after it too: the scheduler draws the
         // slices, not the runtime, so it is never written and reads as unset.
@@ -3681,6 +3694,7 @@ mod legacy_backend_json {
         "chaos_instruction_offset",
         "rewrite_exclusives_in_memory",
         "count_store_exclusives",
+        "rewrite_exclusives_overlay",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -3830,6 +3844,11 @@ mod legacy_backend_json {
                     | "rewrite_exclusives_in_memory"
                     | "count_store_exclusives",
                 ) => seed.deserialize(BoolDeserializer::new(false)).map(Some),
+                // Empty, as its serde default is.
+                Some("rewrite_exclusives_overlay") => seed
+                    .deserialize(serde_json::Value::Array(Vec::new()))
+                    .map(Some)
+                    .map_err(<A::Error as de::Error>::custom),
                 // Empty, as its serde default is; and 0, the default.
                 Some(
                     "in_guest_reserved_signals" | "access_trace_from" | "chaos_instruction_offset",
@@ -4182,7 +4201,8 @@ mod legacy_backend_json {
                 | "access_trace_max_bytes"
                 | "chaos_instruction_offset"
                 | "rewrite_exclusives_in_memory"
-                | "count_store_exclusives" => Ok(()),
+                | "count_store_exclusives"
+                | "rewrite_exclusives_overlay" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
         }
@@ -5104,7 +5124,8 @@ mod tests {
                 | "access_trace_max_bytes"
                 | "chaos_instruction_offset"
                 | "rewrite_exclusives_in_memory"
-                | "count_store_exclusives" => {}
+                | "count_store_exclusives"
+                | "rewrite_exclusives_overlay" => {}
                 other => expected.push(other.to_owned()),
             }
         }
@@ -5741,6 +5762,41 @@ mod tests {
             !from_legacy_backend_json(&array)
                 .unwrap()
                 .rewrite_exclusives_in_memory
+        );
+    }
+
+    /// `rewrite_exclusives_overlay` never enters the legacy form, whatever
+    /// its value: the legacy string keeps its bytes, and it reads back as
+    /// empty from both the object and the array form.
+    #[test]
+    fn rewrite_exclusives_overlay_never_enters_the_legacy_form() {
+        let off = Config {
+            backend: BackendCapabilities::DBT,
+            ..Config::default()
+        };
+        let on = Config {
+            rewrite_exclusives_overlay: vec!["/bin/guest".into(), "/lib/libatomic.so.1".into()],
+            ..off.clone()
+        };
+        let json = to_legacy_backend_json(&on).unwrap();
+        assert_eq!(json, to_legacy_backend_json(&off).unwrap());
+        assert!(!json.contains("rewrite_exclusives_overlay"), "{json}");
+        assert!(
+            from_legacy_backend_json(&json)
+                .unwrap()
+                .rewrite_exclusives_overlay
+                .is_empty()
+        );
+        let values: Vec<serde_json::Value> = ordered_entries(&json)
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect();
+        let array = serde_json::to_string(&values).unwrap();
+        assert!(
+            from_legacy_backend_json(&array)
+                .unwrap()
+                .rewrite_exclusives_overlay
+                .is_empty()
         );
     }
 
