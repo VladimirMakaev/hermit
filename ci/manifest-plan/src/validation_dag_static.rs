@@ -1316,7 +1316,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // untrap_passthrough_syscalls_never_enters_the_legacy_form: 2003, listed.
     // And host_input::tests::host_file_identities_without_and_with_contents
     // (a property snapshot copy is identified by its contents): 2004, listed.
-    ("test.regular_crates", 2004),
+    // And host_input::tests::a_flattened_identity_does_not_clash_with_a_records_own_content
+    // (the snapshot hash's JSON key is not a record's own `content`): 2005,
+    // listed.
+    ("test.regular_crates", 2005),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -5590,7 +5593,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1987.
     // Kept equal to the second test.regular_crates_on_host entry below: 1989.
     // And this change's tests, as at this node's second entry below: 1990.
-    ("test.regular_crates_on_host", 1990),
+    // And this change's tests, as at this node's second entry below: 1991.
+    ("test.regular_crates_on_host", 1991),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6875,7 +6879,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four schedule replay options tests: 1987.
     // And the same two --untrap-passthrough-syscalls detcore-model units: 1989, listed.
     // And the same host_input identity unit: 1990.
-    ("test.regular_crates_on_host", 1990),
+    // And the same flattened-identity unit: 1991.
+    ("test.regular_crates_on_host", 1991),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
