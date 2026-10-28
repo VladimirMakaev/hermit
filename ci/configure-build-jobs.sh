@@ -3171,8 +3171,18 @@ fi
 # and third-party/ are byte-identical by git object id between the pins
 # (4e4afaa7, 3f2abba1, e2a6ab75, fb49c0ba), so the existing SDK budget
 # carries, not runtime equivalence.
-if [[ ${REVERIE_DBT_BUDGET_BOUND_PIN:-} != 9443a6b2825711294852a75a955744c027684f16 ]]; then
-    echo "configure-build-jobs.sh: DECLINED (no_result, exit 75): DBT budget is not bound to Reverie 9443a6b2825711294852a75a955744c027684f16 (bound pin: ${REVERIE_DBT_BUDGET_BOUND_PIN:-<unset>})" >&2
+# CARRY TO a09bc2932007af8e9820b9364d623f85c87cdc89 (2026-11-01): from 9443a6b2825711294852a75a955744c027684f16.
+# Interval: Reverie #1153 (9bf28456, a09bc293) on 9443a6b2, in
+# reverie-kvm/src/preemption_timer.rs, reverie-ptrace/src/timer.rs,
+# reverie/src/pmu_config.rs and that file's LiteInst source-catalog row; it is
+# not on Reverie's main branch yet, and the pin moves to the landed revision
+# once it is. The reverie-dbt tree is unchanged (af428c60), so the committed
+# inventory stays as it is; reverie-dbt/vendor/dynamorio, reverie-dbt/build.rs,
+# reverie-dbt/native and third-party/ are byte-identical by git object id
+# between the pins (4e4afaa7, 3f2abba1, d582607c, fb49c0ba), so the existing
+# SDK budget carries, not runtime equivalence.
+if [[ ${REVERIE_DBT_BUDGET_BOUND_PIN:-} != a09bc2932007af8e9820b9364d623f85c87cdc89 ]]; then
+    echo "configure-build-jobs.sh: DECLINED (no_result, exit 75): DBT budget is not bound to Reverie a09bc2932007af8e9820b9364d623f85c87cdc89 (bound pin: ${REVERIE_DBT_BUDGET_BOUND_PIN:-<unset>})" >&2
     return 75
 fi
 
