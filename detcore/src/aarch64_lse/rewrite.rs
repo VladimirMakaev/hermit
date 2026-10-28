@@ -103,6 +103,10 @@ pub enum Refusal {
     /// restore another. Rewriting it needs a seventh instruction, or proof
     /// that the failure path overwrites Rv before reading it.
     NewValueAfterCompare,
+    /// Only the unwind table says the sequence is code, and an `LDR`
+    /// (literal) or `ADR` reaches its bytes, so they may be a literal pool
+    /// inside the function the table covers.
+    LiteralInsideSequence,
 }
 
 /// A sequence the rewriter replaces, and its replacement.

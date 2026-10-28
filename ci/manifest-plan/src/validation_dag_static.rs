@@ -3275,7 +3275,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the two aarch64 exclusive-loop units for Rust std's loop shapes (a
     // flag-setting read-modify-write, a compare-and-swap that retries
     // elsewhere): 3346.
-    ("test.detcore_unit", 3346),
+    // And the nineteen units that tell code from data by mapping symbols and
+    // the unwind table (aarch64_lse::mapping, aarch64_lse::elf and the
+    // store-exclusive census): 3365, listed.
+    ("test.detcore_unit", 3365),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5770,7 +5773,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same record_serde unit: 3343.
     // And the same test: 3344.
     // And the same two aarch64 exclusive-loop units: 3346.
-    ("test.detcore_unit_on_host", 3346),
+    // And the same nineteen code-from-data units: 3365, listed.
+    ("test.detcore_unit_on_host", 3365),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
