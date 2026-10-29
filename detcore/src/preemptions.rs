@@ -691,6 +691,7 @@ impl PreemptionRecord {
             background_starts,
             segment_store_exclusives: _,
             queued_sleeps_registered_at_first_pass,
+            sched_seed,
         } = self;
         let followed = len < global.len();
         let global = global[..len.min(global.len())].to_vec();
@@ -796,6 +797,7 @@ impl PreemptionRecord {
             // Likewise what this run's host observed of its segments.
             segment_store_exclusives: HostObservedFlag::default(),
             queued_sleeps_registered_at_first_pass: *queued_sleeps_registered_at_first_pass,
+            sched_seed: *sched_seed,
         }
     }
 
@@ -4985,6 +4987,26 @@ mod tests {
             assert_eq!(
                 record.schedule_prefix(len).timed_wait_spread,
                 Some(setting),
+                "prefix of {len} events"
+            );
+        }
+    }
+
+    /// The scheduler seed of the recorded run is a setting of the whole run,
+    /// as the guest random seed is: a prefix of the schedule keeps it,
+    /// whether it is shorter or whole.
+    #[test]
+    fn a_schedule_prefix_keeps_the_scheduler_seed() {
+        let tid = DetTid::from_raw(3);
+        let mut record = PreemptionRecord::from_sched_events(vec![
+            SchedEvent::branches(tid, 10),
+            SchedEvent::branches(tid, 20),
+        ]);
+        record.sched_seed = Some(7654321);
+        for len in [0, 1, 2, 9] {
+            assert_eq!(
+                record.schedule_prefix(len).sched_seed,
+                Some(7654321),
                 "prefix of {len} events"
             );
         }

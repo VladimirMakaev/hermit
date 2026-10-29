@@ -3706,7 +3706,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And preemptions::tests::a_record_too_varied_to_renumber_keeps_its_priorities: 3571.
     // And scheduler::test::a_recorded_schedule_stores_the_scheduler_seed: 3572,
     // listed.
-    ("test.detcore_unit", 3572),
+    // And a_schedule_prefix_keeps_the_scheduler_seed, for main's prefix
+    // records: 3573.
+    ("test.detcore_unit", 3573),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6371,7 +6373,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same error-queue decision unit: 3570, listed.
     // And the same normalize test: 3571.
     // And the same recorded scheduler-seed unit: 3572, listed.
-    ("test.detcore_unit_on_host", 3572),
+    // And the same prefix scheduler-seed unit: 3573.
+    ("test.detcore_unit_on_host", 3573),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
