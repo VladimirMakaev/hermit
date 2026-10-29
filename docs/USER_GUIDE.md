@@ -1005,6 +1005,13 @@ a seed's, which an explicit `--trial-timeout=SECONDS` bounds too. On a
 backend that does not enforce `--timeout`, `auto` gives no bound and an explicit
 number is refused; bound the whole analysis from outside there.
 
+When analyze's own bound stops a `--prefix-search` trial, a default-search
+(bisection) trial or the baseline run, the run runs again at once, as
+`<trial>_retry`, with 4 times the bound (within the run arguments' own
+`--timeout` and the time budget left). When that bound fires is the host's, so
+the stopped run has no outcome and is never counted; only a rerun that
+completes counts, and one stopped again ends the analysis as below.
+
 A timed-out trial cannot certify a causal report: it establishes neither the
 target nor the baseline outcome, even if it captured stacks. Analysis returns
 exit 124 without saving a successful report; diagnostics from previously
@@ -1107,8 +1114,7 @@ shortened to the time left; a run the budget cuts short is thrown away rather
 than counted as not meeting the target, so the budget decides only when
 analyze stops, never what it finds. When it runs out, analyze exits **120**
 after the stderr line `HERMIT_ANALYZE_PARTIAL class=time-budget` (or
-`class=trial-budget`, or `class=trial-inconclusive` for a trial analyze's
-bound stopped twice) and a report that says it is partial, why, and which
+`class=trial-budget`) and a report that says it is partial, why, and which
 phase was running:
 
 - The default search reports the closest pair of schedules it found, a
