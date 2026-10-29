@@ -3441,7 +3441,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // lib's a_replayed_slice_arms_an_exact_stop_only_where_a_branch_ends_it;
     // and slice_boundary::grant's a_boundary_grants_pmu_count_keeps_its_exact_stop:
     // 3476, listed.
-    ("test.detcore_unit", 3476),
+    // And scheduler::test::the_chaos_bounds_apply_past_the_end_of_a_replayed_schedule
+    // (#4658's bounds past a replayed schedule's end): 3242 + 1 = 3477, listed.
+    ("test.detcore_unit", 3477),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4818,7 +4820,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_library_run_records_the_stdio_kinds_of_its_commands_descriptors: 777.
     // And a_containerized_run_records_the_stdio_kinds_it_inherits: 778.
     // And a_schedule_replay_keeps_the_long_slices_of_a_preemption_replay: 779.
-    ("test.cli", 779),
+    // And a_new_thread_past_a_replayed_schedule_gets_its_first_turn_within_a_second:
+    // 780, listed.
+    ("test.cli", 780),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5431,7 +5435,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same library-run stdio-kind test: 696.
     // And the same containerized-run stdio-kind test: 697.
     // And the same uncapped-slices replay test: 698.
-    ("test.cli_on_host", 698),
+    // And the same replayed-schedule first-turn test, not excluded: 699, listed.
+    ("test.cli_on_host", 699),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -6031,7 +6036,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same first-slice offset unit: 3467.
     // And the same nine re-landed #4597 preemption-replay units: 3476,
     // listed.
-    ("test.detcore_unit_on_host", 3476),
+    // And the same unit for #4658's bounds past a replayed schedule's end:
+    // 3477, listed.
+    ("test.detcore_unit_on_host", 3477),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
