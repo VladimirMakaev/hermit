@@ -3327,6 +3327,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_connection_is_guest_made_only_when_both_of_its_ends_are: 2888.
     // And io_buffers' a_retried_connect_that_finds_its_socket_connected_pairs_nothing:
     // 2889, listed.
+    // On main 32f85d391 (2877), this change's three units, fd's
+    // a_received_descriptor_is_guest_held_only_through_its_senders_open_file
+    // and a_socket_is_guest_created_only_through_its_own_open_file, io_buffers'
+    // six send and connect units and scm_rights'
+    // a_connection_is_guest_made_only_when_both_of_its_ends_are: 2889.
+    // The same twelve units on main dc85ec16a, which has three of them
+    // (3034): 3169, listed.
     ("test.detcore_unit", 3169),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5835,6 +5842,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three connect and pairing units: 2888, listed.
     // And the same three connect and pairing units: 2888.
     // And the same retried-connect unit: 2889, listed.
+    // The same twelve units on main 32f85d391 (2877): 2889.
+    // The same twelve units on main dc85ec16a, which has three of them
+    // (3034): 3169, listed.
     ("test.detcore_unit_on_host", 3169),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
