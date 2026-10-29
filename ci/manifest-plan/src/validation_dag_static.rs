@@ -3337,9 +3337,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test's ten idle-poller deadlock units (a reader beside
     // a writer nothing can wake, and nine states that still poll on): 2748.
     // And scheduler::test::a_trace_replay_grant_after_a_failed_attempt_is_no_attempt: 2749.
-    // Measured with this change's eleven units on #4862's rebased head: 2825, listed.
     // Measured with this change's eleven units on #4862's rebased head: 2825.
     // The same eleven units on #4862's head on main 32f85d391 (2889): 2900, listed.
+    // The same eleven units on #4862's head on main 32f85d391 (2889): 2900.
+    // The same eleven units on #4862's head on main dc85ec16a (3043): 3180,
+    // listed.
     ("test.detcore_unit", 3180),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4712,6 +4714,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR 4753 adds a_recording_from_before_readlinkat_was_recorded_is_refused_by_version: 742 + 1 = 761.
     // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 655.
     // The same test on main 32f85d391 (694): 695, listed.
+    // The same test on main 32f85d391 (694): 695.
+    // The same test on main dc85ec16a (744): 762, listed.
     ("test.cli", 762),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5304,6 +5308,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same PR 4753 case: 661 + 1 = 680.
     // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 574.
     // The same test on main 32f85d391 (613): 614, listed.
+    // The same test on main 32f85d391 (613): 614.
+    // The same test on main dc85ec16a (663): 681, listed.
     ("test.cli_on_host", 681),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5858,9 +5864,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (3034): 3169, listed.
     // And the same ten idle-poller deadlock units: 2748.
     // And the same TraceReplay-grant unit: 2749.
-    // The same eleven units: 2825, listed.
     // The same eleven units: 2825.
     // The same eleven units on main 32f85d391 (2889): 2900, listed.
+    // The same eleven units on main 32f85d391 (2889): 2900.
+    // The same eleven units on main dc85ec16a (3043): 3180, listed.
     ("test.detcore_unit_on_host", 3180),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5981,7 +5988,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // `cargo nextest list --profile ci` (the local shards' 61 + 290 + 349).
     // Recount at 360e99b2e24: shard 2 grew to 292 (see its pin), so the
     // whole-node twin executes 61 + 292 + 349 = 702.
-    // And scheduler_deadlock's poll-deadlock report: 695.
+    // And scheduler_deadlock's poll-deadlock report: 703, listed.
     ("test.hermit_integration_on_host", 703),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode
