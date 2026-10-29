@@ -1319,7 +1319,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And host_input::tests::a_flattened_identity_does_not_clash_with_a_records_own_content
     // (the snapshot hash's JSON key is not a record's own `content`): 2005,
     // listed.
-    ("test.regular_crates", 2005),
+    // And detcore-model's stacktrace_at_schedule_positions_never_enters_the_legacy_form and
+    // stacktrace_at_schedule_positions_needs_a_replayed_schedule_and_round_trips
+    // (https://github.com/rrnewton/hermit/issues/4917): 2007.
+    ("test.regular_crates", 2007),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2210,7 +2213,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and run::run_takes_a_replayed_records_seeds_as_main_does (every launch
     // takes a replayed record's seeds): 1547.
     // And analyze::phases::tests::analyze_trials_take_the_targets_scheduler_seed_and_endpoints_their_own: 1548.
-    ("test.hermit_unit", 1548),
+    // And analyze::phases' a_prefix_stack_trial_requests_its_stack_by_schedule_position
+    // (https://github.com/rrnewton/hermit/issues/4917): 1549.
+    ("test.hermit_unit", 1549),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3713,7 +3718,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_prefix_keeps_the_scheduler_seed, for main's prefix
     // records: 3573.
     // And record_serde::tests::the_scheduler_seed_round_trips_through_the_record_serde: 3574.
-    ("test.detcore_unit", 3574),
+    // And https://github.com/rrnewton/hermit/issues/4917's four schedule-position stack units
+    // (two replayer::tests, two scheduler::test): 3578.
+    ("test.detcore_unit", 3578),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5113,7 +5120,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And implicit_binds_take_the_same_ports_on_every_run: 763 + 1 = 790.
     // And no_namespace_bisect_replays_the_schedules_it_writes: 745 + 1 = 746.
     // And no_namespace_minimize_replays_its_candidate_records: 746 + 1 = 792.
-    ("test.cli", 792),
+    // And a_prefix_stack_prints_at_its_schedule_position_whatever_the_retries
+    // (https://github.com/rrnewton/hermit/issues/4917): 793.
+    ("test.cli", 793),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5742,7 +5751,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // LiteInst guest: 682 + 1 = 709.
     // And the same --no-namespace bisect test, not excluded: 664 + 1 = 665.
     // And the same --minimize test, not excluded: 665 + 1 = 711.
-    ("test.cli_on_host", 711),
+    // And the same schedule-position stack test, not excluded: 712.
+    ("test.cli_on_host", 712),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5775,7 +5785,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1989.
     // And this change's tests, as at this node's second entry below: 1990.
     // And this change's tests, as at this node's second entry below: 1991.
-    ("test.regular_crates_on_host", 1991),
+    // And the cases added since, as this twin's entry further down counts: 1993.
+    ("test.regular_crates_on_host", 1993),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6380,7 +6391,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same recorded scheduler-seed unit: 3572, listed.
     // And the same prefix scheduler-seed unit: 3573.
     // And the same record-serde round trip: 3574.
-    ("test.detcore_unit_on_host", 3574),
+    // And the same four schedule-position stack units of
+    // https://github.com/rrnewton/hermit/issues/4917: 3578.
+    ("test.detcore_unit_on_host", 3578),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6838,7 +6851,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same recorded-seeds replay test: 1539, listed.
     // And the same two replayed-seed tests: 1541.
     // And the same trial scheduler-seed test: 1542.
-    ("test.hermit_unit_on_host", 1542),
+    // And the same prefix stack trial unit of
+    // https://github.com/rrnewton/hermit/issues/4917: 1543.
+    ("test.hermit_unit_on_host", 1543),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -7109,7 +7124,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same flattened-identity unit: 1991.
     // Six regular-crate tests the pin missed, as cargo nextest list counts
     // the cell at this head: 1921.
-    ("test.regular_crates_on_host", 1991),
+    // And the same two detcore-model units of
+    // https://github.com/rrnewton/hermit/issues/4917: 1993.
+    ("test.regular_crates_on_host", 1993),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
