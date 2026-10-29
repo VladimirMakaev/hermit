@@ -3414,7 +3414,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // armed thread, replay transitions) and preemptions'
     // the_post_crash_switch_round_trips_and_a_replay_takes_the_recorded_bound:
     // 3460, listed.
-    ("test.detcore_unit", 3460),
+    // And a_schedule_prefix_keeps_the_post_crash_bound_and_the_switches_only_for_the_whole_schedule,
+    // for main's prefix records: 3461.
+    ("test.detcore_unit", 3461),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5992,7 +5994,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three transformed-record units: 3444.
     // And the same interpolated-record unit: 3445.
     // And the same fifteen post-crash units: 3460, listed.
-    ("test.detcore_unit_on_host", 3460),
+    // And the same prefix-record unit: 3461.
+    ("test.detcore_unit_on_host", 3461),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
