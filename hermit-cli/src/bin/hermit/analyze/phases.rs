@@ -4661,7 +4661,7 @@ mod tests {
                 &schedule,
                 0,
                 (&schedule, None),
-                ([None, None], None),
+                ([None, None], None, None),
                 &[],
                 None,
             );
