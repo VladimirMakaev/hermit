@@ -1267,6 +1267,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (PR 4892): 1891 + 1 = 1892 on main 2033f299f.
     // The same unit on main 16a66895f (1906): 1907, listed.
     // The same unit on main 16a66895f, and on main 32f85d391 (1906): 1907, listed.
+    // The same unit on main 16a66895f, and on main 32f85d391 (1906): 1907.
+    // The same unit on main dc85ec16a (1929): 1963, listed.
     ("test.regular_crates", 1963),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -1978,6 +1980,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (PR 4892): 1169 + 1 = 1170 on main 2033f299f.
     // The same unit on main 16a66895f (1202): 1203, listed.
     // The same unit on main 16a66895f, and on main 32f85d391 (1202): 1203, listed.
+    // The same unit on main 16a66895f, and on main 32f85d391 (1202): 1203.
+    // The same unit on main dc85ec16a (1289): 1304, listed.
     ("test.hermit_unit", 1304),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3402,10 +3406,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 2770 on main 2033f299f.
     // The same eighteen units on #4692's rebased head on main 0e7fd4bdc: 2843.
     // The same eighteen units on #4692's rebased head on main 16a66895f
-    // (2882): 2900, listed.
-    // The same eighteen units on #4692's rebased head on main 16a66895f: 2900.
+    // (2882): 2900.
     // The same eighteen units on #4692's rebased head on main 32f85d391
     // (2900): 2918, listed.
+    // (2900): 2918.
+    // The same eighteen units on #4692's rebased head on main dc85ec16a
+    // (3054): 3072, listed.
     ("test.detcore_unit", 3199),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5960,6 +5966,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same eighteen units on main 16a66895f (2882): 2900, listed.
     // The same eighteen units on main 16a66895f: 2900.
     // The same eighteen units on main 32f85d391 (2900): 2918, listed.
+    // The same eighteen units on main 16a66895f (2882): 2900.
+    // The same eighteen units on main 32f85d391 (2900): 2918.
+    // The same eighteen units on main dc85ec16a (3054): 3072, listed.
     ("test.detcore_unit_on_host", 3199),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6367,6 +6376,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same thread-exit ordering unit: 1164 on main 2033f299f.
     // The same unit on main 16a66895f (1196): 1197, listed.
     // The same unit on main 16a66895f, and on main 32f85d391 (1196): 1197, listed.
+    // The same unit on main 16a66895f, and on main 32f85d391 (1196): 1197.
+    // The same unit on main dc85ec16a (1283): 1298, listed.
     ("test.hermit_unit_on_host", 1298),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6621,6 +6632,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 2033f299f.
     // The same unit on main 16a66895f (1892): 1893, listed.
     // The same unit on main 16a66895f, and on main 32f85d391 (1892): 1893, listed.
+    // The same unit on main 16a66895f, and on main 32f85d391 (1892): 1893.
+    // The same unit on main dc85ec16a (1915): 1949, listed.
     ("test.regular_crates_on_host", 1949),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
