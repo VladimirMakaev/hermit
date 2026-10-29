@@ -6418,7 +6418,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same overlay legacy-form unit: 1927.
     // And the same desync-notes round-trip unit: 1928.
     // And the same binder-count summary test: 1929, listed.
-    ("test.regular_crates_on_host", 1929),
+    // And the same summary-JSON unit as test.regular_crates (#4878): 1930.
+    ("test.regular_crates_on_host", 1930),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
