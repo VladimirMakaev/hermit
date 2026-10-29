@@ -3412,7 +3412,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (2900): 2918.
     // The same eighteen units on #4692's rebased head on main dc85ec16a
     // (3054): 3072, listed.
-    ("test.detcore_unit", 3199),
+    // (3054): 3072.
+    // And scheduler::test::a_fatal_delivery_noted_for_the_count_alone_dooms_no_thread:
+    // 3073.
+    // The same nineteen units on #4692's head with its receipt unit (3055):
+    // 3200, listed.
+    ("test.detcore_unit", 3200),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5969,7 +5974,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same eighteen units on main 16a66895f (2882): 2900.
     // The same eighteen units on main 32f85d391 (2900): 2918.
     // The same eighteen units on main dc85ec16a (3054): 3072, listed.
-    ("test.detcore_unit_on_host", 3199),
+    // The same eighteen units on main dc85ec16a (3054): 3072.
+    // And the same count-only fatal-delivery unit: 3073.
+    // The same nineteen units on #4692's head with its receipt unit (3055):
+    // 3200, listed.
+    ("test.detcore_unit_on_host", 3200),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
