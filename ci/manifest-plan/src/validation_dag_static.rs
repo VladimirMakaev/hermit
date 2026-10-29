@@ -3544,7 +3544,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_cpu_clock_names_only_tasks_linux_still_has): 3247, listed.
     // And cpu_clock::handler_tests'
     // timer_settime_on_a_timer_whose_thread_exited_is_esrch: 3569, listed.
-    ("test.detcore_unit", 3569),
+    // And syscalls::helpers::kernel_signal_wait_failures::
+    // an_error_queue_read_runs_once_only_where_its_protocol_never_waits:
+    // 3570, listed.
+    ("test.detcore_unit", 3570),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6202,7 +6205,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three property snapshot units: 3563.
     // And the same five CPU-clock fix-forward units: 3247, listed.
     // And the same timer_settime ESRCH unit: 3569, listed.
-    ("test.detcore_unit_on_host", 3569),
+    // And the same error-queue decision unit: 3570, listed.
+    ("test.detcore_unit_on_host", 3570),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
