@@ -184,7 +184,9 @@ mod tests {
         (28, "b018ce6ee3d10754", "f013e36743d8d9e6"),
         // Retypes `GlobalRequest::TraceSchedEvent`; adds `GlobalResponse::WithWatchOrder` (#4796).
         (29, "a99611decbff6728", "f013e36743d8d9e6"),
-        // Adds `GlobalRequest::TakeSleepInterruption` and its response.
+        // Adds `GlobalRequest::TakeSleepInterruption` and its response, and
+        // `ObservationFinish::InterruptForCaught`'s `dequeue`, which the
+        // digest does not cover (https://github.com/rrnewton/hermit/issues/4931).
         (21, "a26a19716aa915db", "f013e36743d8d9e6"),
     ];
 

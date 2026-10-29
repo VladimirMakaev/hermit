@@ -3514,7 +3514,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and scheduler::boundary_controller::tests::
     // consuming_the_last_boundary_record_stops_the_spread: 3533.
     // And the #4931 fix's queued-arm timed-signal unit: 3295 + 1 = 3534.
-    ("test.detcore_unit", 3534),
+    // And its round-1 units (gate, filing, controlled observation): 3296 + 3 = 3537.
+    ("test.detcore_unit", 3537),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6151,7 +6152,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same raw-record unit: 3531.
     // And the same two spread transition tests: 3533.
     // And the #4931 fix's queued-arm timed-signal unit: 3295 + 1 = 3534.
-    ("test.detcore_unit_on_host", 3534),
+    // And its round-1 units (gate, filing, controlled observation): 3296 + 3 = 3537.
+    ("test.detcore_unit_on_host", 3537),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
