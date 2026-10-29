@@ -611,6 +611,7 @@ impl PreemptionRecord {
             rewrite_exclusives_in_memory,
             rejoins,
             background_starts,
+            segment_store_exclusives: _,
         } = self;
         let followed = len < global.len();
         let global = global[..len.min(global.len())].to_vec();
@@ -706,6 +707,8 @@ impl PreemptionRecord {
             } else {
                 background_starts.clone()
             },
+            // Likewise what this run's host observed of its segments.
+            segment_store_exclusives: HostObservedFlag::default(),
         }
     }
 
@@ -4215,6 +4218,26 @@ mod tests {
             assert_eq!(
                 record.schedule_prefix(len).uncapped_slices(),
                 Some(9_400_000),
+                "prefix of {len} events"
+            );
+        }
+    }
+
+    /// Whether the run's segments saw failed store-exclusives is what its host
+    /// observed, as the failure count is, not part of the preemptions: a
+    /// prefix record carries neither, for any length.
+    #[test]
+    fn a_schedule_prefix_leaves_out_the_hosts_store_exclusive_segment_flag() {
+        let tid = DetTid::from_raw(3);
+        let mut record = PreemptionRecord::from_sched_events(vec![
+            SchedEvent::branches(tid, 10),
+            SchedEvent::branches(tid, 20),
+        ]);
+        record.segment_store_exclusives = HostObservedFlag(true);
+        assert!(record.segment_store_exclusives());
+        for len in [0, 1, 2, 9] {
+            assert!(
+                !record.schedule_prefix(len).segment_store_exclusives(),
                 "prefix of {len} events"
             );
         }

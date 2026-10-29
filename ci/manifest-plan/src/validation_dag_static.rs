@@ -3388,7 +3388,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // two_events_reported_by_both_sites_count_two_events): 3436, listed.
     // And this change's counter-read tests: 3438.
     // And this change's Detcore unit test: 3439.
-    ("test.detcore_unit", 3439),
+    // And a_schedule_prefix_leaves_out_the_hosts_store_exclusive_segment_flag,
+    // for main's prefix records: 3440.
+    ("test.detcore_unit", 3440),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5950,7 +5952,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same nine skid-overshoot event units: 3436, listed.
     // And the same tests: 3438.
     // And the same test: 3439.
-    ("test.detcore_unit_on_host", 3439),
+    // And the same prefix-record unit: 3440.
+    ("test.detcore_unit_on_host", 3440),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
