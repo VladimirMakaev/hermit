@@ -5935,6 +5935,7 @@ mod tests {
                     schedule: PreemptionRecord::from_sched_events(events.clone()),
                     decision: 1,
                     continuation: None,
+                    fallback: None,
                 },
                 |runname, _, prefix, position, _| {
                     stacks += 1;
