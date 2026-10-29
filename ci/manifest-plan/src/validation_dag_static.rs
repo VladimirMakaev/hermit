@@ -1264,6 +1264,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR 4753 adds hermit-record-format's readlinkat_is_recorded_and_replayed_on_every_architecture: 1929 + 1 = 1962.
     // And detcore-model's thread_exit_ordering_round_trips_and_defaults_to_false
     // (PR 4892): 1891 + 1 = 1892, listed.
+    // (PR 4892): 1891 + 1 = 1892 on main 2033f299f.
+    // The same unit on main 16a66895f (1906): 1907, listed.
     ("test.regular_crates", 1963),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -1972,6 +1974,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // verify divergence names its store-exclusive retries): 1303.
     // And only_ptrace_e9patch_and_dbt_state_that_thread_exits_finish_first
     // (PR 4892): 1169 + 1 = 1170, listed.
+    // (PR 4892): 1169 + 1 = 1170 on main 2033f299f.
+    // The same unit on main 16a66895f (1202): 1203, listed.
     ("test.hermit_unit", 1304),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3393,9 +3397,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_fatal_delivery_records_its_doom_outside_record_replay:
     // 2766 + 3 = 2769.
     // And io_buffers' a_retry_loop_judges_guest_held_provenance_before_every_attempt:
-    // 2770, listed.
     // 2770 on main 2033f299f.
     // The same eighteen units on #4692's rebased head (2825): 2843, listed.
+    // The same eighteen units on #4692's rebased head on main 0e7fd4bdc: 2843.
+    // The same eighteen units on #4692's rebased head on main 16a66895f
+    // (2882): 2900, listed.
     ("test.detcore_unit", 3199),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5945,9 +5951,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two units for which polling retries count: 2763.
     // And the same three provenance, merge and doom units: 2766.
     // And the same three filing-time doom and fatal-delivery units: 2769.
-    // And the same retry-loop provenance unit: 2770, listed.
     // And the same retry-loop provenance unit: 2770 on main 2033f299f.
     // The same eighteen units on #4692's rebased head (2825): 2843, listed.
+    // The same eighteen units on #4692's rebased head on main 0e7fd4bdc: 2843.
+    // The same eighteen units on main 16a66895f (2882): 2900, listed.
     ("test.detcore_unit_on_host", 3199),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6352,6 +6359,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same unit tests as test.hermit_unit: 1293.
     // And the same four store-exclusive cause units: 1297.
     // And the same thread-exit ordering unit: 1164, listed.
+    // And the same thread-exit ordering unit: 1164 on main 2033f299f.
+    // The same unit on main 16a66895f (1196): 1197, listed.
     ("test.hermit_unit_on_host", 1298),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6602,6 +6611,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four recorder ending units: 1947.
     // PR 4753: the same one added case: 1915 + 1 = 1948.
     // And the same detcore-model thread-exit ordering unit: 1878, listed.
+    // And the same detcore-model thread-exit ordering unit: 1878 on main
+    // 2033f299f.
+    // The same unit on main 16a66895f (1892): 1893, listed.
     ("test.regular_crates_on_host", 1949),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
