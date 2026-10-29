@@ -2246,6 +2246,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_refusal_refused_again_or_deterministic_ends_the_search_with_a_partial_report,
     // a_refused_search_round_or_minimize_replay_is_never_an_end,
     // a_refused_recheck_is_noted_in_the_report}: 1577.
+    // a_refusal_refused_again_or_deterministic_ends_the_analysis,
+    // a_refused_search_round_or_minimize_replay_ends_the_analysis,
+    // a_refused_recheck_ends_the_analysis}: 1577.
     ("test.hermit_unit", 1577),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
