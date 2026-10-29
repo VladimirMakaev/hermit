@@ -2193,6 +2193,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a search started from an observed interval): 1534.
     // And phases::tests::a_budget_hit_after_the_decision_reports_it: 1535.
     // And phases::tests::a_trial_budget_that_ends_at_the_stack_trace_runs_reports_the_decision: 1536.
+    // And phases::tests::a_budget_hit_during_the_final_replays_reports_no_decision: 1284.
+    // And phases::tests::a_trial_budget_that_ends_at_the_final_replays_reports_no_decision: 1536.
     ("test.hermit_unit", 1536),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
