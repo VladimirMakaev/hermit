@@ -5397,7 +5397,7 @@ mod tests {
         // `replay_edited_preemptions` and `strict_schedule_boundaries` none: fourteen more keys and
         // forty-nine fewer, so thirty-five keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 34);
+        assert_eq!(fields.len(), keys.len() + 37);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:

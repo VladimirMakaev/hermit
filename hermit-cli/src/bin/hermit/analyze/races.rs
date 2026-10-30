@@ -6,7 +6,10 @@
  * LICENSE file in the root directory of this source tree.
  */
 
-//! Names the two conflicting operations whose order decides the outcome.
+//! Names the conflicting operations whose order differs, around the deciding
+//! event, between a run that meets the target and one that does not. It
+//! shows what differs, not what decides: only a replay with an order
+//! reversed (the report's check by intervention) shows that one decides.
 //!
 //! Analyze finds the scheduling decision (event S) after which the guest
 //! meets its target, and replays the schedule with it (the target) and
@@ -128,9 +131,19 @@ pub enum RaceStatus {
     /// No conflicting pair; two timed waits or clock reads whose return
     /// order flips.
     Timing,
-    /// Several pairs or timed calls whose order changes, none of which the
-    /// evidence singles out; `candidates` ranks them.
+    /// Several pairs, changes of course or timed calls, none of which the
+    /// evidence singles out; `candidates` ranks them. A rank orders kinds of
+    /// evidence and is not a verdict: a candidate is shown to decide the
+    /// outcome only by its `check` (`decides`), and exactly one such makes
+    /// the status `found_by_intervention`.
     Candidates,
+    /// Candidates, of which exactly one decides by intervention: a replay
+    /// with that one's turn order reversed (its check says which events
+    /// moved, and which threads' events they crossed) changes whether the
+    /// run meets the target, while the unedited control replay does not.
+    /// `accesses` are that candidate's. The two runs did not show it as a
+    /// race of their own.
+    FoundByIntervention,
     /// The traces cover the window and hold neither kind of pair.
     NoneFound,
     /// The traces cannot answer.
@@ -326,7 +339,9 @@ pub struct ReorderedPair {
     pub accesses: [RacingAccess; 2],
 }
 
-/// One ranked entry of a `candidates` result.
+/// One ranked entry of a `candidates` result: what differs between the runs
+/// at one pair of calls. Its rank is the finder's order of kinds of
+/// evidence, not a finding that it decides; only its `check` can show that.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct RaceCandidate {
     /// The resource the two accesses conflict on; `None` for two timed
@@ -335,7 +350,13 @@ pub struct RaceCandidate {
     pub resource: Option<ResourceText>,
     /// The two accesses, in target order.
     pub accesses: [RacingAccess; 2],
-    /// Their order in each run.
+    /// Their order in each run. For a change of course against the deciding
+    /// event, the baseline order is measured against the changed call's
+    /// counterpart there (the same thread's call of the same number), and
+    /// can be the same as the target's: that pair is listed for the change,
+    /// not for a flip. Without a counterpart the changed call sorts last in
+    /// the baseline, as any absent call does, and the evidence says no order
+    /// is measured there.
     pub order: RaceOrder,
     /// Whether the access the order is measured against (the victim, or the
     /// call whose time or course changed) happens before the outcome in the
@@ -344,9 +365,101 @@ pub struct RaceCandidate {
     /// Events from that access to the outcome in the target.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub events_before_outcome: Option<u64>,
-    /// The evidence, in a sentence: which threads, what flipped, the
-    /// distance to the outcome and the happens-before relation.
+    /// The evidence, in a sentence: which threads, what differs (an order
+    /// that flips, or a change of course whose order with the deciding event
+    /// stays the same), why it is listed, the distance to the outcome and
+    /// the happens-before relation. It says nothing of whether the pair
+    /// decides; `check` does.
     pub evidence: String,
+    /// What a replay with this candidate's order reversed showed, when the
+    /// report checked it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub check: Option<CandidateCheck>,
+}
+
+/// What reversing one candidate's order showed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckVerdict {
+    /// The reversed replay changed whether the run meets the target, and the
+    /// unedited control did not.
+    Decides,
+    /// The reversed replay ended as the run it edits did.
+    DoesNotDecide,
+    /// The replay could not follow the edited schedule (a moved event
+    /// needed one that now comes after it), so it shows nothing.
+    NotRealized,
+    /// No replay answered: there was nothing to move, or it did not finish.
+    NotChecked,
+}
+
+/// A check by intervention of one candidate: the edit, the replay and what
+/// it showed.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CandidateCheck {
+    pub verdict: CheckVerdict,
+    /// The run whose realized schedule was edited, `target` or `baseline`.
+    pub edited: String,
+    /// The edit: `moving 7 events of thread 53 before thread 21's turn at
+    /// #39925, crossing thread 3 (2 events)`.
+    pub edit: String,
+    /// What the edit moved, when it made one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub moved: Option<MovedEvents>,
+    /// The replay's name in the workspace (its reproducer is
+    /// `<trial>.repro`), when one ran.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trial: Option<String>,
+    /// What the replay did, or why none answered.
+    pub detail: String,
+}
+
+/// The events a check's edit moved: one thread's, past the other thread's
+/// turn, and the events of other threads they crossed on the way.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct MovedEvents {
+    /// The thread whose events moved.
+    pub thread: DetTid,
+    /// How many of its events moved.
+    pub events: usize,
+    /// `before` the other thread's turn (they now run earlier) or `after`
+    /// it (they are held back).
+    pub direction: String,
+    /// The event of the other access, whose turn they now precede or follow.
+    pub past_event: EventIndex,
+    /// The threads other than the pair whose events they crossed, with how
+    /// many of each; empty when they crossed only the other thread's.
+    pub crossed: Vec<CrossedThread>,
+}
+
+/// One thread's events that a check's edit moved others across.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct CrossedThread {
+    pub thread: DetTid,
+    pub events: usize,
+}
+
+impl CandidateCheck {
+    /// `decides: reversing this turn order (moving 7 events of thread 53
+    /// before thread 21's turn at #39925, crossing thread 3 (2 events)) in
+    /// the target run misses the target; the unedited control meets it
+    /// (racing_candidate_1.repro)`.
+    pub fn sentence(&self) -> String {
+        let verdict = match self.verdict {
+            CheckVerdict::Decides => "decides",
+            CheckVerdict::DoesNotDecide => "does not decide",
+            CheckVerdict::NotRealized => "not realized",
+            CheckVerdict::NotChecked => "not checked",
+        };
+        let trial = self
+            .trial
+            .as_ref()
+            .map_or(String::new(), |t| format!(" ({t}.repro)"));
+        format!(
+            "{verdict}: reversing this turn order ({}) in the {} run {}{trial}",
+            self.edit, self.edited, self.detail
+        )
+    }
 }
 
 /// At most this many candidates are listed.
@@ -2433,28 +2546,63 @@ impl<'a> Finder<'a> {
         let toward = self.toward_outcome(victim, outcome);
         let unordered = hb_ends(sides.map(|s| Some((s.op.target, s.at))), false)
             .map(|(from, to)| happens_before(&self.target.edges, from, to));
+        // The pair's baseline order, measured against the changed call's
+        // counterpart (the same thread's call of the same number, at its
+        // entry); none is claimed when it or the deciding call has none.
+        let counterpart = change.side.op.baseline;
+        let measured = match (counterpart, deciding.op.baseline) {
+            (Some(b), Some(_)) => {
+                let measured_change = Side {
+                    op: Op {
+                        target: change.side.op.target,
+                        baseline: Some(b),
+                    },
+                    at: AccessPoint::Entry,
+                };
+                let measured_sides = if deciding.target_key() < changed.target_key() {
+                    [deciding, measured_change]
+                } else {
+                    [measured_change, deciding]
+                };
+                Ok((self.order_of(measured_sides), b.pre))
+            }
+            (None, _) => Err("the changed call"),
+            (Some(_), None) => Err("the deciding call"),
+        };
+        let order = match &measured {
+            Ok((order, _)) => order.clone(),
+            Err(_) => self.order_of(sides),
+        };
         let evidence = format!(
-            "{}; it takes its data from {} (#{}), and {}; the deciding event {} runs {}; {}; no \
-             access Hermit sees changes order around that change, so what decides may be an \
-             order in memory that syscalls do not show; {}",
+            "{}; it takes its data from {} (#{}), and {}; the deciding event {} runs {}; {}; it \
+             is listed for that change, ahead of order flips, and no access Hermit sees changes \
+             order around it, so what decides may be an order in memory that syscalls do not \
+             show; {}",
             describe(victim.op.target, victim.op.baseline),
             who(partner.op.target),
             partner.op.target.pre,
             change.text(),
             self.decision,
             who(deciding.op.target),
-            pair_hb_clause(unordered.as_ref()),
+            change_order_clause(
+                measured
+                    .as_ref()
+                    .map(|(order, at)| (order, *at))
+                    .map_err(|who| *who),
+                unordered.as_ref()
+            ),
             outcome_clause(who(victim.op.target), toward.as_ref())
         );
         Some((
             tid,
             RaceCandidate {
                 resource: None,
-                order: self.order_of(sides),
+                order,
                 accesses: sides.map(|side| self.access_of(side)),
                 reaches_outcome: toward.as_ref().is_some_and(|(v, _)| v.ordered),
                 events_before_outcome: toward.map(|(_, d)| d),
                 evidence,
+                check: None,
             },
         ))
     }
@@ -2523,6 +2671,7 @@ impl<'a> Finder<'a> {
             reaches_outcome: toward.as_ref().is_some_and(|(v, _)| v.ordered),
             events_before_outcome: toward.map(|(_, d)| d),
             evidence,
+            check: None,
         }
     }
 
@@ -2571,6 +2720,7 @@ impl<'a> Finder<'a> {
             reaches_outcome: toward.as_ref().is_some_and(|(v, _)| v.ordered),
             events_before_outcome: toward.map(|(_, d)| d),
             evidence,
+            check: None,
         }
     }
 
@@ -2616,6 +2766,7 @@ impl<'a> Finder<'a> {
             reaches_outcome: toward.as_ref().is_some_and(|(v, _)| v.ordered),
             events_before_outcome: toward.map(|(_, d)| d),
             evidence,
+            check: None,
         }
     }
 
@@ -2968,6 +3119,59 @@ fn outcome_clause(name: String, toward: Option<&(HbVerdict, u64)>) -> String {
     }
 }
 
+/// How a change of course and the deciding call stand in the two runs, and
+/// what orders them in the target. `measured` is their order with the
+/// baseline side measured at the changed call's counterpart (and where that
+/// counterpart enters), or which of the two has no baseline counterpart, in
+/// which case no baseline order is claimed: `the two run in the same order
+/// in both runs (the changed call's counterpart enters at #112 in the
+/// baseline), ordered in the target by futex wake thread 21 #100 -> thread
+/// 53 #108`.
+fn change_order_clause(
+    measured: Result<(&RaceOrder, EventIndex), &str>,
+    verdict: Option<&HbVerdict>,
+) -> String {
+    let runs = match measured {
+        Ok((order, at)) if order.target == order.baseline => format!(
+            "the two run in the same order in both runs (the changed call's counterpart enters at \
+             #{at} in the baseline)"
+        ),
+        Ok((_, at)) => format!(
+            "the two run in one order in the target and the other in the baseline (the changed \
+             call's counterpart enters at #{at} there)"
+        ),
+        Err(which) => format!(
+            "{which} has no counterpart in the baseline, so the two have no order there to \
+             compare"
+        ),
+    };
+    match verdict {
+        Some(v) if v.ordered => {
+            format!("{runs}; ordered in the target by {}", edge_chain(&v.edges))
+        }
+        Some(_) => format!("{runs}; unordered by the edges Hermit observes in the target"),
+        None => format!("{runs}; one of the two has no target event"),
+    }
+}
+
+/// `futex wake thread 21 #100 -> thread 53 #108, then ...`.
+fn edge_chain(edges: &[HbEdge]) -> String {
+    edges
+        .iter()
+        .map(|e| {
+            format!(
+                "{} thread {} #{} -> thread {} #{}",
+                edge_kind_text(e.kind),
+                e.from.tid,
+                e.from.event,
+                e.to.tid,
+                e.to.event
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", then ")
+}
+
 /// Whether edges order the two accesses of a candidate pair in the target.
 fn pair_hb_clause(verdict: Option<&HbVerdict>) -> String {
     match verdict {
@@ -3307,18 +3511,26 @@ pub fn render_racing_accesses(r: &RacingAccesses) -> String {
              The order that flips is the return order of two timed calls:",
             r.decision
         )),
+        RaceStatus::FoundByIntervention => {
+            let resource = r
+                .resource
+                .as_ref()
+                .map_or(String::new(), |x| format!(" ({})", x.text));
+            lines.push(format!(
+                "Racing accesses{resource}, found by intervention, not as an order the two \
+                 runs show: {}.",
+                r.reason
+            ));
+        }
         RaceStatus::Candidates => {
             lines.push(format!("Racing accesses: {}.", r.reason));
             lines.push(
-                "Candidates, ranked (each says what differs between the runs; Hermit cannot \
-                 tell which decides):"
+                "Candidates, ranked (each says what differs between the runs; a rank is not a \
+                 verdict, and a candidate decides only where its check says so):"
                     .to_string(),
             );
-            for (i, c) in r.candidates.iter().enumerate() {
-                lines.push(format!("  {}. {}.", i + 1, c.evidence));
-                let [a, b] = &c.accesses;
-                lines.extend(access_lines([a, b]).into_iter().map(|l| format!("   {l}")));
-            }
+            lines.extend(candidate_lines(r));
+            lines.extend(undecided_lines(r));
             if let Some(o) = &r.outcome {
                 lines.push(format!(
                     "Outcome: {} by thread {} at #{}.",
@@ -3345,16 +3557,7 @@ pub fn render_racing_accesses(r: &RacingAccesses) -> String {
         if let Some(hb) = &r.happens_before {
             lines.push(happens_before_sentence(hb, [first, second]));
         }
-        for access in [first, second] {
-            if let Some(stack) = &access.stack {
-                lines.push(format!(
-                    "{} at {}, the stack at its entry:",
-                    access_name(access),
-                    event_text(access.event)
-                ));
-                lines.push(stack.to_string().trim_end().to_string());
-            }
-        }
+        lines.extend(stack_lines([first, second]));
     }
     if !r.also_reordered.is_empty() {
         lines.push("Also reordered:".to_string());
@@ -3373,8 +3576,172 @@ pub fn render_racing_accesses(r: &RacingAccesses) -> String {
             lines.push(format!("  and {} more", r.more_reordered));
         }
     }
+    if r.status == RaceStatus::FoundByIntervention {
+        lines.push("Candidates checked:".to_string());
+        lines.extend(candidate_lines(r));
+    }
     lines.extend(r.notes.iter().cloned());
     lines.join("\n")
+}
+
+/// Each candidate: its evidence, its accesses, their stacks and its check.
+/// A candidate whose check does not decide says it is not shown to decide,
+/// whatever its rank.
+fn candidate_lines(r: &RacingAccesses) -> Vec<String> {
+    let mut lines = Vec::new();
+    for (i, c) in r.candidates.iter().enumerate() {
+        let decides = c
+            .check
+            .as_ref()
+            .is_some_and(|check| check.verdict == CheckVerdict::Decides);
+        let verdict = if decides { "" } else { "; not shown to decide" };
+        lines.push(format!("  {}. {}{verdict}.", i + 1, c.evidence));
+        let [a, b] = &c.accesses;
+        lines.extend(access_lines([a, b]).into_iter().map(|l| format!("   {l}")));
+        lines.extend(stack_lines([a, b]));
+        if let Some(check) = &c.check {
+            lines.push(format!("   Check: {}.", check.sentence()));
+        }
+    }
+    lines
+}
+
+/// For `candidates` whose checks ran and none of which decides: what that
+/// means, and what to try next. A reversal that ran as edited and left the
+/// outcome as it was clears its candidate, and only as far as one turn
+/// reversal in one run goes; a reversal that could not be replayed as
+/// edited, one never tried because its control did not reproduce the run,
+/// and a candidate not checked at all leave it untested, so the first
+/// sentence keeps them apart. Empty when no check ran or one decides.
+fn undecided_lines(r: &RacingAccesses) -> Vec<String> {
+    let checks: Vec<Option<&CandidateCheck>> =
+        r.candidates.iter().map(|c| c.check.as_ref()).collect();
+    let verdict = |v: CheckVerdict| {
+        checks
+            .iter()
+            .filter(|c| c.is_some_and(|c| c.verdict == v))
+            .count()
+    };
+    if r.status != RaceStatus::Candidates
+        || checks.iter().all(Option::is_none)
+        || verdict(CheckVerdict::Decides) > 0
+    {
+        return Vec::new();
+    }
+    let n = checks.len();
+    let ran = verdict(CheckVerdict::DoesNotDecide);
+    let not_realized = verdict(CheckVerdict::NotRealized);
+    // A check whose control did not reproduce the run names the control as
+    // its trial: its reversal was never tried.
+    let control_failed = checks
+        .iter()
+        .flatten()
+        .filter(|c| {
+            c.verdict == CheckVerdict::NotChecked
+                && c.trial.as_ref().is_some_and(|t| t.ends_with("_control"))
+        })
+        .count();
+    let not_checked = n - ran - not_realized - control_failed;
+    let plural = |count: usize| if count == 1 { "" } else { "s" };
+    let mut untested = Vec::new();
+    if not_realized > 0 {
+        untested.push(format!(
+            "{not_realized} reversal{} could not be replayed as edited",
+            plural(not_realized)
+        ));
+    }
+    if control_failed > 0 {
+        untested.push(format!(
+            "for {control_failed} the control did not reproduce the run, so {} reversal{} {} not \
+             tried",
+            if control_failed == 1 { "its" } else { "their" },
+            plural(control_failed),
+            if control_failed == 1 { "was" } else { "were" }
+        ));
+    }
+    if not_checked > 0 {
+        untested.push(format!(
+            "{not_checked} {} not checked",
+            if not_checked == 1 { "was" } else { "were" }
+        ));
+    }
+    let untested = untested.join("; ");
+    let head = format!(
+        "None of the {n} candidate{} was shown to decide",
+        if n == 1 { "" } else { "s" }
+    );
+    let summary = if ran == n {
+        format!(
+            "{head}: {} ran as edited and left the outcome as it was, so the outcome probably \
+             does not turn on any one of these candidates' orders alone (each check reverses one \
+             turn order in one run); it may turn on an order not ranked here, an order in memory \
+             that syscalls do not show, one outside the trace, or several together.",
+            if n == 1 {
+                "its reversal".to_string()
+            } else {
+                format!("all {n} reversals")
+            }
+        )
+    } else if ran == 0 {
+        format!(
+            "{head}, and none was tested: {untested}; the deciding interaction may be among them \
+             or elsewhere."
+        )
+    } else {
+        let rest = n - ran;
+        format!(
+            "{head}: {ran} reversal{} ran as edited and left the outcome as it was; of the other \
+             {rest}, {untested}; so {} untested, not cleared, and the deciding interaction may \
+             be among {} or elsewhere.",
+            plural(ran),
+            if rest == 1 {
+                "that one is"
+            } else {
+                "those are"
+            },
+            if rest == 1 { "it" } else { "them" }
+        )
+    };
+    let mut next = vec![
+        "rerun with --minimize if the analysis did not use it, so fewer chaos interventions \
+         surround the deciding event"
+            .to_string(),
+    ];
+    if r.truncated {
+        next.push(
+            "a wider --race-window, since a trace was cut short before the window ended"
+                .to_string(),
+        );
+    }
+    let unrealized: Vec<String> = checks
+        .iter()
+        .flatten()
+        .filter(|c| c.verdict == CheckVerdict::NotRealized)
+        .filter_map(|c| c.trial.as_ref().map(|t| format!("{t}.repro")))
+        .collect();
+    if !unrealized.is_empty() {
+        next.push(format!(
+            "the unrealized checks' replays ({} in the workspace) show where each left its edit",
+            unrealized.join(", ")
+        ));
+    }
+    vec![summary, format!("To look further: {}.", next.join("; "))]
+}
+
+/// Each access's stack at its entry, when the report took it.
+fn stack_lines(accesses: [&RacingAccess; 2]) -> Vec<String> {
+    let mut lines = Vec::new();
+    for access in accesses {
+        if let Some(stack) = &access.stack {
+            lines.push(format!(
+                "{} at {}, the stack at its entry:",
+                access_name(access),
+                event_text(access.event)
+            ));
+            lines.push(stack.to_string().trim_end().to_string());
+        }
+    }
+    lines
 }
 
 /// `thread 9's close`.
@@ -3521,23 +3888,7 @@ fn happens_before_sentence(hb: &HappensBefore, accesses: [&RacingAccess; 2]) -> 
     let text = |v: &Option<HbVerdict>| match v {
         None => "not applicable: one of the accesses has no event there".to_string(),
         Some(v) if !v.ordered => unordered.to_string(),
-        Some(v) => {
-            let chain: Vec<String> = v
-                .edges
-                .iter()
-                .map(|e| {
-                    format!(
-                        "{} thread {} #{} -> thread {} #{}",
-                        edge_kind_text(e.kind),
-                        e.from.tid,
-                        e.from.event,
-                        e.to.tid,
-                        e.to.event
-                    )
-                })
-                .collect();
-            format!("ordered by {}", chain.join(", then "))
-        }
+        Some(v) => format!("ordered by {}", edge_chain(&v.edges)),
     };
     let caveat = if is_unordered(&hb.target) || is_unordered(&hb.baseline) {
         format!(" {INVISIBLE_SYNC_CAVEAT}")
@@ -4892,15 +5243,81 @@ mod tests {
             "{}",
             candidate.evidence
         );
+        // Its order does not flip, measured against the changed call's
+        // counterpart in the baseline (#112, after the deciding event), and
+        // it says so, and why it is listed.
+        assert_eq!(candidate.order.baseline, candidate.order.target);
+        assert!(
+            candidate.evidence.contains(
+                "; the two run in the same order in both runs (the changed call's counterpart \
+                 enters at #112 in the baseline); "
+            ) && candidate
+                .evidence
+                .contains("; it is listed for that change, ahead of order flips, "),
+            "{}",
+            candidate.evidence
+        );
         let text = render_racing_accesses(&r);
         assert!(
-            text.contains("Candidates, ranked (each says what differs between the runs; Hermit cannot tell which decides):\n  1. thread 3's read"),
+            text.contains("Candidates, ranked (each says what differs between the runs; a rank is not a verdict, and a candidate decides only where its check says so):\n  1. thread 3's read"),
+            "{text}"
+        );
+        // Ranked first, it is still not shown to decide.
+        assert!(
+            text.contains("reaches it through program order; not shown to decide.\n"),
             "{text}"
         );
         let json = serde_json::to_value(&r).unwrap();
         assert_eq!(json["status"], "candidates");
         assert_eq!(json["candidates"][0]["accesses"][1]["thread"], 53);
         assert_eq!(json["candidates"][0]["reaches_outcome"], true);
+    }
+
+    /// The baseline order of a change of course is measured at the changed
+    /// call's counterpart, not at the absent event that sorts last: a
+    /// counterpart that enters before the deciding call's event in the
+    /// baseline makes the order opposite, and a change with no counterpart
+    /// claims no order there.
+    #[test]
+    fn a_changed_course_is_ordered_by_its_baseline_counterpart() {
+        // In the baseline the deciding call (thread 21's write) returns only
+        // after the changed call's counterpart (#112) enters.
+        let (target, mut baseline) = fed_by_a_changed_course(false);
+        let deciding = baseline
+            .iter_mut()
+            .find(|sys| sys.tid == t(21) && sys.nth == 40)
+            .unwrap();
+        deciding.post = Some(115);
+        let (target, baseline) = (trace(target), trace(baseline));
+        let r = find_at(&target, &baseline, (3, 140));
+        assert_eq!(r.status, RaceStatus::Candidates, "{}", r.reason);
+        let [candidate] = r.candidates.as_slice() else {
+            panic!("{:?}", r.candidates);
+        };
+        assert_eq!(candidate.order.target, [0, 1]);
+        assert_eq!(candidate.order.baseline, [1, 0]);
+        assert!(
+            candidate.evidence.contains(
+                "; the two run in one order in the target and the other in the baseline (the \
+                 changed call's counterpart enters at #112 there); "
+            ),
+            "{}",
+            candidate.evidence
+        );
+
+        let order = RaceOrder {
+            target: [0, 1],
+            baseline: [0, 1],
+        };
+        assert_eq!(
+            change_order_clause(Err("the changed call"), None),
+            "the changed call has no counterpart in the baseline, so the two have no order there \
+             to compare; one of the two has no target event"
+        );
+        assert!(change_order_clause(Ok((&order, 7)), None).starts_with(
+            "the two run in the same order in both runs (the changed call's counterpart enters at \
+             #7 in the baseline)"
+        ));
     }
 
     #[test]
@@ -6150,6 +6567,88 @@ mod tests {
         assert_eq!(outcome_point(&trace, S, &any_only), None);
     }
 
+    /// When checks ran and none decides, the candidates block says so after
+    /// the list, keeps reversals that ran apart from checks that could not
+    /// replay theirs, and says what to try next; when one decides, or none
+    /// ran, it says nothing of the kind.
+    #[test]
+    fn candidates_none_of_which_decides_say_what_that_means() {
+        let base = fdsan();
+        let [first, second]: [RacingAccess; 2] = base.accesses.clone().try_into().unwrap();
+        let candidate = |verdict: Option<CheckVerdict>, n: usize, control: bool| RaceCandidate {
+            resource: base.resource.clone(),
+            accesses: [first.clone(), second.clone()],
+            order: base.order.clone().unwrap(),
+            reaches_outcome: true,
+            events_before_outcome: Some(10),
+            evidence: format!("evidence {n}"),
+            check: verdict.map(|verdict| CandidateCheck {
+                verdict,
+                edited: "target".to_string(),
+                edit: "moving 1 event of thread 9 before thread 7's turn at #7587, crossing no \
+                       other thread"
+                    .to_string(),
+                moved: None,
+                trial: Some(if control {
+                    format!("racing_candidate_{n}_control")
+                } else {
+                    format!("racing_candidate_{n}")
+                }),
+                detail: "the detail".to_string(),
+            }),
+        };
+        // Each candidate's verdict, and whether its trial was its control
+        // (a not_checked check whose control did not reproduce the run).
+        let with_trials = |verdicts: &[(Option<CheckVerdict>, bool)]| {
+            let mut r = base.clone();
+            r.status = RaceStatus::Candidates;
+            r.accesses = Vec::new();
+            r.candidates = verdicts
+                .iter()
+                .enumerate()
+                .map(|(i, (v, control))| candidate(*v, i + 1, *control))
+                .collect();
+            r
+        };
+        let with = |verdicts: &[Option<CheckVerdict>]| {
+            with_trials(&verdicts.iter().map(|v| (*v, false)).collect::<Vec<_>>())
+        };
+        use CheckVerdict::*;
+
+        let all_ran = render_racing_accesses(&with(&[Some(DoesNotDecide); 3]));
+        assert!(
+            all_ran.contains("\nNone of the 3 candidates was shown to decide: all 3 reversals ran as edited and left the outcome as it was, so the outcome probably does not turn on any one of these candidates' orders alone (each check reverses one turn order in one run); it may turn on an order not ranked here, an order in memory that syscalls do not show, one outside the trace, or several together.\nTo look further: rerun with --minimize if the analysis did not use it, so fewer chaos interventions surround the deciding event.\n"),
+            "{all_ran}"
+        );
+
+        let none_ran = render_racing_accesses(&with_trials(&[
+            (Some(NotRealized), false),
+            (Some(NotRealized), false),
+            (Some(NotChecked), true),
+        ]));
+        assert!(
+            none_ran.contains("\nNone of the 3 candidates was shown to decide, and none was tested: 2 reversals could not be replayed as edited; for 1 the control did not reproduce the run, so its reversal was not tried; the deciding interaction may be among them or elsewhere.\n")
+                && none_ran.contains("; the unrealized checks' replays (racing_candidate_1.repro, racing_candidate_2.repro in the workspace) show where each left its edit.\n"),
+            "{none_ran}"
+        );
+
+        let mut mixed = with(&[Some(DoesNotDecide), Some(NotRealized), None]);
+        mixed.truncated = true;
+        let mixed = render_racing_accesses(&mixed);
+        assert!(
+            mixed.contains("\nNone of the 3 candidates was shown to decide: 1 reversal ran as edited and left the outcome as it was; of the other 2, 1 reversal could not be replayed as edited; 1 was not checked; so those are untested, not cleared, and the deciding interaction may be among them or elsewhere.\n")
+                && mixed.contains("; a wider --race-window, since a trace was cut short before the window ended; "),
+            "{mixed}"
+        );
+
+        // Two that decide stay candidates, and say nothing of the kind.
+        let two = render_racing_accesses(&with(&[Some(Decides), Some(Decides), Some(NotRealized)]));
+        assert!(
+            !two.contains("was shown to decide") && !two.contains("To look further"),
+            "{two}"
+        );
+    }
+
     #[test]
     fn the_block_prints_each_access_stack_and_an_unavailable_reason() {
         let mut r = fdsan();
@@ -6171,6 +6670,31 @@ mod tests {
             !text.contains("thread 7's lseek at #7589, the stack"),
             "{text}"
         );
+
+        // A candidate's accesses print their stacks under its entry too.
+        let mut candidates = r.clone();
+        candidates.status = RaceStatus::Candidates;
+        let [first, second] = std::mem::take(&mut candidates.accesses).try_into().unwrap();
+        candidates.candidates = vec![RaceCandidate {
+            resource: candidates.resource.clone(),
+            accesses: [first, second],
+            order: candidates.order.clone().unwrap(),
+            reaches_outcome: true,
+            events_before_outcome: Some(10),
+            evidence: "the evidence".to_string(),
+            check: None,
+        }];
+        let text = render_racing_accesses(&candidates);
+        assert!(
+            text.contains("  1. the evidence; not shown to decide.\n")
+                && text.contains(
+                    "thread 9's close at #7587, the stack at its entry:\nStack trace for thread 9"
+                ),
+            "{text}"
+        );
+
+        // No check ran: nothing is said about what the checks showed.
+        assert!(!text.contains("was shown to decide"), "{text}");
 
         let gone = RacingAccesses::unavailable(7586, "the target replay records no access trace: backend `kvm` is refused: use --backend=ptrace".to_string());
         assert_eq!(
