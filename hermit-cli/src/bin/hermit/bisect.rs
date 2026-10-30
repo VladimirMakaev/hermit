@@ -207,6 +207,7 @@ impl BisectOpts {
             ("--bad", &self.bad),
         ])?;
         analyzer.adopt_uncapped_slices(&[self.good.as_path(), self.bad.as_path()])?;
+        analyzer.refuse_instruction_offsets(&[("--good", &self.good), ("--bad", &self.bad)])?;
         let (mut good, mut bad) = (good, bad);
         // Analyze's trial outputs omit optional event timestamps. Put these
         // admitted search inputs in that same representation: bisection edits
