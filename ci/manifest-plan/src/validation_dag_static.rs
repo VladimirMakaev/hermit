@@ -4726,7 +4726,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run_timeout_prints_a_partial_summary_naming_the_deadline: 774,
     // listed.
     // And a_schedule_replay_names_a_stdio_kind_changed_since_the_recording: 775.
-    ("test.cli", 775),
+    // And a_verify_run_records_the_stdio_kinds_its_guest_was_given: 776.
+    ("test.cli", 776),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5329,7 +5330,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same --die-on-desync readmission test: 692.
     // And the same partial-summary test, not excluded: 693, listed.
     // And the same stdio-kind replay test: 694.
-    ("test.cli_on_host", 694),
+    // And the same captured-run stdio-kind test: 695.
+    ("test.cli_on_host", 695),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
