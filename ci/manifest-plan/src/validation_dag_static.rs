@@ -3366,6 +3366,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the sixteen port_allocator::tests units and the four
     // syscalls::implicit_bind::tests units for deterministic implicit-bind
     // ports: 2702, listed.
+    // And resumed_kernel_wait_result_maps_only_erestartsys: 2683.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4756,6 +4757,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 641 - 4 = 637, listed.
     // And the four an_untraced_*_runs_as_natively tests: 641.
     // And implicit_binds_take_the_same_ports_on_every_run: 623, listed.
+    // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5359,6 +5361,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four an_untraced_*_runs_as_natively tests: 560.
     // And implicit_binds_take_the_same_ports_on_every_run, which starts no
     // LiteInst guest: 542, listed.
+    // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5883,6 +5886,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same five lone-slice-end units: 2700.
     // And the same three replayer units: 2703.
     // And the same twenty implicit-bind port units: 2702, listed.
+    // And resumed_kernel_wait_result_maps_only_erestartsys: 2683.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
