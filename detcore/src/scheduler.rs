@@ -2207,6 +2207,13 @@ pub struct Scheduler {
     boundary_replayer: Option<boundary_replayer::BoundaryReplayer>,
     boundary_stacktrace_events: std::collections::BTreeMap<usize, Option<PathBuf>>,
 
+    /// The host files the run whose schedule this run replays
+    /// (`Config::replay_schedule_from`) opened, if its recording says. The
+    /// global state compares this run's files against them when the run ends
+    /// (`crate::host_inputs::changes_since`); no scheduling decision reads
+    /// them.
+    pub(crate) recorded_host_inputs: Option<detcore_model::host_input::HostInputSet>,
+
     /// Whether the replayed schedule's priorities were dropped when its
     /// recording ran out (`release_replay_priorities_if_exhausted`).
     replay_priorities_released: bool,
@@ -4259,6 +4266,7 @@ impl Scheduler {
         > = BTreeMap::new();
         let mut boundary_replayer = None;
         let mut boundary_stacktrace_events = BTreeMap::new();
+        let mut recorded_host_inputs = None;
         let (replayer, m_vec) = match &cfg.replay_schedule_from {
             Some(path) => {
                 trace!("Scheduler loading trace from path {}", path.display());
@@ -4268,6 +4276,7 @@ impl Scheduler {
                 recording
                     .require_strict_mode(cfg.strict_schedule_boundaries)
                     .unwrap_or_else(|error| exit_on_scheduler_refusal(&error));
+                recorded_host_inputs = recording.host_inputs().cloned();
                 match recording {
                     Recording::Legacy(record) => {
                         callback_checkpoints = record
@@ -4393,6 +4402,7 @@ impl Scheduler {
             replayer,
             boundary_replayer,
             boundary_stacktrace_events,
+            recorded_host_inputs,
             replay_priorities_released: false,
             recorded_event_count: 0,
             stacktrace_events,
@@ -17218,6 +17228,9 @@ impl Scheduler {
                     syscall_histogram.summary(SyscallObservationScope::Complete),
                 ),
                 adopted_seeds: None,
+                // GlobalState keeps the host-input records.
+                host_inputs: None,
+                host_inputs_changed: Vec::new(),
             },
             info_reprio_descrip,
         ))

@@ -5032,10 +5032,47 @@ impl<T: RecordOrReplay> Detcore<T> {
                     }
                 }
                 if let (true, Some(stat)) = (guest.config().record_host_inputs, &host_stat) {
+                    let identity = detcore_model::host_input::HostFileIdentity::from_stat(stat);
+                    let regular = stat.st_mode & libc::S_IFMT == libc::S_IFREG;
+                    // Where the tool sees the guest's descriptor, the file it
+                    // names, by a `readlink` of it: whether it reached a kernel
+                    // object whatever path the guest spelled, and otherwise,
+                    // for a regular file, where to find it again to hash its
+                    // bytes once the guest's processes have exited
+                    // (`crate::host_inputs::hash_at_end`). The file itself is
+                    // neither opened nor read now: the guest could observe
+                    // that, as an inotify watch on its directory does.
+                    let target = crate::fifo_peer::guest_descriptors_are_visible(
+                        &self.cfg.backend,
+                        guest.thread_state().physical_tid,
+                    )
+                    .then(|| {
+                        crate::util::raw_read_link(&PathBuf::from(format!(
+                            "/proc/{}/fd/{fd}",
+                            guest.tid().as_raw()
+                        )))
+                        .ok()
+                    })
+                    .flatten();
+                    let kernel_object = target.as_deref().is_some_and(|target| {
+                        detcore_model::host_input::is_kernel_object(&target.to_string_lossy())
+                    });
+                    let reopen = target
+                        .filter(|target| {
+                            regular
+                                && !kernel_object
+                                && target.is_absolute()
+                                && !target.to_string_lossy().ends_with(" (deleted)")
+                        })
+                        .map(|target| detcore_model::host_input::HostReopen::new(target, stat));
                     crate::tool_global::record_host_input(
                         guest,
                         observed_path.to_string_lossy().into_owned(),
-                        detcore_model::host_input::HostFileIdentity::from_stat(stat),
+                        identity,
+                        reopen,
+                        false,
+                        kernel_object,
+                        !regular,
                     )
                     .await;
                 }
