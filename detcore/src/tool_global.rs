@@ -2639,6 +2639,13 @@ impl GlobalState {
         summary.host_id_tasks = self.host_id_tasks.load(SeqCst);
         summary.binder_external_calls =
             Some(crate::syscalls::binder::external_calls()).filter(|calls| *calls > 0);
+        summary.property_snapshot = self.cfg.property_snapshot.as_ref().map(|snapshot| {
+            detcore_model::summary::PropertySnapshotSummary {
+                copied_files: snapshot.live_files.len() as u64,
+                uncopied_files: snapshot.uncopied_files.len() as u64,
+                consistent_cut: snapshot.consistent_cut,
+            }
+        });
         //
         // Real time report:
         // N.B.: We don't have a job-level exit hook atm (T76248597), so we use the
@@ -21628,6 +21635,7 @@ mod tests {
             size,
             mtime_sec: 1_700_000_000,
             mtime_nsec: 5,
+            content: None,
         };
         let open = |path: &str, ino: u64, size: i64| HostInputRecord {
             path: path.to_owned(),
@@ -21785,6 +21793,7 @@ mod tests {
             size: 100,
             mtime_sec: 1_700_000_000,
             mtime_nsec: 5,
+            content: None,
         };
         let mut sender_time = DetTime::new(&config);
         sender_time.add_syscall();
