@@ -14451,6 +14451,7 @@ fi
                 skid_overshoots: 0,
                 forwarded_syscalls: None,
                 guest_deadlock: false,
+                virtual_timeout_ns: None,
             };
             fs::write(
                 root.join("record.json"),

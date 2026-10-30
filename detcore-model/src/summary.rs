@@ -238,6 +238,13 @@ pub struct RunSummary {
     /// with. Absent (false) for every other run and in older summaries.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub guest_deadlock: bool,
+
+    /// The run ended because its virtual clock passed `--virtual-timeout`,
+    /// whose bound in virtual nanoseconds this is: the scheduler granted no
+    /// turn past it. Its status is then 124, not one the guest exited with.
+    /// Absent for every other run and in older summaries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub virtual_timeout_ns: Option<u64>,
 }
 
 /// The seeds a schedule replay adopted from its recording: each is `Some`
@@ -339,6 +346,7 @@ impl RunSummary {
             host_inputs_changed: _,
             stdio_changed: _,
             guest_deadlock,
+            virtual_timeout_ns,
         } = self;
         writeln!(f, "Final thread-tree was: {}", threads_descrip)?;
         writeln!(
@@ -353,6 +361,12 @@ impl RunSummary {
             writeln!(
                 f,
                 "The guest deadlocked: every remaining thread was blocked with no possible wake."
+            )?;
+        }
+        if let Some(bound) = virtual_timeout_ns {
+            writeln!(
+                f,
+                "The run's virtual clock passed --virtual-timeout={bound}: no scheduler turn was granted after it."
             )?;
         }
         if include_report_metadata {
