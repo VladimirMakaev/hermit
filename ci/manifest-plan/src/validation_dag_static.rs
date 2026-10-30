@@ -1265,6 +1265,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's detcore-model tests: 1883.
     // only_a_chaos_instruction_offset_needs_a_stop_at_every_slice_end
     // (--chaos-instruction-offset): 1883.
+    // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
+    // (https://github.com/rrnewton/hermit/issues/4876): 1881.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3724,6 +3726,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // kept timer, the replay target, a scheduler-recorded offset, and the
     // hooks arming, recording and replaying one offset slice: 2730.
     // And a_published_instruction_offset_dies_with_its_thread: 2731.
+    // And scheduler::callback_history_scheduler_tests::summarized_desyncs_name_their_recorded_event
+    // and preemptions::tests::callback_checkpoints_are_placed_at_the_event_ending_their_slice
+    // (https://github.com/rrnewton/hermit/issues/4876): 2696.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6468,6 +6473,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same filing-time change-point unit: 2706, listed.
     // And the same eight --chaos-instruction-offset units: 2730.
     // And the same published-offset unit: 2731.
+    // And the same two summarized-desync position units: 2696.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -7188,6 +7194,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --watch detcore-model tests: 1875.
     // And the same tests: 1869.
     // And the same --chaos-instruction-offset detcore-model unit: 1869.
+    // And the same desync-notes round-trip unit: 1867.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.

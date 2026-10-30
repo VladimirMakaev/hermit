@@ -405,6 +405,14 @@ pub struct RunSummary {
     /// `--verify` compares as it was.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watch: Option<WatchRunSummary>,
+
+    /// **Trace replay:** each departure from the record that
+    /// `desync_descrip` summarizes, with where in the record it happened, so
+    /// that a tool can place it without parsing text
+    /// (<https://github.com/rrnewton/hermit/issues/4876>). Absent when there
+    /// were none, and from summaries written before it existed.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub desync_notes: Vec<DesyncNote>,
 }
 
 /// The seeds a schedule replay adopted from its recording: each is `Some`
@@ -544,6 +552,82 @@ impl fmt::Display for WatchRunSummary {
     }
 }
 
+/// What kind of departure a [`DesyncNote`] reports.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum DesyncKind {
+    /// The earliest replayed schedule event that differed from the record.
+    /// `schedevent_desynced` counts every such event; only a thread mismatch
+    /// also prints a `[tracereplay]` warning.
+    ScheduleEvent,
+    /// A thread reached a recorded callback checkpoint (the end of a recorded
+    /// slice at a callback) with other coordinates than the record's.
+    CallbackCheckpoint,
+    /// The run ended with recorded callback checkpoints of a thread never
+    /// reached.
+    IncompleteCallbackHistory,
+    /// Priority-history replay refused a recorded callback checkpoint.
+    CallbackRefusal,
+    /// A kind this build does not know, written by a later Hermit.
+    #[serde(other)]
+    Other,
+}
+
+/// A recorded callback checkpoint a [`DesyncNote`] concerns.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct CheckpointRef {
+    /// Its number in the thread's list (`callback_checkpoints` in the
+    /// record).
+    pub number: usize,
+    /// The index, in the record's schedule (`global`, from 0), of the
+    /// thread's event that ends the checkpoint's slice. `None` for a
+    /// checkpoint before the thread's first event.
+    pub record_event: Option<u64>,
+}
+
+/// Where a schedule replay was, in its own numbering and in the record's.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayPosition {
+    /// The number of the event the replay traces next, as the `[tracereplay]
+    /// ... at event #N` warnings number events (from 0).
+    pub event: u64,
+    /// The index, in the record's schedule, of the next recorded event the
+    /// replay was to match. It equals `event` until the first desync; after
+    /// one, an event observed in hard desync consumes no recorded event and a
+    /// fast-forward skips recorded events, so the two can part.
+    pub record_event: u64,
+}
+
+/// One departure of a replay from its record, as `desync_descrip` lists it
+/// (<https://github.com/rrnewton/hermit/issues/4876>).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct DesyncNote {
+    pub kind: DesyncKind,
+    /// The thread it concerns: the thread that ran the differing event, or
+    /// whose checkpoints these are.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread: Option<DetTid>,
+    /// Where in the record the departure lies, as an index into the record's
+    /// schedule (`global`, from 0): the recorded event the first differing
+    /// event stood for (`schedule_event`); the event ending the checkpoint's
+    /// slice (`callback_checkpoint`); the first unconsumed checkpoint's
+    /// (`incomplete_callback_history`). `None` when the record gives none.
+    pub record_event: Option<u64>,
+    /// The recorded callback checkpoints it concerns, each with the index of
+    /// the event ending its slice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub checkpoints: Vec<CheckpointRef>,
+    /// Where the replay was when it reported this: at the differing event
+    /// itself (`schedule_event`); when the thread reported the checkpoint,
+    /// which can be later than `record_event`, since a thread reports it on
+    /// its next check-in (`callback_checkpoint`); where the replay ended
+    /// (`incomplete_callback_history`). `None` without a schedule replay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported_at: Option<ReplayPosition>,
+    /// The line `desync_descrip` carries for it.
+    pub message: String,
+}
+
 /// The full human-readable report, including recorded launch configuration.
 fn is_zero(value: &u64) -> bool {
     *value == 0
@@ -646,6 +730,7 @@ impl RunSummary {
             skid_overshoot_reports,
             seed_reproducible: _,
             watch,
+            desync_notes: _,
         } = self;
         if let Some(bound) = run_timeout_secs {
             writeln!(
@@ -1117,6 +1202,83 @@ mod tests {
             let parsed: RunSummary = serde_json::from_value(value).unwrap();
             assert_eq!(parsed.preemption, summary.preemption);
         }
+    }
+
+    /// `desync_notes` reaches `--summary-json` with each note's kind, thread,
+    /// recorded position, checkpoints and replay position, and reads back; a
+    /// summary without notes, or written before the field existed, omits it;
+    /// a kind from a later Hermit still parses
+    /// (https://github.com/rrnewton/hermit/issues/4876).
+    #[test]
+    fn desync_notes_round_trip_through_summary_json() {
+        use super::CheckpointRef;
+        use super::DesyncKind;
+        use super::DesyncNote;
+        use super::ReplayPosition;
+        use crate::pid::DetTid;
+        let summary = RunSummary {
+            desync_notes: vec![
+                DesyncNote {
+                    kind: DesyncKind::CallbackCheckpoint,
+                    thread: Some(DetTid::from_raw(5125)),
+                    record_event: Some(16559),
+                    checkpoints: vec![CheckpointRef {
+                        number: 23,
+                        record_event: Some(16559),
+                    }],
+                    reported_at: Some(ReplayPosition {
+                        event: 16621,
+                        record_event: 16617,
+                    }),
+                    message: "DESYNC callback checkpoint 23 for 5125 at record event #16559".into(),
+                },
+                DesyncNote {
+                    kind: DesyncKind::IncompleteCallbackHistory,
+                    thread: Some(DetTid::from_raw(5126)),
+                    record_event: None,
+                    checkpoints: vec![CheckpointRef {
+                        number: 0,
+                        record_event: None,
+                    }],
+                    reported_at: None,
+                    message: "DESYNC incomplete callback history for 5126".into(),
+                },
+            ],
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(
+            value["desync_notes"],
+            serde_json::json!([
+                {
+                    "kind": "callback_checkpoint",
+                    "thread": 5125,
+                    "record_event": 16559,
+                    "checkpoints": [{ "number": 23, "record_event": 16559 }],
+                    "reported_at": { "event": 16621, "record_event": 16617 },
+                    "message": "DESYNC callback checkpoint 23 for 5125 at record event #16559"
+                },
+                {
+                    "kind": "incomplete_callback_history",
+                    "thread": 5126,
+                    "record_event": null,
+                    "checkpoints": [{ "number": 0, "record_event": null }],
+                    "message": "DESYNC incomplete callback history for 5126"
+                }
+            ])
+        );
+        let parsed: RunSummary = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(parsed.desync_notes, summary.desync_notes);
+
+        let mut later = value;
+        later["desync_notes"][0]["kind"] = serde_json::json!("untaken_background_start");
+        let parsed: RunSummary = serde_json::from_value(later).unwrap();
+        assert_eq!(parsed.desync_notes[0].kind, DesyncKind::Other);
+
+        let none = serde_json::to_value(RunSummary::default()).unwrap();
+        assert!(none.get("desync_notes").is_none(), "{none}");
+        let old: RunSummary = serde_json::from_value(none).unwrap();
+        assert!(old.desync_notes.is_empty());
     }
 
     #[test]
