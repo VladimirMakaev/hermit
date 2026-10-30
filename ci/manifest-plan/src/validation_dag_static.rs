@@ -3320,6 +3320,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And syscalls::helpers::tests::only_msg_dontwait_keeps_a_socket_call_from_waiting: 2723.
     // And the decision it feeds, syscalls::helpers::kernel_signal_wait_failures::
     // msg_dontwait_runs_a_call_once_on_a_socket_the_guest_left_blocking: 2724.
+    // And syscalls::helpers::tests::msg_errqueue_marks_only_a_receive_as_an_error_queue_read
+    // and fd::tests::error_queue_reads_never_wait_on_the_protocols_that_read_the_queue: 2726.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4670,6 +4672,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (--virtual-timeout, tests/c/virtual_timeout_loop.c; the node skips
     // run_kvm_virtual_timeout_is_reported_from_the_childs_note): 629.
     // And msg_dontwait_returns_at_once_on_a_blocking_socket: 645.
+    // And msg_errqueue_returns_at_once_on_inet_sockets_and_waits_on_unix_sockets: 646.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5227,6 +5230,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three --virtual-timeout tests (this node skips the KVM
     // one too): 548.
     // And msg_dontwait_returns_at_once_on_a_blocking_socket: 564.
+    // And msg_errqueue_returns_at_once_on_inet_sockets_and_waits_on_unix_sockets: 565.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5730,6 +5734,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --virtual-timeout scheduler units: 2686.
     // And the same MSG_DONTWAIT unit: 2723.
     // And the same MSG_DONTWAIT decision unit: 2724.
+    // And the same two MSG_ERRQUEUE units: 2726.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
