@@ -532,7 +532,8 @@ mod tests {
                     1,
                     crate::scheduler::runqueue::DEFAULT_PRIORITY,
                     crate::scheduler::runqueue::DEFAULT_PRIORITY,
-                 None,);
+                    None,
+                );
             }
             if with_checkpoint {
                 writer.insert_callback_checkpoint(

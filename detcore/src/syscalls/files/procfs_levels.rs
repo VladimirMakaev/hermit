@@ -798,7 +798,8 @@ impl<T: RecordOrReplay> Detcore<T> {
             if root.is_some() || self.cfg.recordreplay_modes {
                 return None;
             }
-            let prefix = crate::procfs::absent_cpu_entry_prefix(&observed, self.cfg.virtual_cpu_count())?;
+            let prefix =
+                crate::procfs::absent_cpu_entry_prefix(&observed, self.cfg.virtual_cpu_count())?;
             let parent = prefix.parent()?;
             if !is_on_sysfs(parent) {
                 return None;
