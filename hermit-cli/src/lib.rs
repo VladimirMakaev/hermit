@@ -62,6 +62,7 @@ pub mod physical_exit_watch;
 pub mod preemption_admission;
 pub mod proc_mount;
 mod ptrace_completion;
+mod timeout_survivors;
 
 pub use canonical_verdict::Verdict;
 
@@ -5036,6 +5037,12 @@ fn liteinst_requires_forced_shutdown(status: ExitStatus) -> bool {
 pub struct GuestTimedOut {
     /// The bound that was exceeded, as the caller spelled it.
     pub limit: Duration,
+    /// The guest processes still running when the bound fired, in one line
+    /// (`timeout_survivors::traced_processes_now`), where the backend could
+    /// read them. A run lasts until every guest process exits, so this is what
+    /// tells a stuck root apart from a root that exited and left a blocked
+    /// child behind.
+    pub survivors: Option<String>,
 }
 
 impl std::fmt::Display for GuestTimedOut {
@@ -5044,7 +5051,11 @@ impl std::fmt::Display for GuestTimedOut {
             f,
             "Guest exceeded the --timeout bound of {} seconds",
             self.limit.as_secs()
-        )
+        )?;
+        if let Some(survivors) = &self.survivors {
+            write!(f, "; {survivors}")?;
+        }
+        Ok(())
     }
 }
 
@@ -5170,7 +5181,10 @@ where
         None => guest.await,
         Some(limit) => match tokio::time::timeout(limit, guest).await {
             Ok(result) => result,
-            Err(_) => Err(Error::new(GuestTimedOut { limit })),
+            Err(_) => Err(Error::new(GuestTimedOut {
+                limit,
+                survivors: None,
+            })),
         },
     }
 }
@@ -5590,7 +5604,10 @@ async fn run_with_output_backend_inner(
         None => guest.await,
         Some(limit) => match tokio::time::timeout(limit, guest).await {
             Ok(result) => result,
-            Err(_elapsed) => Err(Error::new(GuestTimedOut { limit })),
+            Err(_elapsed) => Err(Error::new(GuestTimedOut {
+                limit,
+                survivors: None,
+            })),
         },
     }
 }
