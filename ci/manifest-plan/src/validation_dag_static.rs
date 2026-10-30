@@ -3439,6 +3439,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test::a_trace_replay_grant_after_a_failed_attempt_is_no_attempt: 2693.
     // And scheduler::tests::replay_stops_waiting_for_a_log_served_call_that_never_returns: 2683.
     // And scheduler::tests::replay_refuses_a_call_that_never_returns_unless_it_is_a_background_call: 2684.
+    // Two bubble-sort tests: its states equal the recorded sort's, and a long
+    // reversal sorts in bounded memory: 2684, listed.
+    // And the_format_is_the_presence_of_the_top_level_marker (a schedule's
+    // format is read without a JSON tree of it): 2685, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6013,6 +6017,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same ten idle-poller deadlock units: 2692.
     // And the same TraceReplay-grant unit: 2693.
     // And the same two in-flight-exit scheduler tests as test.detcore_unit: 2684.
+    // The same two bubble-sort tests: 2684, listed.
+    // And the same schedule-format probe test: 2685, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
