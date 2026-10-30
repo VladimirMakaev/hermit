@@ -542,7 +542,19 @@ impl RunData {
     /// so an explicit --trial-timeout bounds it.
     pub fn new_run1_target(aopts: &AnalyzeOpts, runname: String) -> anyhow::Result<Self> {
         let ro = Self::get_run1_runopts(aopts)?;
-        Ok(Self::new_unbounded(aopts, runname, ro).compared_by_selfcheck())
+        let mut run = Self::new_unbounded(aopts, runname, ro).compared_by_selfcheck();
+        if let Some(record) = &aopts.run1_preemptions {
+            let copy = run.root_path().with_extension(PREEMPTS_EXT);
+            std::fs::copy(record, &copy).with_context(|| {
+                format!(
+                    "cannot copy --run1-preemptions {} into the workspace",
+                    record.display()
+                )
+            })?;
+            run = run.with_preempts_path_in(copy);
+            run.apply_trial_bound();
+        }
+        Ok(run)
     }
 
     /// Replay with the selected run's seeds and the original replay policy.

@@ -361,9 +361,13 @@ pub struct AnalyzeOpts {
     /// no other; analyze then removes the workspace and dies of that signal (a shell reports
     /// 128 plus its number, 143 for SIGTERM). --verbose, and --trial-log above
     /// warn, keep the workspace too. The report file (--report-file) is never
-    /// removed. Without --keep-tmp, even with --verbose, a bisection trial's
-    /// schedules are removed as soon as its outcome is read, and every run's
-    /// recording with event times once analyze has written it without them.
+    /// removed. Without --keep-tmp, even with --verbose or --trial-log above
+    /// warn, a bisection trial's schedules are removed as soon as its outcome
+    /// is read, and every run's recording with event times once analyze has
+    /// written it without them. Without --keep-tmp, even with --verbose, a
+    /// bisection trial's schedules are removed as soon as its outcome is read,
+    /// and every run's recording with event times once analyze has written it
+    /// without them.
     ///
     /// Analyze cannot clean up after SIGKILL, nor after a stop signal it does not handle: one it
     /// inherits as ignored stays ignored, and an analyze that is PID 1 of its PID namespace

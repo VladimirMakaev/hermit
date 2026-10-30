@@ -976,9 +976,10 @@ replay) log at `debug` or above into their files, whatever `--trial-log` says.
 While analyze runs, a bisection trial's schedules, as large as the endpoints'
 (hundreds of MB for a few million events), are removed as soon as the trial's
 outcome is read, and every run's recording with event times once analyze has
-written it without them. `--keep-tmp` keeps them as well; `--verbose` does
-not, so the reproducer it prints for each trial needs `--keep-tmp` to run
-afterwards. `hermit bisect` keeps them.
+written it without them. `--keep-tmp` keeps them as well; `--verbose` and a
+`--trial-log` above warn keep the workspace but not these, so the reproducer
+`--verbose` prints for each trial needs `--keep-tmp` to run afterwards.
+`hermit bisect` keeps them.
 
 Analyze cannot clean up after SIGKILL, nor after a stop signal it does not
 handle: a signal it inherits as ignored stays ignored (SIGINT in a shell's
