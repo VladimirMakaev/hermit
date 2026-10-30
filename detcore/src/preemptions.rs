@@ -1636,7 +1636,11 @@ mod tests {
     #[test]
     fn a_format_this_hermit_does_not_read_survives_every_transform_and_stays_refused() {
         let tid = DetTid::from_raw(3);
-        for format in [0, PREEMPTION_RECORD_FORMAT + 1, PREEMPTION_RECORD_FORMAT + 2] {
+        for format in [
+            0,
+            PREEMPTION_RECORD_FORMAT + 1,
+            PREEMPTION_RECORD_FORMAT + 2,
+        ] {
             let mut value = serde_json::to_value(PreemptionRecord::from_sched_events(vec![
                 SchedEvent::branches(tid, 10),
                 SchedEvent::branches(tid, 20),
@@ -1659,9 +1663,17 @@ mod tests {
                     PreemptionRecord::from_vecs_of(&BTreeMap::new(), &record).unwrap(),
                 ),
             ] {
-                assert_eq!(out.format_version(), format, "{transform} of format {format}");
+                assert_eq!(
+                    out.format_version(),
+                    format,
+                    "{transform} of format {format}"
+                );
                 let read: PreemptionRecord = serde_json::from_str(&out.to_string()).unwrap();
-                assert_eq!(read.format_version(), format, "{transform} of format {format}");
+                assert_eq!(
+                    read.format_version(),
+                    format,
+                    "{transform} of format {format}"
+                );
                 assert!(read.validate().is_err(), "{transform} of format {format}");
                 if format != 0 {
                     assert!(
