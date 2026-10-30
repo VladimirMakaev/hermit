@@ -1278,7 +1278,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model host_input::tests::stdio_kinds_name_each_changed_descriptor: 1975.
     // And host_input::tests::terminal_devices_follow_the_kernels_driver_list: 1976.
     // And host_input::tests::a_guest_descriptor_is_classified_without_reaching_a_fuse_filesystem: 1977.
-    ("test.regular_crates", 1977),
+    // And host_input::tests::a_guest_descriptor_is_statted_only_on_a_local_kernel_filesystem: 1932.
+    // And host_input::tests::the_root_is_known_by_its_mapped_image: 1978.
+    ("test.regular_crates", 1978),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -5351,7 +5353,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1961.
     // Kept equal to the second test.regular_crates_on_host entry below: 1962.
     // Kept equal to the second test.regular_crates_on_host entry below: 1963.
-    ("test.regular_crates_on_host", 1963),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1964.
+    ("test.regular_crates_on_host", 1964),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6570,7 +6573,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same detcore-model stdio unit: 1961.
     // And the same terminal-device unit: 1962.
     // And the same guest-descriptor classifier unit: 1963.
-    ("test.regular_crates_on_host", 1963),
+    // And the same mapped-image unit: 1964.
+    ("test.regular_crates_on_host", 1964),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
