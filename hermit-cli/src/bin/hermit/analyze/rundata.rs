@@ -34,6 +34,7 @@ use reverie::process::Output;
 use tracing::metadata::LevelFilter;
 
 use crate::analyze::consts::*;
+use crate::analyze::stop;
 use crate::analyze::types::AnalyzeOpts;
 use crate::analyze::types::CONFIRM_BOUND_FACTOR;
 use crate::analyze::types::ContinuationTimeslice;
@@ -303,7 +304,11 @@ impl RunData {
     }
 
     /// Execute the run. (Including setting up logging and temp dir binding.)
+    ///
+    /// Once a stop signal has arrived (`stop`), no run starts, and the run it
+    /// ended reports the stop instead of its own outcome.
     pub fn launch(&mut self) -> anyhow::Result<()> {
+        stop::check()?;
         let root = self.root_path();
         let gopts = self.trial_global_opts();
         // Open it HERE, on the host, for the same reason `main` does: `launch` runs
@@ -334,10 +339,9 @@ impl RunData {
         self.runopts.write_debug_options_dump()?;
 
         let started = Instant::now();
-        let (_, output) = self
-            .runopts
-            .run(&gopts, true)
-            .map_err(|error| self.name_the_trial_bound(error))?;
+        let ran = self.runopts.run(&gopts, true);
+        stop::check()?;
+        let (_, output) = ran.map_err(|error| self.name_the_trial_bound(error))?;
         let output: Output = output.context("expected captured output")?;
         self.wall = Some(started.elapsed());
 
