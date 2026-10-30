@@ -1122,7 +1122,8 @@ given, the report calls that trial a hang, a third outcome rather than a run
 that misses (for example a deadlock while other threads keep polling), and
 notes that the boundary rests on a wall-clock bound. If the trial confirmed is
 the empty prefix's and it meets the target, the scheduler alone meets it, and
-analyze ends with an error that says so. A search whose baseline side never
+analyze concludes that no event decides the outcome (see the exit status
+below). A search whose baseline side never
 finishes thus runs one trial at 4 times the bound instead of rechecking it at
 the usual one, and one whose confirmation finishes runs the rest of its trials
 under the longer bound. A trial that Hermit refuses when its guest reaches an
@@ -1217,6 +1218,52 @@ hermit analyze --prefix-search --time-budget=30m --run1-seed=1 \
 hermit analyze --prefix-search --time-budget=30m --run1-seed=1 \
   --target-stdout='FAILED' --resume=/tmp/hermit_analyzeXXXX -- --chaos -- PROGRAM
 ```
+
+Analyze's exit status says what it concluded. A conclusion is never reported
+as a failure of Hermit; only a failure to conclude exits 125, under a class
+line that says which. The class line is the first line on stderr:
+
+| Exit | Line on stderr | Meaning |
+| --- | --- | --- |
+| 0 (or `--success-exit-code`) | none | The report names the critical events (`"verdict": "critical_events"`). |
+| 0 (or `--success-exit-code`) | `HERMIT_ANALYZE_VERDICT class=no-deciding-event` | No event of the target schedule decides the outcome: without chaos the scheduler alone meets the target, so debug that run directly. The report says why (`"verdict": "no_deciding_event"`) and names no event. |
+| 2 | `HERMIT_ANALYZE_PRECONDITION class=target-not-reproduced` | The target run, the failing endpoint of a bisection, or `--minimize`'s last record does not meet the target criteria. |
+| 2 | `HERMIT_ANALYZE_PRECONDITION class=baseline-not-reproduced` | The baseline meets the target too, or the baseline the user chose does not finish. |
+| 2 | `HERMIT_ANALYZE_PRECONDITION class=no-prefix-continuation` | No continuation timeslice allows a prefix search. |
+| 2 | `HERMIT_ANALYZE_PRECONDITION class=endpoints-not-separable` | `hermit bisect` only: no single reordering separates `--good` from `--bad`. Analyze searches within the target schedule instead. |
+| 2 | `HERMIT_ANALYZE_PRECONDITION class=endpoints-identical` | `hermit bisect` only: `--good` and `--bad` contain identical event traces. |
+| 2 | none | clap's usage error: the command line did not parse. |
+| 122 | `HERMIT_POLICY_REFUSAL class=policy-refusal` | Hermit refused the target run, or analyze or bisect refused its options or schedules. |
+| 123 | `HERMIT_LOG_CAP class=log-cap` | `--max-log-bytes` ended the analysis. |
+| 125 | `HERMIT_INTERNAL_FAILURE class=replay-not-reproducible` | `--selfcheck` found a difference, or a jittered schedule never replayed the same way twice: replay, Hermit's or this host's (`hermit host-capabilities` says whether its branch counter is exact), did not reproduce a run. |
+| 125 | `HERMIT_INTERNAL_FAILURE class=search-did-not-converge` | The event-level search did not converge within its passes. |
+| 125 | another `HERMIT_INTERNAL_FAILURE class=...` | Hermit failed. |
+| 128 + N | none | Signal N (SIGTERM, SIGINT or SIGHUP) stopped the analysis. |
+
+Exit 2 means that the inputs do not give analyze what it needs, as `diff` and
+`grep` exit 2 when they cannot do what was asked; the message says what to
+change. `--success-exit-code` refuses 2 and 120 to 127 for that reason. `hermit
+bisect` checks that its `--good` schedule misses the target and its `--bad`
+schedule meets it, and exits 2 with the same lines when one does not.
+
+A report file (`--report-file`) has one schema for every verdict: read its
+`verdict` first. `critical_events` fills `critical_event1` and
+`critical_event2` (and `deciding_event` for a timing decision);
+`no_deciding_event` leaves them out, and `header` says why. Its
+`verdict_reason` says what the scheduler alone shows. When the trials keep
+timing settings from the run arguments (`--pipe-wake-latency`,
+`--scheduler-turn-cost` other than the default charge), analyze runs one more
+trial, the empty prefix without them at the first continuation it tried: if it
+misses the target, the
+reason is `{"cause": "timing_semantics", "options": [...], "alternatives":
+[...], "trial": "..."}`, the settings cause the outcome, a two-seed search
+can end the same way, and a new failing run under the alternatives may have
+an event that decides it. Otherwise (it meets the target too, or it is not
+run because a `--run1-preemptions` recording fixes the settings) the reason
+is `{"cause": "scheduler_alone", "timing_in_force": [...]}`, and without
+such settings `{"cause": "scheduler_alone"}`. A cause a later build adds
+reads as `unknown`. A report from before the field names the critical
+events.
 
 ## Common Run Options
 
