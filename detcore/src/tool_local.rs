@@ -5041,6 +5041,11 @@ pub struct ThreadState<T> {
     #[serde(default)]
     pub replay_rcb_end: Option<u64>,
 
+    /// In a preemption replay, the logical time of the last priority change
+    /// point this thread filed ([`ThreadState::file_replay_change_point`]).
+    #[serde(default)]
+    pub last_replay_change_point: Option<LogicalTime>,
+
     // AUTONOMOUS-BOT-IMPLEMENTED
     // TODO-HUMAN-REVIEW(PR-1151)
     /// Deterministic chaos epoch this thread was in at its last `next_timeslice`.
@@ -5876,6 +5881,7 @@ impl<T> ThreadState<T> {
             scheduler_grants: 0,
             end_of_timeslice: None, // Temporary/bogus.
             replay_rcb_end: None,
+            last_replay_change_point: None,
             // AUTONOMOUS-BOT-IMPLEMENTED
             // TODO-HUMAN-REVIEW(PR-1151)
             chaos_epoch: chaos_epoch_sentinel(),
@@ -7193,6 +7199,51 @@ impl<T> ThreadState<T> {
     }
 
     /// Whether this thread has consumed its current logical timeslice.
+    /// Files a priority change point at `time` in a preemption replay, or
+    /// returns the thread's last one when `time` is not after it.
+    ///
+    /// A replay that reproduces its record files each thread's change points
+    /// at the record's times, which are strictly increasing (the loaded
+    /// record is validated), so it never gets the error. A change point at or
+    /// before the last one is a thread that left the record: a slice closed
+    /// with no time in it, as when the slice before ran onto the next
+    /// recorded end's branch count while that end's time was still ahead and
+    /// the thread's time did not move (the adjacent zero-RCB slices of
+    /// `end_timeslice_with_checkpoint`). Filed, such a change point was never
+    /// granted, and the replay stalled until `--timeout`. Outside a
+    /// preemption replay nothing is checked or kept.
+    pub(crate) fn file_replay_change_point(
+        &mut self,
+        cfg: &Config,
+        time: LogicalTime,
+    ) -> Result<(), LogicalTime> {
+        if cfg.replay_preemptions_from.is_none() {
+            return Ok(());
+        }
+        if let Some(last) = self.last_replay_change_point.filter(|last| time <= *last) {
+            return Err(last);
+        }
+        self.last_replay_change_point = Some(time);
+        Ok(())
+    }
+
+    /// Runs the rest of a preemption replay's thread as its final slice: no
+    /// recorded end governs it any more, and only the run's own PMU maximum
+    /// (if any) bounds its slices, as when the record runs out. For a thread
+    /// that left its record ([`Self::file_replay_change_point`]), whose
+    /// remaining recorded ends no longer describe it.
+    pub(crate) fn abandon_replayed_slices(&mut self, cfg: &Config) {
+        self.stats.last_recorded_slice = Some(self.stats.timeslice_count);
+        self.end_of_timeslice = Some(LogicalTime::MAX);
+        self.replay_rcb_end = None;
+        let now = self.thread_logical_time.as_nanos();
+        self.max_timeslice_end = cfg
+            .max_timeslice
+            .map(|max_timeslice| now + Duration::from_nanos(u64::from(max_timeslice)));
+        self.last_rcb_timer = None;
+        self.last_rcb_timer_is_max = false;
+    }
+
     pub(crate) fn timeslice_expired(&self) -> bool {
         if let Some(replay_rcb_end) = self.replay_rcb_end {
             return self.committed_clock_value >= replay_rcb_end;
@@ -7356,41 +7407,60 @@ impl<T> ThreadState<T> {
                             current_ns,
                             prio
                         );
-                        if let Some(target_rcbs) = replay_rcb_end
-                            && target_rcbs < current_rcbs
+                        // The thread may have run past this recorded end, and
+                        // past later ones, before it could be stopped: a skid
+                        // overshoot under replay. Pass over every recorded end
+                        // already behind it, report the overshoot once (the
+                        // run then ends in the skid-overshoot policy refusal)
+                        // and follow the first recorded end still ahead, so no
+                        // slice ends twice at the same point. An edited record's
+                        // ended slices were skipped above (`next_edited_slice`).
+                        let mut next = Some((end_time, prio, replay_rcb_end));
+                        let mut overshoot = None;
+                        let mut passed = 0_u64;
+                        while !cfg.replay_edited_preemptions
+                            && let Some((time, _, rcbs)) = next
                         {
-                            panic!(
-                                "Cannot set RCB end of timeslice to {} for thread {}, when current RCB count is already {}. \
-                                 An edited record, not the recording of this run's schedule, needs \
-                                 --replay-edited-preemptions.",
-                                target_rcbs, self.dettid, current_rcbs
-                            )
+                            if let Some(behind) =
+                                replay_slice_overshoot(time, rcbs, current_ns, current_rcbs)
+                                    .or_else(|| {
+                                        closes_at_last_end(time, rcbs, current_ns, current_rcbs)
+                                    })
+                            {
+                                overshoot.get_or_insert(behind);
+                            } else if passed == 0 || rcbs != Some(current_rcbs) {
+                                break;
+                            }
+                            // Behind, or at exactly the thread's branch count
+                            // after passing one (`replay_slice_overshoot`
+                            // calls that end "now"): ending it would close a
+                            // slice at the instant the last one closed.
+                            passed += 1;
+                            next = thi.next_with_rcbs();
                         }
-                        let exact_deadline_is_now =
-                            replay_rcb_end.is_some_and(|target| target == current_rcbs);
-                        // An edited record keeps a slice whose end has passed
-                        // while its RCB target is ahead: the target governs.
-                        let rcb_target_governs =
-                            cfg.replay_edited_preemptions && replay_rcb_end.is_some();
-                        if end_time <= current_ns && !exact_deadline_is_now && !rcb_target_governs {
-                            // Records that store their epoch are reconciled with
-                            // this run's epoch before any guest starts (see
-                            // `adopt_replayed_schedule_epoch` in hermit-cli), so
-                            // reaching this with such a record means the replay
-                            // really diverged. A record without an epoch cannot
-                            // be checked up front; say what usually causes it.
-                            panic!(
-                                "Cannot set end of timeslice to {} for thread {}, when current thread logical time is already {}. \
-                                 The replayed preemption record's timeslice ends are absolute virtual times; if it was \
-                                 recorded under a different virtual-time epoch, replay it with that --epoch \
-                                 (https://github.com/rrnewton/hermit/issues/3413). An edited record, not the \
-                                 recording of this run's schedule, needs --replay-edited-preemptions.",
-                                end_time, self.dettid, current_ns
-                            )
+                        if let Some(overshoot) = overshoot {
+                            report_replay_slice_overshoot(
+                                cfg.panic_on_rcb_overshoot,
+                                self.dettid,
+                                self.stats.timeslice_count + 1,
+                                &overshoot,
+                                passed,
+                            );
                         }
-                        self.end_of_timeslice = Some(end_time);
-                        self.replay_rcb_end = replay_rcb_end;
-                        result = Some(prio);
+                        match next {
+                            Some((time, prio, rcbs)) => {
+                                self.end_of_timeslice = Some(time);
+                                self.replay_rcb_end = rcbs;
+                                result = Some(prio);
+                            }
+                            None => {
+                                // Past every recorded end: the final slice, as
+                                // when the record runs out.
+                                self.stats.last_recorded_slice = Some(self.stats.timeslice_count);
+                                self.end_of_timeslice = Some(LogicalTime::MAX);
+                                result = Some(thi.final_priority());
+                            }
+                        }
                     } else {
                         let max = LogicalTime::MAX;
                         let prio = thi.final_priority();
@@ -9106,11 +9176,11 @@ mod timeslice_tests {
     }
 
     /// Without --replay-edited-preemptions, a replay that reaches a recorded
-    /// slice end already passed stops: a faithful replay never does, so the
-    /// replay diverged.
+    /// slice end already passed (a faithful replay never does: the thread ran
+    /// past it before it could be stopped) reports a skid overshoot and
+    /// follows the first recorded end still ahead.
     #[test]
-    #[should_panic(expected = "needs --replay-edited-preemptions")]
-    fn a_faithful_replay_past_a_recorded_end_stops() {
+    fn a_faithful_replay_past_a_recorded_end_reports_an_overshoot() {
         let config = Config {
             replay_edited_preemptions: false,
             ..edited_replay_config()
@@ -9122,13 +9192,17 @@ mod timeslice_tests {
             (start + Duration::from_nanos(100), DEFAULT_PRIORITY + 1),
             (start + Duration::from_nanos(900), DEFAULT_PRIORITY),
         ]);
-        replay_from_500ns(&config, history);
+        let (state, prio, _) = replay_from_500ns(&config, history);
+        assert_eq!(prio, Some(DEFAULT_PRIORITY));
+        assert_eq!(
+            state.end_of_timeslice,
+            Some(start + Duration::from_nanos(900))
+        );
     }
 
     /// The same for a recorded RCB deadline the PMU count has passed.
     #[test]
-    #[should_panic(expected = "count is already 10. An edited record")]
-    fn a_faithful_replay_past_a_recorded_rcb_end_stops() {
+    fn a_faithful_replay_past_a_recorded_rcb_end_reports_an_overshoot() {
         let config = Config {
             replay_edited_preemptions: false,
             ..edited_replay_config()
@@ -9142,7 +9216,337 @@ mod timeslice_tests {
                 (start + Duration::from_nanos(900), DEFAULT_PRIORITY),
             ])
             .with_preemption_rcbs(vec![4, 90]);
+        let (state, prio, _) = replay_from_500ns(&config, history);
+        assert_eq!(prio, Some(DEFAULT_PRIORITY));
+        assert_eq!(state.replay_rcb_end, Some(90));
+    }
+
+    /// The overshoot report names the option an edited record needs, for a
+    /// record edited after recording and replayed without it.
+    #[test]
+    #[should_panic(expected = "needs --replay-edited-preemptions")]
+    fn a_faithful_replay_overshoot_names_the_edited_record_option() {
+        let config = Config {
+            replay_edited_preemptions: false,
+            panic_on_rcb_overshoot: true,
+            ..edited_replay_config()
+        };
+        let start = ThreadState::new(DetPid::from_raw(5), &config, ())
+            .thread_logical_time
+            .as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                (start + Duration::from_nanos(100), DEFAULT_PRIORITY + 1),
+                (start + Duration::from_nanos(900), DEFAULT_PRIORITY),
+            ])
+            .with_preemption_rcbs(vec![4, 90]);
         replay_from_500ns(&config, history);
+    }
+
+    /// A thread past a recorded slice end, by branch count or (when the
+    /// count does not say otherwise) by time, has overshot it; exactly at the
+    /// recorded count is the slice's end, now, not an overshoot.
+    #[test]
+    fn replay_slice_overshoot_classifies_by_branches_then_time() {
+        let at = |ns| LogicalTime::from_nanos(ns);
+        // Behind in branches.
+        let overshoot = replay_slice_overshoot(at(500), Some(40), at(400), 51).unwrap();
+        assert_eq!((overshoot.end_rcbs, overshoot.now_rcbs), (Some(40), 51));
+        // Exactly at the recorded branch count, even with the time past it.
+        assert_eq!(replay_slice_overshoot(at(300), Some(51), at(400), 51), None);
+        // Ahead in branches, but the time is past the recorded end.
+        assert!(replay_slice_overshoot(at(400), Some(60), at(400), 51).is_some());
+        // Ahead in both.
+        assert_eq!(replay_slice_overshoot(at(500), Some(60), at(400), 51), None);
+        // No recorded count: the time decides, an end at `now` included.
+        assert!(replay_slice_overshoot(at(400), None, at(400), 51).is_some());
+        assert_eq!(replay_slice_overshoot(at(401), None, at(400), 51), None);
+    }
+
+    /// A preemption replay whose thread is already past the next recorded
+    /// slice end reports a skid overshoot once and follows the next recorded
+    /// end still ahead, instead of panicking.
+    #[test]
+    fn a_replay_past_a_recorded_slice_end_reports_an_overshoot() {
+        let config = Config {
+            target_timeslice: nz(10_000),
+            max_timeslice: nz(100_000),
+            ..Default::default()
+        };
+        let mut state = ThreadState::new(DetPid::from_raw(5), &config, ());
+        let now = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                (now + Duration::from_nanos(100), DEFAULT_PRIORITY),
+                (now + Duration::from_nanos(200), DEFAULT_PRIORITY),
+            ])
+            .with_preemption_rcbs(vec![40, 80]);
+        state.preemption_points = Some(history.into_iter());
+        state.committed_clock_value = 51;
+        reverie::take_skid_overshoot_count();
+
+        state.next_timeslice(&config);
+
+        assert!(reverie::take_skid_overshoot_count() >= 1);
+        assert_eq!(
+            state.end_of_timeslice,
+            Some(now + Duration::from_nanos(200))
+        );
+        assert_eq!(state.replay_rcb_end, Some(80));
+    }
+
+    /// A thread past several recorded ends passes over all of them at once
+    /// (one report) and follows the first still ahead, passing too an end at
+    /// exactly its branch count after a passed one (that slice would close
+    /// at the instant the last one did); past every one, it runs the final
+    /// slice, as when the record runs out.
+    #[test]
+    fn a_replay_past_several_recorded_ends_follows_the_first_ahead() {
+        let config = Config {
+            target_timeslice: nz(10_000),
+            max_timeslice: nz(100_000),
+            ..Default::default()
+        };
+        let mut state = ThreadState::new(DetPid::from_raw(5), &config, ());
+        let now = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                (now + Duration::from_nanos(100), DEFAULT_PRIORITY),
+                (now + Duration::from_nanos(150), DEFAULT_PRIORITY),
+                (now + Duration::from_nanos(300), DEFAULT_PRIORITY),
+            ])
+            .with_preemption_rcbs(vec![40, 45, 80]);
+        state.preemption_points = Some(history.into_iter());
+        state.committed_clock_value = 51;
+        state.next_timeslice(&config);
+        assert_eq!(state.replay_rcb_end, Some(80));
+        assert_eq!(
+            state.end_of_timeslice,
+            Some(now + Duration::from_nanos(300))
+        );
+
+        let mut state = ThreadState::new(DetPid::from_raw(7), &config, ());
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                (now + Duration::from_nanos(100), DEFAULT_PRIORITY),
+                (now + Duration::from_nanos(150), DEFAULT_PRIORITY),
+                (now + Duration::from_nanos(300), DEFAULT_PRIORITY),
+            ])
+            .with_preemption_rcbs(vec![40, 51, 80]);
+        state.preemption_points = Some(history.into_iter());
+        state.committed_clock_value = 51;
+        state.next_timeslice(&config);
+        assert_eq!(
+            state.replay_rcb_end,
+            Some(80),
+            "the end at 51 is passed too"
+        );
+
+        let mut state = ThreadState::new(DetPid::from_raw(6), &config, ());
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                (now + Duration::from_nanos(100), DEFAULT_PRIORITY),
+                (now + Duration::from_nanos(150), DEFAULT_PRIORITY),
+            ])
+            .with_preemption_rcbs(vec![40, 45]);
+        state.preemption_points = Some(history.into_iter());
+        state.committed_clock_value = 51;
+        state.next_timeslice(&config);
+        // The final slice: the record is spent, and no recorded branch count
+        // governs (the run's own bound caps the slice, as when a record runs
+        // out).
+        assert_eq!(state.replay_rcb_end, None);
+        assert!(state.stats.last_recorded_slice.is_some());
+    }
+
+    /// A recorded end exactly at the thread's branch count but behind it in
+    /// time is passed, and reported, at a slice's start: following it would
+    /// end the slice at once, at a point the record had already left.
+    /// The shape of an Android emulator replay (crash_dump64, `--chaos
+    /// --preemption-timeout=10000`, REVERIE_BLOCK_STEP=0): its slice T9 ended
+    /// by its timer at branch 863958, the count of the next recorded end
+    /// (#1884, recorded about 1.8 ms behind the thread's time), and T10 then
+    /// ended with no syscall at T9's instant. Its change point stalled the
+    /// replay, and the timeout's cleanup tripped the re-recording writer's
+    /// `&time > last`. Now that end, and the next one behind the thread in
+    /// time (#1885, one branch ahead), are passed, and the slice follows the
+    /// first recorded end ahead in both, so it is not already over.
+    #[test]
+    fn a_replay_passes_an_end_at_its_count_whose_time_is_behind() {
+        let config = Config {
+            target_timeslice: nz(10_000),
+            max_timeslice: nz(100_000),
+            ..Default::default()
+        };
+        let mut state = ThreadState::new(DetPid::from_raw(31754), &config, ());
+        state.thread_logical_time.add_rcbs(863_958);
+        state.committed_clock_value = 863_958;
+        let now = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                (
+                    LogicalTime::from_nanos(now.as_nanos() - 1_802_680),
+                    DEFAULT_PRIORITY + 1,
+                ),
+                (
+                    LogicalTime::from_nanos(now.as_nanos() - 1_802_670),
+                    DEFAULT_PRIORITY + 2,
+                ),
+                (now + Duration::from_nanos(10_780), DEFAULT_PRIORITY + 3),
+            ])
+            .with_preemption_rcbs(vec![863_958, 863_959, 864_037]);
+        state.preemption_points = Some(history.into_iter());
+
+        // Both ends are passed through the overshoot report; the process-wide
+        // overshoot count is not asserted here, since tests running beside
+        // this one take it too. The end-to-end replay checks the refusal.
+        let prio = state.next_timeslice(&config);
+
+        assert_eq!(prio, Some(DEFAULT_PRIORITY + 3));
+        assert_eq!(state.replay_rcb_end, Some(864_037));
+        assert_eq!(
+            state.end_of_timeslice,
+            Some(now + Duration::from_nanos(10_780))
+        );
+        assert!(
+            !state.timeslice_expired(),
+            "the slice is not over before it starts"
+        );
+    }
+
+    /// An end exactly at the thread's count whose time is not behind it is
+    /// the slice's end, now, as before (the record's adjacent zero-RCB
+    /// slices, `replay_preserves_adjacent_zero_rcb_slices`).
+    #[test]
+    fn a_replay_follows_an_end_at_its_count_whose_time_is_ahead() {
+        let config = Config {
+            target_timeslice: nz(10_000),
+            max_timeslice: nz(100_000),
+            ..Default::default()
+        };
+        let mut state = ThreadState::new(DetPid::from_raw(5), &config, ());
+        let now = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![(
+                now + Duration::from_nanos(25_000),
+                DEFAULT_PRIORITY + 1,
+            )])
+            .with_preemption_rcbs(vec![0]);
+        state.preemption_points = Some(history.into_iter());
+
+        assert_eq!(state.next_timeslice(&config), Some(DEFAULT_PRIORITY + 1));
+        assert_eq!(state.replay_rcb_end, Some(0));
+        assert_eq!(
+            state.end_of_timeslice,
+            Some(now + Duration::from_nanos(25_000))
+        );
+
+        // At the thread's time exactly, too.
+        let mut state = ThreadState::new(DetPid::from_raw(6), &config, ());
+        let now = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![(now, DEFAULT_PRIORITY + 1)])
+            .with_preemption_rcbs(vec![0]);
+        state.preemption_points = Some(history.into_iter());
+        assert_eq!(state.next_timeslice(&config), Some(DEFAULT_PRIORITY + 1));
+        assert_eq!(state.replay_rcb_end, Some(0));
+        assert_eq!(state.end_of_timeslice, Some(now));
+    }
+
+    #[test]
+    fn an_end_at_the_count_closes_at_the_last_end_unless_its_time_is_ahead() {
+        let at = |ns| LogicalTime::from_nanos(ns);
+        assert!(closes_at_last_end(at(300), Some(51), at(400), 51).is_some());
+        assert!(closes_at_last_end(at(399), Some(51), at(400), 51).is_some());
+        assert_eq!(closes_at_last_end(at(400), Some(51), at(400), 51), None);
+        assert_eq!(closes_at_last_end(at(401), Some(51), at(400), 51), None);
+        assert_eq!(closes_at_last_end(at(300), Some(52), at(400), 51), None);
+        assert_eq!(closes_at_last_end(at(300), None, at(400), 51), None);
+    }
+
+    /// The shape of a stalled Android emulator replay (`--chaos
+    /// --preemption-timeout=1000`): a slice ended at the branch count of the
+    /// next recorded end, whose time was still ahead, so that end was
+    /// followed and its slice was over at once (adjacent zero-RCB slices);
+    /// but the thread's time had not moved, so the second change point would
+    /// have been filed at the instant of the first. It is caught before it
+    /// is filed, and the thread runs on as its final slice, not already over.
+    #[test]
+    fn a_replay_change_point_at_the_last_ones_instant_is_caught_before_filing() {
+        let config = Config {
+            target_timeslice: nz(10_000),
+            max_timeslice: nz(100_000),
+            replay_preemptions_from: Some(std::path::PathBuf::from("history.json")),
+            ..Default::default()
+        };
+        let mut state = ThreadState::new(DetPid::from_raw(31744), &config, ());
+        let start = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![
+                // Frontier: a replayed slice at its recorded count ends once
+                // the thread is within one RCB (10 ns here) of the recorded
+                // time, so the ends sit where the thread's time is then.
+                (start + Duration::from_nanos(40), DEFAULT_PRIORITY + 1),
+                (start + Duration::from_nanos(50), DEFAULT_PRIORITY + 2),
+                (start + Duration::from_nanos(500), DEFAULT_PRIORITY + 3),
+            ])
+            .with_preemption_rcbs(vec![4, 4, 40]);
+        state.preemption_points = Some(history.into_iter());
+
+        state.next_timeslice(&config);
+        state.thread_logical_time.add_rcbs(4);
+        state.committed_clock_value = 4;
+        assert!(state.timeslice_expired());
+        let now = state.thread_logical_time.as_nanos();
+        assert_eq!(state.file_replay_change_point(&config, now), Ok(()));
+
+        // The end at the same count, 10 ns later, is followed (its time is
+        // ahead), and its slice is over at once; the thread's time is still
+        // `now`.
+        state.next_timeslice(&config);
+        assert_eq!(state.replay_rcb_end, Some(4));
+        assert!(state.timeslice_expired());
+        assert_eq!(state.file_replay_change_point(&config, now), Err(now));
+
+        state.abandon_replayed_slices(&config);
+        assert!(!state.timeslice_expired());
+        assert_eq!(state.replay_rcb_end, None);
+        assert_eq!(state.end_of_timeslice, Some(LogicalTime::MAX));
+        assert_eq!(
+            state.max_timeslice_end,
+            Some(now + Duration::from_nanos(100_000))
+        );
+
+        // A later change point files as usual; outside a preemption replay
+        // nothing is checked.
+        let later = now + Duration::from_nanos(1);
+        assert_eq!(state.file_replay_change_point(&config, later), Ok(()));
+        let recording = Config {
+            replay_preemptions_from: None,
+            ..config
+        };
+        assert_eq!(state.file_replay_change_point(&recording, later), Ok(()));
+    }
+
+    /// Under `--panic-on-rcb-overshoot` the overshoot panics, as the timer's
+    /// own check does.
+    #[test]
+    #[should_panic(expected = "HERMIT_SKID_OVERSHOOT preemption replay")]
+    fn a_replay_overshoot_panics_when_asked_to() {
+        let config = Config {
+            target_timeslice: nz(10_000),
+            max_timeslice: nz(100_000),
+            panic_on_rcb_overshoot: true,
+            ..Default::default()
+        };
+        let mut state = ThreadState::new(DetPid::from_raw(5), &config, ());
+        let now = state.thread_logical_time.as_nanos();
+        let history = ThreadHistory::new()
+            .with_prio_changes(vec![(now + Duration::from_nanos(100), DEFAULT_PRIORITY)])
+            .with_preemption_rcbs(vec![40]);
+        state.preemption_points = Some(history.into_iter());
+        state.committed_clock_value = 51;
+        state.next_timeslice(&config);
     }
 
     // AUTONOMOUS-BOT-IMPLEMENTED
@@ -10456,4 +10860,163 @@ mod native_main_state_tests {
             .unwrap();
         assert_eq!(again.shared_open_files_for_exec().unwrap(), Some(empty));
     }
+}
+/// How far a preemption replay's thread ran past a recorded slice end it
+/// had not been stopped at ([`replay_slice_overshoot`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ReplaySliceOvershoot {
+    /// The recorded end of the slice.
+    pub(crate) end_time: LogicalTime,
+    /// The recorded end of the slice in retired conditional branches, when
+    /// the record has it.
+    pub(crate) end_rcbs: Option<u64>,
+    /// Where the thread already is.
+    pub(crate) now: LogicalTime,
+    /// Where the thread already is, in retired conditional branches.
+    pub(crate) now_rcbs: u64,
+}
+
+/// Whether a thread at `now` (`now_rcbs`) has already passed the recorded end
+/// of its next slice, `end_time` (`end_rcbs`). A recorded branch count
+/// decides when there is one: past it is an overshoot, and exactly at it is
+/// the slice's end, now, whatever the time says. Without one, a recorded end
+/// at or before `now` is an overshoot.
+///
+/// Records that store their epoch are reconciled with this run's epoch before
+/// any guest starts (`adopt_replayed_schedule_epoch` in hermit-cli), so for
+/// them this means the replay ran past the point it should have stopped at.
+/// A record without an epoch cannot be checked up front: replaying it under
+/// another epoch also lands here
+/// (https://github.com/rrnewton/hermit/issues/3413).
+pub(crate) fn replay_slice_overshoot(
+    end_time: LogicalTime,
+    end_rcbs: Option<u64>,
+    now: LogicalTime,
+    now_rcbs: u64,
+) -> Option<ReplaySliceOvershoot> {
+    let passed = match end_rcbs {
+        Some(end) if end != now_rcbs => end < now_rcbs || end_time <= now,
+        Some(_) => false,
+        None => end_time <= now,
+    };
+    passed.then_some(ReplaySliceOvershoot {
+        end_time,
+        end_rcbs,
+        now,
+        now_rcbs,
+    })
+}
+
+/// A recorded slice end exactly at the thread's branch count, `rcbs`, whose
+/// recorded time is behind the thread's, `now`, taken as an overshoot.
+///
+/// This is asked at a slice's start, where `now` is the instant the slice
+/// before it ended. A recorded end exactly at the thread's count is "now" for
+/// [`replay_slice_overshoot`], and a slice following it is already over: it
+/// ends at once, with no branch and no syscall. That is the record's own
+/// shape for adjacent zero-RCB slices (several change points with no branch
+/// between them, `replay_preserves_adjacent_zero_rcb_slices`), where the
+/// thread is at the recorded end in time too, or before it. An end whose
+/// recorded time is behind the thread's is not that: the replay's thread is
+/// already past it, because the slice before ran onto its count (a skid) or
+/// the replay's time ran ahead of the record. Following it closed a slice
+/// with no time in it at a point the record had already left, which stalled
+/// a replay and then tripped the re-recording writer's `&time > last` in the
+/// timeout's cleanup. A recorded end at the thread's time exactly is still
+/// followed; a change point that then repeats the last one's instant is the
+/// scheduler's to refuse (`report_stale_replay_change_point`).
+fn closes_at_last_end(
+    end_time: LogicalTime,
+    end_rcbs: Option<u64>,
+    now: LogicalTime,
+    rcbs: u64,
+) -> Option<ReplaySliceOvershoot> {
+    (end_rcbs == Some(rcbs) && end_time < now).then_some(ReplaySliceOvershoot {
+        end_time,
+        end_rcbs,
+        now,
+        now_rcbs: rcbs,
+    })
+}
+
+/// Reports a preemption replay's thread about to file a change point at
+/// `time`, not after its last one at `last`
+/// ([`ThreadState::file_replay_change_point`]): a skid overshoot, counted
+/// where every overshoot is (`reverie::record_skid_overshoot`) so the run
+/// ends in the skid-overshoot policy refusal, and named with
+/// `reverie::SKID_OVERSHOOT_MARKER`. Panics instead under
+/// `--panic-on-rcb-overshoot`.
+#[cold]
+pub(crate) fn report_stale_replay_filing(
+    panic_on_rcb_overshoot: bool,
+    dettid: DetTid,
+    slice: u64,
+    time: LogicalTime,
+    last: LogicalTime,
+) {
+    let message = format!(
+        "{} preemption replay: thread {} would end slice T{} with a change point at {}, not \
+         after its last change point at {}: the slice closed with no time in it, which the \
+         replayed record never does. The thread files no change point here and runs on as \
+         its final slice; the rest of this run does not replay the record exactly.",
+        reverie::SKID_OVERSHOOT_MARKER,
+        dettid,
+        slice,
+        time,
+        last,
+    );
+    if panic_on_rcb_overshoot {
+        panic!("{message}");
+    }
+    reverie::record_skid_overshoot();
+    tracing::error!("{message}");
+}
+
+/// Reports a preemption replay's thread found past `passed` recorded slice
+/// ends, the first of which `overshoot` describes: a
+/// skid overshoot, counted where every overshoot is
+/// (`reverie::record_skid_overshoot`) so the run ends in the skid-overshoot
+/// policy refusal, and named with `reverie::SKID_OVERSHOOT_MARKER`. Panics
+/// instead under `--panic-on-rcb-overshoot`, as the timer's own overshoot
+/// check does.
+#[cold]
+fn report_replay_slice_overshoot(
+    panic_on_rcb_overshoot: bool,
+    dettid: DetTid,
+    slice: u64,
+    overshoot: &ReplaySliceOvershoot,
+    passed: u64,
+) {
+    let rcbs = match overshoot.end_rcbs {
+        Some(end) => format!(
+            " (recorded at {end} retired conditional branches, the thread is at {}, {} past it)",
+            overshoot.now_rcbs,
+            overshoot.now_rcbs.saturating_sub(end)
+        ),
+        None => String::new(),
+    };
+    let later = match passed {
+        0 | 1 => String::new(),
+        more => format!(", and past the {} recorded ends after it", more - 1),
+    };
+    let message = format!(
+        "{} preemption replay: thread {} is already at {} when slice T{} is recorded to end at {}{}{}. \
+         The replay goes on from the first recorded end still ahead, or its final slice past \
+         every one; the rest of this run does not replay the record exactly. \
+         If the record was made under another virtual-time epoch, replay it with that --epoch \
+         (https://github.com/rrnewton/hermit/issues/3413). An edited record, not the recording \
+         of this run's schedule, needs --replay-edited-preemptions.",
+        reverie::SKID_OVERSHOOT_MARKER,
+        dettid,
+        overshoot.now,
+        slice,
+        overshoot.end_time,
+        rcbs,
+        later,
+    );
+    if panic_on_rcb_overshoot {
+        panic!("{message}");
+    }
+    reverie::record_skid_overshoot();
+    tracing::error!("{message}");
 }
