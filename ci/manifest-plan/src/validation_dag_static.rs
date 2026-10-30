@@ -2096,6 +2096,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // remove 5 and one `#[ignore]` test is listed but never executed.
     // And run::access_trace_is_refused_where_its_records_would_name_nothing
     // and run::a_manifest_leaves_out_the_access_trace: 1123.
+    // and run::a_manifest_leaves_out_the_access_trace: 1179.
+    // And the racing-accesses report's races::tests::{
+    // the_outcome_point_is_the_first_criterion_met_after_the_decision,
+    // the_block_prints_each_access_stack_and_an_unavailable_reason} and
+    // race_report::tests::{an_unreadable_realized_schedule_is_named,
+    // a_traced_replay_carries_the_record_cap}: 1183.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6629,6 +6635,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --no-namespace replay units: 1163 + 2 = 1165.
     // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1169.
     // And the same two access-trace run:: tests as test.hermit_unit: 1117.
+    // And the same three prefix-hang tests: 1143.
+    // And the same eight workspace-cleanup tests: 1151.
+    // And the same twenty-six racing-access finder tests: 1177.
+    // And the same four racing-accesses report tests: 1181.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
