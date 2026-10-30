@@ -88,6 +88,29 @@ pub struct Replayer {
     /// `events_popped + skipped` is the replay's position in the schedule,
     /// which places the background starts.
     skipped: u64,
+    /// The first replayed event that differed from the record, for the run
+    /// summary (<https://github.com/rrnewton/hermit/issues/4876>).
+    pub first_desync: Option<FirstDesync>,
+    /// How many recorded events fast-forwards dropped unconsumed.
+    pub events_dropped: u64,
+}
+
+/// The first replayed event that differed from the record
+/// (`Replayer::first_desync`).
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub struct FirstDesync {
+    /// Its number, as `traced_event_count` and the `[tracereplay]` warnings
+    /// number events.
+    pub event: u64,
+    /// The record's position then ([`Replayer::record_position`]): the index
+    /// of the recorded event it stood for.
+    pub record_event: u64,
+    /// The thread that ran it.
+    pub observed: DetTid,
+    /// The thread of the recorded event.
+    pub expected: DetTid,
+    /// Whether it was a hard desync (`is_hard_desync`).
+    pub hard: bool,
 }
 
 /// The count of desyncs for a particular thread.
@@ -288,7 +311,18 @@ impl Replayer {
             skipped: 0,
             unmatched_run: 0,
             released: false,
+            first_desync: None,
+            events_dropped: 0,
         }
+    }
+
+    /// Where the replay is in the record: the index, among the record's
+    /// schedule events, of the next one to match. It equals
+    /// `traced_event_count` until the first desync; after it, an event
+    /// observed in hard desync consumes no recorded event and a fast-forward
+    /// drops recorded events unobserved, so the two can part.
+    pub fn record_position(&self) -> u64 {
+        self.events_popped + self.events_dropped
     }
 
     /// The same replayer, with the poll skips its record holds
@@ -642,6 +676,15 @@ impl Replayer {
             let is_desync = is_desync(observed, &expected);
             let mut in_hard_desync_mode = false;
             if is_desync {
+                if self.first_desync.is_none() {
+                    self.first_desync = Some(FirstDesync {
+                        event: current_ix,
+                        record_event: self.record_position(),
+                        observed: observed.dettid,
+                        expected: expected.dettid,
+                        hard: is_hard_desync(observed, &expected),
+                    });
+                }
                 let counts = self.desync_counts.entry(mytid).or_default();
                 if is_hard_desync(observed, &expected) {
                     if self.die_on_desync {
@@ -809,6 +852,7 @@ impl Replayer {
             // Drop the corresponding number of of missed/mismatched events so that the observed
             // matches the head of the replay tape (which is to be popped).
             self.cursor.drop(ix);
+            self.events_dropped += ix as u64;
             Some(ix)
         } else {
             trace!(
