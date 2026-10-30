@@ -888,7 +888,15 @@ impl RecordVersion {
 // ERESTARTSYS on, and an SA_RESTART handler ran the poll again; replaying such
 // a recording here ends that poll with EINTR and falls out of step, so it is
 // refused.
-pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x18d);
+// 0x18d -> 0x18e (stacked after the frontier's earlier format changes; on its own 0x187 -> 0x188; provisional: 0x188 is HIGHEST_SHIPPED + 1 at this base; the
+// lander re-checks HIGHEST_SHIPPED + 1 at land): the kernel's restart of a poll
+// a signal ended in the kernel is the guest's own restart_syscall, run in place
+// and recorded with the poll's outputs, where it was a poll Detcore injected in
+// its stead. A recording holds restart_syscall at that point instead of poll,
+// so an older replayer would refuse it as a desync, and this one would refuse
+// an older recording the same way; the exact-match gate names the cause
+// instead.
+pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x18e);
 
 /// The highest RECORD_VERSION this project has ever shipped.
 ///
@@ -913,7 +921,7 @@ pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x18d);
 /// the version exists to prevent.
 ///
 /// RAISE THIS IN THE SAME COMMIT THAT RAISES RECORD_VERSION.
-const HIGHEST_SHIPPED_RECORD_VERSION: u32 = 0x18d;
+const HIGHEST_SHIPPED_RECORD_VERSION: u32 = 0x18e;
 
 const _: () = assert!(
     RECORD_VERSION.0 >= HIGHEST_SHIPPED_RECORD_VERSION,

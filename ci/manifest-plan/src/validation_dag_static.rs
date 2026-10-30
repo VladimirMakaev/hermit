@@ -1208,6 +1208,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // terminal_outcome_tests::terminal_outcomes_carry_their_status_and_class_line
     // and config::tests::virtual_timeout_round_trips_but_never_enters_the_legacy_form
     // (--virtual-timeout): 1882.
+    // And hermit-record-format event::tests::only_a_restart_naming_an_interrupted_poll_restarts_it: 1881.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -4716,6 +4717,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (https://github.com/rrnewton/hermit/issues/4132), which needs no PMU;
     // its PMU sibling runs in privileged-test.pmu_cli_cases: 623, listed.
     // And a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline: 645.
+    // And a_zero_timeout_poll_ended_by_a_signal_restarts_as_on_linux: 638.
+    // And a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline: 639.
+    // And a_kernel_run_polls_restart_runs_in_place: 640.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5288,6 +5292,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_parents_sigchld_is_not_held_behind_a_sibling_that_never_blocks needs
     // neither a PMU nor CPUID faulting: 542, listed.
     // And a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline: 564.
+    // And a_zero_timeout_poll_ended_by_a_signal_restarts_as_on_linux: 557.
+    // And a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline: 558.
+    // And the same kernel-run poll restart test: 559.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6440,6 +6447,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same detcore-model stdio unit: 1871.
     // And the same one-RCB minimum unit: 1867 (1866 on main plus one).
     // And the same two --virtual-timeout detcore-model tests: 1868.
+    // And the same InterruptedPoll unit: 1867.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
