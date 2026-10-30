@@ -349,7 +349,10 @@ mod callback_history_scheduler_tests {
                 .desync_notes
                 .iter()
                 .map(|note| {
-                    assert!(text.contains(note.message.as_str()), "{note:?} not in {text}");
+                    assert!(
+                        text.contains(note.message.as_str()),
+                        "{note:?} not in {text}"
+                    );
                     (
                         note.kind,
                         note.thread,
@@ -397,11 +400,12 @@ mod callback_history_scheduler_tests {
     /// fast-forward moves the record's position on.
     #[test]
     fn summarized_desyncs_name_their_recorded_event() {
+        use detcore_model::summary::DesyncKind;
+
         use crate::preemptions::callback_history::Checkpoint;
         use crate::preemptions::callback_history::Origin;
         use crate::preemptions::callback_history::Site;
         use crate::slice_boundary::callbacks::Callback;
-        use detcore_model::summary::DesyncKind;
         let t = tid(3);
         let point = Checkpoint {
             history_index: 4,
@@ -514,10 +518,167 @@ mod callback_history_scheduler_tests {
         assert_eq!(
             placed,
             [
-                (DesyncKind::ScheduleEvent, Some(tid(4)), Some(1), Some((1, 1))),
-                (DesyncKind::CallbackCheckpoint, Some(t), Some(2), Some((5, 4))),
+                (
+                    DesyncKind::ScheduleEvent,
+                    Some(tid(4)),
+                    Some(1),
+                    Some((1, 1))
+                ),
+                (
+                    DesyncKind::CallbackCheckpoint,
+                    Some(t),
+                    Some(2),
+                    Some((5, 4))
+                ),
             ]
         );
+    }
+
+    /// A schedule replay's summary lists the recorded background starts it
+    /// did not take, each by thread, call and place in the record, and where
+    /// the replay passed it, in `desync_descrip` and as a note in
+    /// `desync_notes` (https://github.com/rrnewton/hermit/issues/4876).
+    #[test]
+    fn the_summary_names_each_untaken_background_start() {
+        use detcore_model::summary::BackgroundStartRef;
+        use detcore_model::summary::DesyncKind;
+        use detcore_model::summary::ReplayPosition;
+        let (a, b) = (DetTid::from_raw(3), DetTid::from_raw(5));
+        let events = [
+            SchedEvent::branches(a, 10).with_time(LogicalTime::from_nanos(100)),
+            SchedEvent::branches(a, 20).with_time(LogicalTime::from_nanos(200)),
+            SchedEvent::branches(a, 30).with_time(LogicalTime::from_nanos(300)),
+        ];
+        let start = |after, thread, call| crate::preemptions::BackgroundStart {
+            after,
+            thread,
+            call,
+        };
+        let mut scheduler = Scheduler::new(&Config::default());
+        scheduler.replayer = Some(
+            crate::scheduler::replayer::Replayer::new(events.clone())
+                .with_background_starts(&[start(1, b, 2), start(2, a, 5), start(3, a, 7)], true),
+        );
+        let replayer = scheduler.replayer.as_mut().unwrap();
+        replayer.observe_event(&events[0]);
+        replayer.observe_event(&events[1]);
+        let summary = scheduler.generate_partial_run_summary(None).unwrap();
+        let text = summary.desync_descrip.unwrap();
+        // The replay passes the first start, ends with the second due and
+        // never reaches the third.
+        let line = "DESYNC 3 recorded background starts were not taken: thread 5's call 2 before \
+                    record event #1 (passed at event #1, record event #1), thread 3's call 5 \
+                    before record event #2 (due when the replay ended), thread 3's call 7 before \
+                    record event #3 (not reached) (the replay ended at event #2, record event #2)";
+        assert!(text.contains(line), "{text}");
+        assert_eq!(summary.desync_notes.len(), 1);
+        let note = &summary.desync_notes[0];
+        assert_eq!(
+            (
+                note.kind,
+                note.thread,
+                note.record_event,
+                note.message.as_str()
+            ),
+            (DesyncKind::UntakenBackgroundStarts, None, Some(1), line)
+        );
+        assert_eq!(
+            note.background_starts,
+            [
+                BackgroundStartRef {
+                    thread: b,
+                    call: 2,
+                    after: 1,
+                    passed_at: Some(ReplayPosition {
+                        event: 1,
+                        record_event: 1
+                    }),
+                },
+                BackgroundStartRef {
+                    thread: a,
+                    call: 5,
+                    after: 2,
+                    passed_at: None,
+                },
+                BackgroundStartRef {
+                    thread: a,
+                    call: 7,
+                    after: 3,
+                    passed_at: None,
+                },
+            ]
+        );
+        assert_eq!(
+            note.reported_at,
+            Some(ReplayPosition {
+                event: 2,
+                record_event: 2
+            })
+        );
+        // The line lists the first ten starts and counts the rest; the note
+        // lists them all.
+        let many: Vec<_> = (0..12).map(|call| start(3, a, call)).collect();
+        let mut scheduler = Scheduler::new(&Config::default());
+        scheduler.replayer = Some(
+            crate::scheduler::replayer::Replayer::new(events.clone())
+                .with_background_starts(&many, true),
+        );
+        let summary = scheduler.generate_partial_run_summary(None).unwrap();
+        let text = summary.desync_descrip.unwrap();
+        assert!(
+            text.contains(
+                "thread 3's call 9 before record event #3 (not reached) and 2 more (the replay \
+                 ended at event #0, record event #0)"
+            ),
+            "{text}"
+        );
+        assert!(!text.contains("call 10 "), "{text}");
+        assert_eq!(summary.desync_notes[0].background_starts.len(), 12);
+    }
+
+    /// One `desync_notes` collects every producer's note: a replay that
+    /// departs from its schedule at an event and leaves a recorded background
+    /// start untaken reports both, the schedule event's note first, in
+    /// `desync_descrip`'s order (https://github.com/rrnewton/hermit/issues/4876).
+    #[test]
+    fn desync_notes_collect_every_producers_note() {
+        use detcore_model::summary::DesyncKind;
+        let (a, b, c) = (tid(3), tid(5), tid(7));
+        let event = |thread: DetTid, count: u32, nanos: u64| SchedEvent {
+            end_time: Some(LogicalTime::from_nanos(nanos)),
+            ..SchedEvent::branches(thread, count)
+        };
+        let recorded = [event(a, 10, 100), event(a, 20, 200), event(a, 30, 300)];
+        let start = |after, thread, call| crate::preemptions::BackgroundStart {
+            after,
+            thread,
+            call,
+        };
+        let mut scheduler = Scheduler::new(&Config::default());
+        scheduler.replayer = Some(
+            crate::scheduler::replayer::Replayer::new(recorded.clone())
+                .with_background_starts(&[start(1, b, 2)], true),
+        );
+        let replayer = scheduler.replayer.as_mut().unwrap();
+        replayer.observe_event(&recorded[0]);
+        // Another thread runs where the record has `a`: the start due after
+        // event 0 is passed, and the event departs from the schedule.
+        replayer.observe_event(&event(c, 20, 200));
+        let summary = scheduler.generate_partial_run_summary(None).unwrap();
+        let kinds: Vec<_> = summary.desync_notes.iter().map(|note| note.kind).collect();
+        assert_eq!(
+            kinds,
+            [
+                DesyncKind::ScheduleEvent,
+                DesyncKind::UntakenBackgroundStarts
+            ],
+            "{:?}",
+            summary.desync_descrip
+        );
+        let text = summary.desync_descrip.unwrap();
+        for note in &summary.desync_notes {
+            assert!(text.contains(&note.message), "{text}");
+        }
     }
     /// A thread reported past a checkpoint that this custody no longer holds
     /// first is refused as overshot by name, with the policy exit, instead of
