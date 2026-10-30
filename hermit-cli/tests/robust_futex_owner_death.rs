@@ -1603,11 +1603,12 @@ fn ptrace_records_a_self_aliased_word_woken_once_and_refuses_older_recordings() 
     // 0x18c runs a MSG_DONTWAIT call on a socketpair end once,
     // 0x18d a kernel poll a signal stopped before it ran returns,
     // 0x18e restarts a kernel-run poll with the guest's own restart_syscall,
-    // and 0x18f shields kernel-run epoll waits from ignored signals),
+    // 0x18f shields kernel-run epoll waits from ignored signals,
+    // and 0x190 shields kernel-run poll-family waits from them too),
     // and a recording from before the change, 0x14f, is still refused by
     // the exact-match gate.
     assert_eq!(
-        metadata["version"], 0x18f,
+        metadata["version"], 0x190,
         "RECORD_VERSION moved; point this test at the current version and the one before"
     );
     metadata["version"] = serde_json::json!(0x14f);
