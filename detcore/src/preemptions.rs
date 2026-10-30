@@ -1035,6 +1035,7 @@ mod tests {
             start_rip: None,
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(5)),
+            stopless: false,
         };
         let mut plain = PreemptionWriter::new(None);
         plain.insert_schedevent(event(3));

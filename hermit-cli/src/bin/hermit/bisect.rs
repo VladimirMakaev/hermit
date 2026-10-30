@@ -194,7 +194,13 @@ impl BisectOpts {
         {
             event.end_time = None;
         }
-        if good.schedevents() == bad.schedevents() {
+        let (good_events, bad_events) = (good.schedevents(), bad.schedevents());
+        let same_events = good_events.len() == bad_events.len()
+            && good_events
+                .iter()
+                .zip(bad_events)
+                .all(|(g, b)| g.same_operations(b));
+        if same_events {
             bail!("the --good and --bad schedules contain identical event traces");
         }
         Ok((analyzer, good, bad))

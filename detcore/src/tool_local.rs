@@ -5046,6 +5046,16 @@ pub struct ThreadState<T> {
     #[serde(default)]
     pub lone_replay_unsound: bool,
 
+    /// In a schedule replay: the branch count, in `committed_clock_value`
+    /// units, of the thread's next recorded timeslice end when the recording
+    /// took that end without a stop (`SchedEvent::stopless`), as the
+    /// replayer's latest reply to this thread names it (`ReplayedSliceEnd`;
+    /// every TraceSchedEvent reply sets it, `None` when it names no such
+    /// end). Only that end may be taken without a stop in the replay; at any
+    /// other the recording stopped, and its RIP is checked.
+    #[serde(default)]
+    pub replayed_stopless_end: Option<u64>,
+
     /// Are we past the global moment when the guest's first execve of its root binary completes
     /// (with a successful exit code).
     pub(crate) past_global_first_execve: bool,
@@ -5784,6 +5794,7 @@ impl<T> ThreadState<T> {
             lone_slice_end: None,
             replaying_lone_slice_end: None,
             lone_replay_unsound: false,
+            replayed_stopless_end: None,
             record_or_replay,
             preemption_points: None,
             past_global_first_execve: false,
@@ -7332,6 +7343,9 @@ impl<T> ThreadState<T> {
             self.max_timeslice_end = Some(deadline);
         }
         self.replay_backstop = None;
+        // A new deadline lets no end go without a stop until the replayer's
+        // reply that installed it says so (`trace_schedevent`).
+        self.replayed_stopless_end = None;
     }
 
     /// Close the current logical-timeslice statistics without selecting a new

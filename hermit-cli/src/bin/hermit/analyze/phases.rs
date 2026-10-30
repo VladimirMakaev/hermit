@@ -1664,14 +1664,17 @@ impl std::fmt::Display for Departure {
 }
 
 /// Whether `ran` is the event `expected`, as the replayer matches them: the
-/// count and the time aside, and an instruction pointer compared only where
-/// `expected` has one. A replay records the end of a slice a timer cut, which
-/// the recording it replays may leave out; that is the same event.
+/// count and the time aside, an instruction pointer compared only where
+/// `expected` has one, and the end's only where neither run took that
+/// timeslice end without a stop (`SchedEvent::same_kind`). A replay records
+/// the end of a slice a timer cut, which the recording it replays may leave
+/// out; that is the same event.
 fn same_event(expected: &SchedEvent, ran: &SchedEvent) -> bool {
+    let rips_known = !(expected.stopless || ran.stopless);
     expected.dettid == ran.dettid
         && expected.op == ran.op
         && (expected.start_rip.is_none() || expected.start_rip == ran.start_rip)
-        && (expected.end_rip.is_none() || expected.end_rip == ran.end_rip)
+        && (!rips_known || expected.end_rip.is_none() || expected.end_rip == ran.end_rip)
 }
 
 /// How `realized` follows the first `until` events of `requested`: the
@@ -6424,6 +6427,7 @@ mod tests {
             start_rip: None,
             end_rip: detcore::types::InstructionPointer::new(rip),
             end_time: None,
+            stopless: false,
         };
         let requested = vec![
             other(3, 0x10),

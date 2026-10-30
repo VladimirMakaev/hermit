@@ -498,11 +498,26 @@ with `SIGKILL` never has its skipped ends processed; and a debugger that stops
 the thread between skipped ends sees Hermit's slice bookkeeping behind its
 program counter.
 Slice ends while two threads can run still stop the guest. This applies to the
-ptrace backend's precise timer, and not where the run records or replays
-preemptions or schedules, or uses `--target-timeslice`,
-`--chaos-per-thread-slowdown`, `--imprecise-timers`, turn-numbered triggers
-(`--stop-after-turn`, `--stop-after-iter`, `--signal-at`), stack traces at
-preemptions or events, manual interrupt points or a happens-before program.
+ptrace backend's precise timer, and not where the run uses `--target-timeslice`,
+`--chaos-per-thread-slowdown`, `--imprecise-timers`, strict schedule boundaries,
+turn-numbered triggers (`--stop-after-turn`, `--stop-after-iter`,
+`--signal-at`), stack traces at preemptions or events, manual interrupt points
+or a happens-before program.
+
+Recording and replaying keep these savings. A recorded schedule
+(`--record-preemptions-to`) holds each slice end taken without a stop as the
+branches up to it, as for any slice end, but with no instruction pointer (the
+guest was not stopped there) and marked `"stopless": true`. A schedule replay
+(`--replay-schedule-from`) takes such an end without a stop too when the thread
+again runs alone, and stops at every other end, where it checks the instruction
+pointer the recording read. A thread that the replay switches to takes its
+first end with a stop. A preemption replay (`--replay-preemptions-from`) takes
+any recorded end at a retired-branch count without a stop when the thread runs
+alone, except in a record with per-thread chaos rates. A record made before
+this mark existed replays as before. An older Hermit reads a record that holds
+the mark but ignores it: it stops at each such end, except one that its
+thread's own check-in follows directly, which it does not end; its replay
+desynchronizes there.
 
 Advanced investigations can save preemption decisions with
 `--record-preemptions-to=FILE` and replay them with
