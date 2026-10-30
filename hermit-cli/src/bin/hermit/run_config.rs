@@ -947,6 +947,7 @@ mod tests {
             "chaos-timeslice-draw",
             &["--chaos", "--chaos-timeslice-draw=run"],
         ),
+        ("post-crash-timeslice", &["--post-crash-timeslice=40000000"]),
         ("fuzz-futexes", &["--fuzz-futexes"]),
         ("chaos-target-races", &["--chaos-target-races"]),
         (

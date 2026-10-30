@@ -180,6 +180,74 @@ impl fmt::Display for PropertySnapshotSummary {
     }
 }
 
+/// The post-crash timeslice switch of a run (`Config::post_crash_timeslice`).
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct PostCrashSummary {
+    /// The post-crash bound in effect, in virtual nanoseconds.
+    pub bound: u64,
+    /// Where each switch was taken, in order; empty when the run never
+    /// crashed.
+    #[serde(default)]
+    pub switches: Vec<PostCrashSwitchSummary>,
+    /// Under a preemption replay, how many switches its record holds that the
+    /// replay never took (the replay left its record before reaching them).
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub recorded_not_taken: usize,
+}
+
+fn is_zero_u64(count: &u64) -> bool {
+    *count == 0
+}
+
+fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
+/// Where a run took the post-crash switch.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct PostCrashSwitchSummary {
+    /// The thread the crash signal was delivered to.
+    pub dtid: i32,
+    /// The crash signal's number.
+    pub signal: i32,
+    /// The thread whose `execve` took the switch, or `None` when the
+    /// delivery took the default action.
+    pub exec_by: Option<i32>,
+    /// The last committed scheduler turn when it was taken.
+    pub turn: u64,
+}
+
+impl fmt::Display for PostCrashSummary {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Post-crash timeslice: {} virtual ns, ", self.bound)?;
+        if self.switches.is_empty() {
+            write!(f, "not taken")?;
+        }
+        for (index, switch) in self.switches.iter().enumerate() {
+            if index > 0 {
+                write!(f, "; ")?;
+            }
+            write!(
+                f,
+                "switched at turn {} on signal {} to dtid {}",
+                switch.turn, switch.signal, switch.dtid
+            )?;
+            match switch.exec_by {
+                Some(dtid) => write!(f, " (taken at dtid {dtid}'s execve)")?,
+                None => write!(f, " (default action)")?,
+            }
+        }
+        if self.recorded_not_taken > 0 {
+            write!(
+                f,
+                "; {} recorded switch(es) not taken by this replay",
+                self.recorded_not_taken
+            )?;
+        }
+        Ok(())
+    }
+}
+
 /// Statistics that summarize a hermit run.
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct RunSummary {
@@ -240,6 +308,12 @@ pub struct RunSummary {
     /// Launch metadata, so not part of the INFO view `--verify` compares.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub property_snapshot: Option<PropertySnapshotSummary>,
+
+    /// The post-crash timeslice switch, when the run had it on
+    /// (`Config::post_crash_timeslice`). Shown in the full report, but not
+    /// the INFO guest-behavior view used by `--verify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub post_crash: Option<PostCrashSummary>,
 
     /// How the backend dispatched guest syscalls: through signals, patched
     /// direct calls, or ptrace stops. The record carries its own schema
@@ -320,7 +394,7 @@ pub struct RunSummary {
     /// child has exec'd or exited, so one that then fails, or each attempt of
     /// one that is restarted, is counted too: the count is of calls reported,
     /// and can exceed the tasks created.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub host_id_tasks: u64,
     /// aarch64: the load/store exclusive pairs (LL/SC retry loops) in the
     /// guest's executable file mappings, by guest path. A function of the
@@ -350,7 +424,7 @@ pub struct RunSummary {
     /// from, and the cache's own containers. The cache starts empty at each run, but
     /// it belongs to the Hermit process, so this is shown in the full report
     /// and not in the INFO view `--verify` compares. Zero elsewhere.
-    #[serde(default, skip_serializing_if = "is_zero")]
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub exclusive_rewrite_cache_peak: u64,
 
     /// **Nondeterministic:** aarch64, in runs that record or replay
@@ -446,10 +520,6 @@ impl fmt::Display for AdoptedSeeds {
             seeds.join(", ")
         )
     }
-}
-
-fn is_zero(count: &u64) -> bool {
-    *count == 0
 }
 
 /// What rewriting one file's exclusive loops in a guest's memory did. Every
@@ -708,6 +778,7 @@ impl RunSummary {
             per_thread_timeslice,
             preemption,
             property_snapshot,
+            post_crash,
             dispatch_stats: _,
             syscall_histogram: _,
             adopted_seeds,
@@ -870,6 +941,9 @@ impl RunSummary {
         }
         if include_report_metadata && let Some(watch) = watch {
             write!(f, "{watch}")?;
+        }
+        if include_report_metadata && let Some(post_crash) = post_crash {
+            writeln!(f, "{post_crash}")?;
         }
 
         if let Some(txt) = desync_descrip {

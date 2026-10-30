@@ -96,7 +96,7 @@ mod tests {
         // Adds `Resources.slice_expired` (#4653).
         (6, "5a4ad14e74501e11", "6a1b176897e67771"),
         // The frontier stack: its GlobalRequest/GlobalResponse variants.
-        (7, "9701f31690ceed73", "0e137ba5495ffb65"),
+        (7, "51ea506970d3ebfd", "0e137ba5495ffb65"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
