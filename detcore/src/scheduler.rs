@@ -16678,6 +16678,7 @@ impl Scheduler {
                         thread: Some(dettid),
                         record_event: None,
                         checkpoints: Vec::new(),
+                        background_starts: Vec::new(),
                         reported_at: self.replay_position(),
                         message: refusal.clone(),
                     });
@@ -20296,6 +20297,7 @@ impl Scheduler {
                 thread: Some(tid),
                 record_event: place.record_event,
                 checkpoints: vec![place],
+                background_starts: Vec::new(),
                 reported_at,
                 message,
             });
@@ -20402,6 +20404,7 @@ impl Scheduler {
                     thread: Some(first.observed),
                     record_event: Some(first.record_event),
                     checkpoints: Vec::new(),
+                    background_starts: Vec::new(),
                     reported_at: Some(detcore_model::summary::ReplayPosition {
                         event: first.event,
                         record_event: first.record_event,
@@ -20432,18 +20435,74 @@ impl Scheduler {
             None
         };
 
-        // Name the recorded background starts the replay never took.
-        if let Some(left) = self
-            .replayer
-            .as_ref()
-            .map(Replayer::unconsumed_background_starts)
-            .filter(|left| *left > 0)
+        // Name the recorded background starts the replay never took, each by
+        // its thread, call and place in the record, and where the replay
+        // passed it (https://github.com/rrnewton/hermit/issues/4876).
+        if let Some(replayer) = self.replayer.as_ref()
+            && let untaken = replayer.untaken_background_starts()
+            && !untaken.is_empty()
         {
-            let message = format!("DESYNC {left} recorded background starts were not taken");
+            let ended_at = replayer.position_now();
+            let starts: Vec<_> = untaken
+                .iter()
+                .map(|start| detcore_model::summary::BackgroundStartRef {
+                    thread: start.thread,
+                    call: start.call,
+                    after: start.after,
+                    passed_at: start.passed_at,
+                })
+                .collect();
+            // The line lists the first starts; the note lists them all.
+            const LISTED: usize = 10;
+            let more = starts.len().saturating_sub(LISTED);
+            let message = format!(
+                "DESYNC {} recorded background starts were not taken: {}{} (the replay ended at \
+                 event #{}, record event #{})",
+                starts.len(),
+                starts
+                    .iter()
+                    .take(LISTED)
+                    .map(|start| format!(
+                        "thread {}'s call {} before record event #{} ({})",
+                        start.thread,
+                        start.call,
+                        start.after,
+                        match start.passed_at {
+                            Some(at) => format!(
+                                "passed at event #{}, record event #{}",
+                                at.event, at.record_event
+                            ),
+                            // Due when the replay ended (its events passed),
+                            // or still ahead of it.
+                            None if start.after <= ended_at.record_event => {
+                                "due when the replay ended".to_owned()
+                            }
+                            None => "not reached".to_owned(),
+                        }
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                if more > 0 {
+                    format!(" and {more} more")
+                } else {
+                    String::new()
+                },
+                ended_at.event,
+                ended_at.record_event,
+            );
             tracing::warn!("{}", message);
             desync_descrip
                 .get_or_insert_with(String::new)
                 .push_str(&format!("{message}\n"));
+            desync_notes.push(detcore_model::summary::DesyncNote {
+                kind: detcore_model::summary::DesyncKind::UntakenBackgroundStarts,
+                thread: None,
+                record_event: starts.first().map(|start| start.after),
+                checkpoints: Vec::new(),
+                background_starts: starts,
+                reported_at: Some(ended_at),
+                message,
+            });
         }
         // Legacy EOF policy does not make an unconsumed suffix fatal. Name
         // incomplete callback metadata separately; do not invent guest events.
@@ -20482,6 +20541,7 @@ impl Scheduler {
                         thread: Some(*tid),
                         record_event: places.first().and_then(|place| place.record_event),
                         checkpoints: places,
+                        background_starts: Vec::new(),
                         reported_at: replay_ended_at,
                         message,
                     });

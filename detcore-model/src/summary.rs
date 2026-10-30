@@ -701,6 +701,8 @@ pub enum DesyncKind {
     IncompleteCallbackHistory,
     /// Priority-history replay refused a recorded callback checkpoint.
     CallbackRefusal,
+    /// Recorded background starts the replay did not take.
+    UntakenBackgroundStarts,
     /// A kind this build does not know, written by a later Hermit.
     #[serde(other)]
     Other,
@@ -716,6 +718,30 @@ pub struct CheckpointRef {
     /// thread's event that ends the checkpoint's slice. `None` for a
     /// checkpoint before the thread's first event.
     pub record_event: Option<u64>,
+}
+
+/// A recorded background start a [`DesyncNote`] concerns
+/// (`background_starts` in the record).
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+pub struct BackgroundStartRef {
+    /// The thread whose call it began.
+    pub thread: DetTid,
+    /// The call's per-thread sequence number.
+    pub call: u64,
+    /// How many events of the record's schedule came before it: it lies
+    /// before the record's event of this index.
+    pub after: u64,
+    /// Where the replay was when it passed the start without taking it (the
+    /// next event came, or a fast-forward skipped past it): the observed event
+    /// and the record's position before that event or the skip was consumed.
+    /// For a start the replay passed at the next event, `record_event` is at
+    /// least `after`; for one a fast-forward skipped, it is less, as the
+    /// replay jumped over the start. `None` for a start still due when the
+    /// replay ended (`after` at most the note's `reported_at.record_event`)
+    /// and for one it never reached, including those it let go of with the
+    /// schedule (`Replayer::release_schedule`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub passed_at: Option<ReplayPosition>,
 }
 
 /// Where a schedule replay was, in its own numbering and in the record's.
@@ -744,17 +770,23 @@ pub struct DesyncNote {
     /// schedule (`global`, from 0): the recorded event the first differing
     /// event stood for (`schedule_event`); the event ending the checkpoint's
     /// slice (`callback_checkpoint`); the first unconsumed checkpoint's
-    /// (`incomplete_callback_history`). `None` when the record gives none.
+    /// (`incomplete_callback_history`); the first untaken start's `after`
+    /// (`untaken_background_starts`). `None` when the record gives none.
     pub record_event: Option<u64>,
     /// The recorded callback checkpoints it concerns, each with the index of
     /// the event ending its slice.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub checkpoints: Vec<CheckpointRef>,
+    /// The recorded background starts it concerns
+    /// (`untaken_background_starts`), in record order.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub background_starts: Vec<BackgroundStartRef>,
     /// Where the replay was when it reported this: at the differing event
     /// itself (`schedule_event`); when the thread reported the checkpoint,
     /// which can be later than `record_event`, since a thread reports it on
     /// its next check-in (`callback_checkpoint`); where the replay ended
-    /// (`incomplete_callback_history`). `None` without a schedule replay.
+    /// (`incomplete_callback_history`, `untaken_background_starts`). `None`
+    /// without a schedule replay.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reported_at: Option<ReplayPosition>,
     /// The line `desync_descrip` carries for it.
@@ -1437,6 +1469,7 @@ mod tests {
                         number: 23,
                         record_event: Some(16559),
                     }],
+                    background_starts: Vec::new(),
                     reported_at: Some(ReplayPosition {
                         event: 16621,
                         record_event: 16617,
@@ -1451,6 +1484,7 @@ mod tests {
                         number: 0,
                         record_event: None,
                     }],
+                    background_starts: Vec::new(),
                     reported_at: None,
                     message: "DESYNC incomplete callback history for 5126".into(),
                 },
@@ -1490,6 +1524,71 @@ mod tests {
         assert!(none.get("desync_notes").is_none(), "{none}");
         let old: RunSummary = serde_json::from_value(none).unwrap();
         assert!(old.desync_notes.is_empty());
+    }
+
+    /// An `untaken_background_starts` note reaches `--summary-json` with each
+    /// start's thread, call, place and, for one the replay passed, where it
+    /// passed it, and reads back
+    /// (https://github.com/rrnewton/hermit/issues/4876).
+    #[test]
+    fn untaken_background_start_notes_round_trip_through_summary_json() {
+        use super::BackgroundStartRef;
+        use super::DesyncKind;
+        use super::DesyncNote;
+        use super::ReplayPosition;
+        use crate::pid::DetTid;
+        let summary = RunSummary {
+            desync_notes: vec![DesyncNote {
+                kind: DesyncKind::UntakenBackgroundStarts,
+                thread: None,
+                record_event: Some(51206),
+                checkpoints: Vec::new(),
+                background_starts: vec![
+                    BackgroundStartRef {
+                        thread: DetTid::from_raw(5121),
+                        call: 35,
+                        after: 51206,
+                        passed_at: Some(ReplayPosition {
+                            event: 51207,
+                            record_event: 51206,
+                        }),
+                    },
+                    BackgroundStartRef {
+                        thread: DetTid::from_raw(5123),
+                        call: 24,
+                        after: 51217,
+                        passed_at: None,
+                    },
+                ],
+                reported_at: Some(ReplayPosition {
+                    event: 51271,
+                    record_event: 51217,
+                }),
+                message: "DESYNC 2 recorded background starts were not taken: ...".into(),
+            }],
+            ..Default::default()
+        };
+        let value = serde_json::to_value(&summary).unwrap();
+        assert_eq!(
+            value["desync_notes"],
+            serde_json::json!([{
+                "kind": "untaken_background_starts",
+                "record_event": 51206,
+                "background_starts": [
+                    {
+                        "thread": 5121,
+                        "call": 35,
+                        "after": 51206,
+                        "passed_at": { "event": 51207, "record_event": 51206 }
+                    },
+                    { "thread": 5123, "call": 24, "after": 51217 }
+                ],
+                "reported_at": { "event": 51271, "record_event": 51217 },
+                "message": "DESYNC 2 recorded background starts were not taken: ..."
+            }])
+        );
+        let parsed: RunSummary = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.desync_notes, summary.desync_notes);
     }
 
     #[test]
