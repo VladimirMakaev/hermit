@@ -9670,6 +9670,14 @@ mod tests {
             // trampolines keep the original syscall instruction), whose
             // rt_sigreturns reach the seccomp stop that reports them.
             "reports_sigreturns": matches!(backend, Backend::Ptrace | Backend::E9patch),
+            // DR0-DR3, through the ptrace backend, on x86-64 only.
+            "hardware_watchpoints": if cfg!(target_arch = "x86_64")
+                && matches!(backend, Backend::Ptrace | Backend::E9patch)
+            {
+                4
+            } else {
+                0
+            },
         })
     }
 

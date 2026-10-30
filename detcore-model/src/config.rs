@@ -38,10 +38,11 @@ const fn default_backend_capabilities() -> BackendCapabilities {
 
 /// The capabilities a [`Config`] has before the host prepares it for the
 /// backend that runs it: ptrace's, the backend Detcore's own tests use, except
-/// that eight facts stay off (`supports_blocked_wait_signal_interruption` and
+/// that nine facts stay off (`supports_blocked_wait_signal_interruption` and
 /// the four split out of it, which [`set_kernel_signal_facts`] clears
 /// together, `delivers_preemption_timer_events`,
-/// `runs_guest_code_between_injections`, `reports_sigreturns`). Until
+/// `runs_guest_code_between_injections`, `reports_sigreturns`,
+/// `hardware_watchpoints`). Until
 /// `supports_blocked_wait_signal_interruption`,
 /// `delivers_preemption_timer_events` and
 /// `runs_guest_code_between_injections` became backend capabilities they were
@@ -49,7 +50,7 @@ const fn default_backend_capabilities() -> BackendCapabilities {
 /// and were false otherwise; a configuration nobody prepared keeps that
 /// behaviour, and the four readings of the first with it. A configuration
 /// nobody prepared cannot know that sigreturns are reported, so that is off
-/// too (the DBT runtime's standalone
+/// too, and it sets no hardware watchpoints (the DBT runtime's standalone
 /// fallback starts from these). `reports_kernel_child_exit_signals` keeps
 /// ptrace's value, as `reports_child_exit_publication` does: it took over the
 /// child-exit ledger's gates from that field, so such a configuration behaves
@@ -61,6 +62,7 @@ pub const DEFAULT_BACKEND_CAPABILITIES: BackendCapabilities = {
     backend.delivers_preemption_timer_events = false;
     backend.runs_guest_code_between_injections = false;
     backend.reports_sigreturns = false;
+    backend.hardware_watchpoints = 0;
     backend
 };
 
@@ -1005,6 +1007,27 @@ pub struct Config {
     #[serde(default)]
     #[clap(long, value_name = "records")]
     pub access_trace_max_records: Option<u64>,
+
+    /// Report each access to these guest bytes, through a hardware watchpoint, as a `watch_hit`
+    /// record in the access trace (`--record-access-trace-to`): the thread, the instruction after
+    /// the access, the event it follows and, for a thread's first 64 hits, its stack. Repeat it for
+    /// up to the backend's watchpoint count (4 on x86-64). ADDR is a guest virtual address (hex
+    /// with 0x, or decimal), LEN 1, 2, 4 or 8 bytes with ADDR aligned to it (8 by default), and w
+    /// reports writes (the default), rw reads and writes. Every thread arms its watches at its
+    /// first stop from `--watch-from` on at which it does not block SIGTRAP; the trace's
+    /// `watch_summary` lines say which threads armed, when, and how many hits each had. A hit stops
+    /// the thread in the tracer only: it adds no scheduler request and moves no virtual time, so
+    /// the schedule and the guest's results are those of the run without it. Needs the ptrace
+    /// backend's hardware watchpoints and a precise timer whose overflow records are mapped.
+    #[serde(default)]
+    #[clap(long = "watch", value_name = "addr[:len][:w|rw]")]
+    pub watch: Vec<crate::watch::WatchArg>,
+
+    /// With `--watch`, arm the watches only once the run has recorded this many schedule events
+    /// (0, the default, arms them from the start).
+    #[serde(default)]
+    #[clap(long, value_name = "event", default_value = "0")]
+    pub watch_from: u64,
 
     /// **Deprecated:** Print a stacktrace each time the program is preempted.  Only makes sense in `--chaos` mode
     /// and typically goes with preemption recording/replaying.
@@ -2325,6 +2348,12 @@ impl fmt::Display for Config {
         if let Some(records) = self.access_trace_max_records {
             write!(f, " --access-trace-max-records={}", records)?;
         }
+        for watch in &self.watch {
+            write!(f, " --watch={}", watch)?;
+        }
+        if self.watch_from != 0 {
+            write!(f, " --watch-from={}", self.watch_from)?;
+        }
         if self.preemption_stacktrace {
             write!(f, " --preemption-stacktrace")?;
         }
@@ -3094,6 +3123,9 @@ const CONFIG_DEFINITION_SOURCES: &[&[u8]] = &[
     include_bytes!("pid.rs"),
     include_bytes!("schedule.rs"),
     include_bytes!("time.rs"),
+    // `WatchArg`, the element of `Config::watch`. The encoded default holds
+    // no watch, so neither encoding of `Config` shows its layout.
+    include_bytes!("watch.rs"),
 ];
 
 /// A fingerprint of this build's [`Config`] payload and the configuration and
@@ -3387,7 +3419,7 @@ fn legacy_backend_keys(config: &Config) -> [(&'static str, bool); 15] {
 /// can express, which includes every backend's own constant except for
 /// capabilities added after the legacy form froze: those never enter it, as
 /// `record_host_inputs` does not, and read back as their default. There are
-/// ten. `process_exits_complete_asynchronously` and
+/// eleven. `process_exits_complete_asynchronously` and
 /// `virtualizes_guest_sigalrm` are true only for in-guest LiteInst, which
 /// never travels through this DBT-only form.
 /// `supports_blocked_wait_signal_interruption`,
@@ -3398,7 +3430,7 @@ fn legacy_backend_keys(config: &Config) -> [(&'static str, bool); 15] {
 /// `supports_blocked_wait_signal_interruption` (`kernel_signal_state_is_guests`,
 /// `kernel_signal_targets_are_predictable`,
 /// `host_task_reads_reach_guest_threads`, `host_timed_signals_are_physical`),
-/// false for DBT too.
+/// false for DBT too. `hardware_watchpoints` reads back as 0, DBT's.
 ///
 /// `cpuid_virtualized_by_backend` supplies no capability either: it said the
 /// backend installed a CPUID policy of its own, which no backend does any
@@ -3688,6 +3720,9 @@ impl LegacyBackendKeys {
         backend.reports_sigreturns = false;
         backend.delivers_preemption_timer_events = false;
         backend.runs_guest_code_between_injections = false;
+        // Added after the legacy form froze, too: DBT sets no hardware
+        // watchpoints.
+        backend.hardware_watchpoints = 0;
         backend
     }
 }
@@ -3826,7 +3861,9 @@ mod legacy_backend_json {
     /// rewrite of aarch64 exclusive loops is done by the ptrace backend's
     /// global state, and no backend that reads the legacy form does it, so it
     /// is never written and reads as false.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 50] = [
+    /// unset. So did `watch` and `watch_from`, which need the trace and the
+    /// ptrace backend's watchpoints: never written, read as none and 0.
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 52] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -3877,6 +3914,8 @@ mod legacy_backend_json {
         "chaos_timeslice",
         "property_snapshot",
         "rewrite_exclusives_in_memory",
+        "watch",
+        "watch_from",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -4029,9 +4068,14 @@ mod legacy_backend_json {
                     | "rewrite_exclusives_in_memory",
                 ) => seed.deserialize(BoolDeserializer::new(false)).map(Some),
                 // Empty, as its serde default is; and 0, the default.
-                Some("in_guest_reserved_signals" | "access_trace_from") => {
+                Some("in_guest_reserved_signals" | "access_trace_from" | "watch_from") => {
                     seed.deserialize(U64Deserializer::new(0)).map(Some)
                 }
+                // None, as its serde default is.
+                Some("watch") => seed
+                    .deserialize(serde_json::Value::Array(Vec::new()))
+                    .map(Some)
+                    .map_err(<A::Error as de::Error>::custom),
                 // On, as its serde default is.
                 Some("signal_state_copy") => {
                     seed.deserialize(BoolDeserializer::new(true)).map(Some)
@@ -4378,7 +4422,9 @@ mod legacy_backend_json {
                 | "chaos_timeslice_draw"
                 | "chaos_timeslice"
                 | "property_snapshot"
-                | "rewrite_exclusives_in_memory" => Ok(()),
+                | "rewrite_exclusives_in_memory"
+                | "watch"
+                | "watch_from" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
         }
@@ -4768,6 +4814,7 @@ mod tests {
         backend.delivers_preemption_timer_events = false;
         backend.runs_guest_code_between_injections = false;
         backend.reports_sigreturns = false;
+        backend.hardware_watchpoints = 0;
         backend.reports_kernel_child_exit_signals = backend.reports_child_exit_publication;
         // The legacy discover_live_file_metadata bit couples three facts.
         backend.rediscovers_descriptors_after_exec = backend.tool_shares_guest_descriptor_table;
@@ -4866,7 +4913,11 @@ mod tests {
         let baseline = serde_json::to_value(BackendCapabilities::DBT).unwrap();
         for (name, value) in baseline.as_object().unwrap() {
             let mut edited = baseline.clone();
-            edited[name] = serde_json::Value::Bool(!value.as_bool().unwrap());
+            // A flag flips; the watchpoint count goes from none to four.
+            edited[name] = match value {
+                serde_json::Value::Bool(on) => serde_json::Value::Bool(!on),
+                _ => serde_json::json!(if value == 0 { 4 } else { 0 }),
+            };
             let backend = serde_json::from_value(edited).unwrap();
             let sent = Config {
                 backend,
@@ -5317,7 +5368,9 @@ mod tests {
                 | "chaos_timeslice_draw"
                 | "chaos_timeslice"
                 | "property_snapshot"
-                | "rewrite_exclusives_in_memory" => {}
+                | "rewrite_exclusives_in_memory"
+                | "watch"
+                | "watch_from" => {}
                 other => expected.push(other.to_owned()),
             }
         }
@@ -5342,9 +5395,9 @@ mod tests {
         // `annotated_priority_replay`, `virtual_cpus`, `notice_host_network_abstract_binds`,
         // `replay_adopted_seeds`, `replay_continue_fairly`, `eager_lone_preemptions` and
         // `replay_edited_preemptions` and `strict_schedule_boundaries` none: fourteen more keys and
-        // forty-seven fewer, so thirty-three keys fewer than fields.
+        // forty-nine fewer, so thirty-five keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 32);
+        assert_eq!(fields.len(), keys.len() + 34);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
@@ -6437,6 +6490,8 @@ mod tests {
             access_trace: Some(PathBuf::from("/var/run 1.access")),
             access_trace_from: 7586,
             access_trace_max_records: Some(40),
+            watch: vec!["0x404010:4:rw".parse().unwrap()],
+            watch_from: 12,
             ..off.clone()
         };
         let json = to_legacy_backend_json(&on).unwrap();
@@ -6445,6 +6500,7 @@ mod tests {
         let decoded = from_legacy_backend_json(&json).unwrap();
         assert_eq!((decoded.access_trace, decoded.access_trace_from), (None, 0));
         assert_eq!(decoded.access_trace_max_records, None);
+        assert_eq!((decoded.watch, decoded.watch_from), (vec![], 0));
         let values: Vec<serde_json::Value> = ordered_entries(&json)
             .into_iter()
             .map(|(_, value)| value)
@@ -6464,13 +6520,17 @@ mod tests {
                 decoded.access_trace_max_records,
                 config.access_trace_max_records
             );
+            assert_eq!(
+                (decoded.watch, decoded.watch_from),
+                (config.watch.clone(), config.watch_from)
+            );
         }
 
         let spelled = on.to_string();
         assert!(
             spelled.contains(
                 " --record-access-trace-to='/var/run 1.access' --access-trace-from=7586 \
-                 --access-trace-max-records=40"
+                 --access-trace-max-records=40 --watch=0x404010:4:rw --watch-from=12"
             ),
             "{spelled}"
         );
@@ -6480,10 +6540,13 @@ mod tests {
             "--record-access-trace-to=/var/run 1.access",
             "--access-trace-from=7586",
             "--access-trace-max-records=40",
+            "--watch=0x404010:4:rw",
+            "--watch-from=12",
         ]);
         assert_eq!(reparsed.access_trace, on.access_trace);
         assert_eq!(reparsed.access_trace_from, 7586);
         assert_eq!(reparsed.access_trace_max_records, Some(40));
+        assert_eq!((reparsed.watch, reparsed.watch_from), (on.watch, 12));
     }
 
     /// The in-guest reserved-signal set as an in-guest default-route run
@@ -7909,16 +7972,18 @@ mod tests {
     fn config_fingerprint_sees_the_width_of_every_backend_capability() {
         // `BackendCapabilities` lives in Reverie, outside the fingerprinted
         // sources, so only its encoding can reveal a change to it. Every
-        // field is a bool, one byte in the encoding whatever its value, so the
-        // encoded default carries every field, and adding, removing or
-        // widening one changes the bytes. A field that is optional would have
-        // to be present in the default, or a change to its width would encode
-        // as the same bare `None`; this fails first.
+        // field is a bool or the u8 watchpoint count, one byte in the
+        // encoding whatever its value, so the encoded default carries every
+        // field, and adding, removing or widening one changes the bytes. A
+        // field that is optional would have to be present in the default, or
+        // a change to its width would encode as the same bare `None`; this
+        // fails first.
         let config = config_wire_default();
         let fields = serde_json::to_value(config.backend).unwrap();
         let fields = fields.as_object().unwrap();
         assert!(
-            fields.values().all(serde_json::Value::is_boolean),
+            fields.iter().all(|(name, value)| value.is_boolean()
+                || (name == "hardware_watchpoints" && value.is_u64())),
             "{fields:?}"
         );
         let encode = |config: &Config| {
@@ -8011,6 +8076,38 @@ mod tests {
             fingerprint_of_config_material(&wire, &named_shape, &changed_sources),
             current,
             "an inode-identity layout change must invalidate the fingerprint"
+        );
+    }
+
+    /// `Config::watch` is empty in the encoded default, so neither encoding
+    /// shows the layout of its element, `WatchArg`: a plugin built before a
+    /// change to it would decode a run's watches against another layout. A
+    /// change to its definition must invalidate the fingerprint.
+    #[test]
+    fn config_fingerprint_includes_the_watch_element_layout() {
+        let config = config_wire_default();
+        assert!(config.watch.is_empty(), "the default hides the element");
+        let wire = bincode::serde::encode_to_vec(&config, bincode::config::legacy()).unwrap();
+        let named_shape = serde_json::to_string(&config).unwrap();
+        let current = config_wire_fingerprint();
+        let watch_source = include_bytes!("watch.rs").as_slice();
+        assert!(CONFIG_DEFINITION_SOURCES.contains(&watch_source));
+        let without_len = include_str!("watch.rs").replacen("    pub len: u8,\n", "", 1);
+        assert_ne!(without_len.as_bytes(), watch_source);
+        let changed_sources: Vec<_> = CONFIG_DEFINITION_SOURCES
+            .iter()
+            .map(|source| {
+                if *source == watch_source {
+                    without_len.as_bytes()
+                } else {
+                    *source
+                }
+            })
+            .collect();
+        assert_ne!(
+            fingerprint_of_config_material(&wire, &named_shape, &changed_sources),
+            current,
+            "a watch element layout change must invalidate the fingerprint"
         );
     }
 
