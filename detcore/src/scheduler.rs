@@ -1379,6 +1379,10 @@ pub struct Scheduler {
     /// already running from one that switches threads
     /// (<https://github.com/rrnewton/hermit/issues/4139>).
     previous_turn_tid: Option<DetTid>,
+    /// Whether some thread may have passed descriptors out of the guest
+    /// (`Resources::passes_descriptors_out`), after which no guest-held mark
+    /// counts (`polls_only_guest_state`). Permanent.
+    guest_held_marks_revoked: bool,
 
     /// Whether the last committed turn (as for `previous_turn_tid`, not a
     /// host-timed polling retry or a replay's switch turn) ended an expired timed wait
@@ -5367,6 +5371,7 @@ impl Scheduler {
             timed_wait_spread: cfg
                 .chaos_timed_wait_spread
                 .map(|spread| timed_wait_spread::TimedWaitSpread::new(spread, cfg.sched_seed())),
+            guest_held_marks_revoked: false,
             blocked: Default::default(),
             vfork_barriers: Default::default(),
             background_entry_barriers: Default::default(),
@@ -6260,6 +6265,13 @@ impl Scheduler {
         // restarts and re-issues a fresh request on the next turn. Any other
         // double-put still panics, preserving the write-once Ivar invariant.
         // Mirrors the `try_put` guard in `logically_kill_thread` (PR-845).
+        if rs.passes_descriptors_out && !self.guest_held_marks_revoked {
+            info!(
+                "[sched] dettid {} may have passed descriptors out of the guest: guest-held marks no longer count",
+                rs.tid
+            );
+            self.guest_held_marks_revoked = true;
+        }
         let continuation =
             (rs.continues_sigreturn && Self::is_inbound_signal_turn(&rs)).then_some(rs.tid);
         if let Some(dropped) = req.try_put(Ok(rs)) {
@@ -17889,6 +17901,17 @@ impl Scheduler {
         outstanding
     }
 
+    /// Whether polling request `rs` waits on guest state only
+    /// (`Resources::polls_guest_state_only`), as far as the scheduler can
+    /// still trust it: not when it rests on guest-held marks
+    /// (`Resources::relies_on_guest_held_marks`) and some thread may since
+    /// have passed descriptors out of the guest (`guest_held_marks_revoked`).
+    /// That reaches polls already waiting, and every process's descriptors.
+    fn polls_only_guest_state(&self, rs: &Resources) -> bool {
+        rs.polls_guest_state_only
+            && !(rs.relies_on_guest_held_marks && self.guest_held_marks_revoked)
+    }
+
     fn is_internal_turn(rsrcs: &Resources) -> bool {
         Self::is_x_turn(rsrcs, &ResourceID::TraceReplay)
     }
@@ -18018,14 +18041,20 @@ impl Scheduler {
     fn is_idle_guest_poller(&self, tid: DetTid, progress: u64) -> bool {
         self.run_queue.contains_tid(tid)
             && self.attempted_since(tid, progress)
-            && self.request_satisfies(tid, Self::waits_on_guest_state)
+            // A poll with a timeout ends at its own deadline, which
+            // `fast_forward_to_next_finite_deadline` does not consider, so it is
+            // not idle: jumping over it, or opening in the kernel while it waits,
+            // would end it late.
+            && self.request_satisfies(tid, |rs| {
+                self.waits_on_guest_state(rs) && rs.poll_deadline.is_none()
+            })
     }
 
     /// A retry, after an attempt that moved nothing, of a poll whose attempts
     /// depend only on guest actions (`is_idle_guest_poller`).
-    fn waits_on_guest_state(rs: &Resources) -> bool {
+    fn waits_on_guest_state(&self, rs: &Resources) -> bool {
         Self::is_polling_turn(rs)
-            && rs.polls_guest_state_only
+            && self.polls_only_guest_state(rs)
             && Self::waits_after_a_failed_attempt(rs)
     }
 
@@ -18077,7 +18106,7 @@ impl Scheduler {
         let pollers_wait = !self.run_queue.is_empty()
             && self.run_queue.tids().all(|&tid| {
                 self.request_satisfies(tid, |rs| {
-                    Self::waits_on_guest_state(rs)
+                    self.waits_on_guest_state(rs)
                         && rs.poll_deadline.is_none()
                         && !rs.polls_a_named_fifo
                         && !rs.waits_until_nothing_else_can_run
@@ -18697,7 +18726,7 @@ impl Scheduler {
             {
                 Some(Ok(rs)) => (
                     Self::is_polling_turn(&rs),
-                    rs.polls_guest_state_only,
+                    self.polls_only_guest_state(&rs),
                     Self::retries_its_call_without_progress(&rs),
                     rs.waits_until_nothing_else_can_run,
                     Self::is_due_sleep(&rs, now),
@@ -21413,6 +21442,59 @@ mod test {
             ..lone_config()
         };
         assert!(!grant(&eager, false));
+    }
+
+    /// Once a request reports that descriptors may have left the guest
+    /// (`Resources::passes_descriptors_out`), a poll that rests on guest-held
+    /// marks no longer counts as waiting on guest state only, including one
+    /// already waiting; a poll that does not rest on marks still does.
+    #[test]
+    fn guest_held_marks_stop_counting_once_descriptors_leave_the_guest() {
+        let config = Config::default();
+        let mut sched = Scheduler::new(&config);
+        let opener = DetTid::from_raw(3);
+        register_known_thread(&mut sched, opener);
+        let poller = DetTid::from_raw(5);
+        queued_poller(&mut sched, poller, true);
+        let mut marked = sched.next_turns[&poller].req.try_read().unwrap().unwrap();
+        marked.relies_on_guest_held_marks = true;
+        sched.next_turns.get_mut(&poller).unwrap().req = Ivar::full(Ok(marked.clone()));
+        assert!(sched.nothing_else_can_run(opener));
+
+        let exporter = DetTid::from_raw(7);
+        let mut export = Resources::new(exporter);
+        export.passes_descriptors_out = true;
+        let global_time = Arc::new(Mutex::new(GlobalTime::new(&config)));
+        sched.request_put(&Ivar::new(), export, &global_time);
+        assert!(sched.guest_held_marks_revoked);
+        assert!(!sched.nothing_else_can_run(opener));
+
+        marked.relies_on_guest_held_marks = false;
+        sched.next_turns.get_mut(&poller).unwrap().req = Ivar::full(Ok(marked));
+        assert!(sched.nothing_else_can_run(opener));
+    }
+
+    /// A guest-state poll with a timeout wakes at its deadline, which the
+    /// alone-poller fast-forward does not consider, so it may still run.
+    #[test]
+    fn a_guest_poller_with_a_timeout_may_still_run() {
+        let mut sched = Scheduler::new(&Config::default());
+        let opener = DetTid::from_raw(3);
+        register_known_thread(&mut sched, opener);
+        let poller = DetTid::from_raw(5);
+        register_known_thread(&mut sched, poller);
+        let mut resources = Resources::new(poller);
+        resources.insert(ResourceID::InternalIOPolling, Permission::W);
+        resources.poll_attempt = 1;
+        resources.polls_guest_state_only = true;
+        resources.poll_deadline = Some(LogicalTime::from_nanos(1_000_000));
+        sched.next_turns[&poller].req.put(Ok(resources));
+        sched.run_queue.push_poller(poller, DEFAULT_PRIORITY, 1);
+        sched.last_attempt_at.insert(poller, sched.progress_epoch);
+        sched
+            .guest_state_polled_at
+            .insert(poller, sched.progress_epoch);
+        assert!(!sched.nothing_else_can_run(opener));
     }
 
     #[test]
