@@ -1597,11 +1597,12 @@ fn ptrace_records_a_self_aliased_word_woken_once_and_refuses_older_recordings() 
     // 0x187 chaos recordings store their schedule,
     // 0x188 descriptors received over SCM_RIGHTS are registered through the
     // recording, with sockets whose peer is a guest polled in the turn,
-    // and 0x189 MAP_SHARED mappings of one file share memory in replay),
+    // 0x189 MAP_SHARED mappings of one file share memory in replay,
+    // and 0x18a status files show TracerPid 0 on every path),
     // and a recording from before the change, 0x14f, is still refused by
     // the exact-match gate.
     assert_eq!(
-        metadata["version"], 0x189,
+        metadata["version"], 0x18a,
         "RECORD_VERSION moved; point this test at the current version and the one before"
     );
     metadata["version"] = serde_json::json!(0x14f);
