@@ -266,6 +266,7 @@ Do not work around them by trusting the output of the failed run.
 
 | Message family | Trigger |
 | --- | --- |
+| `HERMIT_SCHEDULER_PANIC: the scheduler panicked (above); ...`, then `HERMIT_INTERNAL_FAILURE class=container-child-exit status=Exited(101)` | Detcore's scheduler task panicked (the panic message is printed just above). Every guest thread waits on the scheduler, so the container ends at once with exit status 101 and the run exits 125, instead of hanging until `--timeout`. |
 | `LogicalTime::duration_since ... future`, `update_global_time ... before start`, `Attempted to update ... time ... already ...`, or `Trying to extract time for thread ... no entry` | Detcore's logical clock moved backward or lost a registered thread. |
 | `Couldn't read clock`, `end_of_timeslice is None`, `Ended time slice ... still beyond`, `Timer invariant broken`, or `Failed to set timer` | PMU/RCB timeslice state violated an invariant or the backend rejected a timer. |
 | `thread time should never go down`, `Global time is before epoch start`, or `bump_global_time ... went backwards` | Global and per-thread logical clocks disagree. |

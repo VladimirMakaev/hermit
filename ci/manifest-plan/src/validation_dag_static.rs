@@ -3778,6 +3778,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // rewrite tests on top add none here: 2741, listed.
     // And this branch's Detcore unit tests: 2712.
     // And procmaps' three --detlog-anon units: 2684, listed.
+    // And the scheduler's a_scheduler_task_panic_reaches_its_handler: 2693, listed.
+    // And a_scheduler_panic_during_backend_failure_cleanup_still_unwinds: 2694, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6553,6 +6555,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // rewrite tests on top add none here: 2741, listed.
     // And the same tests: 2712.
     // And procmaps' three --detlog-anon units: 2684, listed.
+    // And the same scheduler-panic unit: 2693, listed.
+    // And the same backend-failure-cleanup panic unit: 2694, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
