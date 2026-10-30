@@ -2102,6 +2102,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // the_block_prints_each_access_stack_and_an_unavailable_reason} and
     // race_report::tests::{an_unreadable_realized_schedule_is_named,
     // a_traced_replay_carries_the_record_cap}: 1183.
+    // And run's a_host_without_tmp_or_a_group_file_mounts_neither,
+    // a_host_without_tmp_refuses_what_would_go_into_it and
+    // a_mount_target_an_earlier_mount_provides_is_not_refused (a host without
+    // /tmp or /etc/group, as Android): 1124, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5006,6 +5010,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And access_trace's a_futex_ping_pong_yields_alternating_wake_edges and
     // signal_child_exit_and_join_edges_name_their_events: 627.
     // And a_schedule_replay_keeps_the_long_slices_of_a_preemption_replay: 638.
+    // And run_rejects_a_missing_mount_target_outside_tmp_by_name: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5641,6 +5646,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three access trace tests, not excluded: 544.
     // And the same two synchronization edge tests, not excluded: 546.
     // And the same uncapped-slices replay test: 557.
+    // And the same missing --mount target test, not excluded: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6651,6 +6657,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same eight workspace-cleanup tests: 1151.
     // And the same twenty-six racing-access finder tests: 1177.
     // And the same four racing-accesses report tests: 1181.
+    // And the same three host-layout units: 1118, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
