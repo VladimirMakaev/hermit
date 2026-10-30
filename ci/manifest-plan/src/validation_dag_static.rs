@@ -3270,6 +3270,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exec_identity_tests'
     // an_exec_continuation_resumes_the_schedules_slice_end_not_a_backstop):
     // 2748, listed.
+    // And scheduler::replayer::tests::a_replay_releases_its_schedule_after_a_long_unmatched_run
+    // (a replay stuck off its schedule lets go of it),
+    // scheduler::test::a_released_schedule_drops_its_callback_checkpoints and
+    // preemptions::callback_history::tests::a_released_replay_drops_the_remaining_checkpoints:
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4597,6 +4601,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_ends_each_recorded_slice_once: 656, listed.
     // Each of the two schedule-replay tests split into one test per seed
     // (seeds 1, 2 and 3), so each fits the 57-second wall bound: 656 + 4 = 660.
+    // And a_replay_stuck_off_its_schedule_lets_every_thread_run: 623, listed.
+    // And a_replay_past_its_schedule_ends_slices_as_a_run_without_one_does: 624.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5143,6 +5149,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_ends_each_recorded_slice_once: 575, listed.
     // And the same per-seed split of the two schedule-replay tests:
     // 575 + 4 = 579.
+    // And a_replay_stuck_off_its_schedule_lets_every_thread_run: 542, listed.
+    // And the same replay-continuation slice test: 543.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5638,6 +5646,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two hook-level replay units: 2743, listed.
     // And the same backstop-coincidence unit: 2744, listed.
     // And the same four replayed-slice-end units: 2748, listed.
+    // And the same three replay-release units: 2685, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests

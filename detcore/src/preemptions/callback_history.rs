@@ -268,6 +268,12 @@ impl State {
         self.progress.observe_event(event);
     }
 
+    /// Drop the remaining checkpoints: the replay no longer follows the
+    /// schedule they belong to (`Replayer::release_schedule`).
+    pub(crate) fn release(&mut self) {
+        self.checkpoints.clear();
+    }
+
     pub fn install(&mut self, startup: Startup) {
         if self.active || self.progress != Progress::default() {
             assert_eq!(
@@ -547,6 +553,14 @@ mod tests {
             assert!(!state.ends_later_in_callback(&actual), "{actual:?}");
         }
         assert!(!State::default().ends_later_in_callback(&expected));
+    }
+
+    #[test]
+    fn a_released_replay_drops_the_remaining_checkpoints() {
+        let mut state = replay(origin());
+        state.release();
+        assert_eq!(state.check(origin()), Decision::Wait);
+        assert!(state.is_active());
     }
 
     #[test]
