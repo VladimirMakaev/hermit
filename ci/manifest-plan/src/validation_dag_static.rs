@@ -3430,6 +3430,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_run_the_timeout_stopped_is_summarized_before_its_recording_is_flushed
     // and scheduler::boundary_controller::tests'
     // only_a_finished_runs_summary_requires_its_replay_to_have_ended: 2684,
+    // And scheduler::test's ten idle-poller deadlock units (a reader beside
+    // a writer nothing can wake, and nine states that still poll on): 2692.
+    // And scheduler::test::a_trace_replay_grant_after_a_failed_attempt_is_no_attempt: 2693.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3846,6 +3849,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And random_determinism's
     // a_schedule_replay_hands_the_guest_the_recorded_random_values (a replay
     // adopts the recorded --rng-seed and refuses another): 347, listed.
+    // And scheduler_deadlock's poll-deadlock report: 347.
     ("test.hermit_integration_3", 347),
     ("test.arbitrary_binaries", 4),
     // Every record_replay identity but one (`cargo nextest list` lists 110):
@@ -4834,6 +4838,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And chaos_timed_wait_spread_reorders_a_wait_against_work_and_keeps_the_clock_honest: 638.
     // And a_schedule_replay_of_a_timed_wait_spread_recording_follows_it: 639.
     // And run_timeout_prints_a_partial_summary_naming_the_deadline: 623,
+    // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5447,6 +5452,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same --chaos-timed-wait-spread guest test: 557.
     // And the same spread schedule-replay test: 558.
     // And the same partial-summary test, not excluded: 542, listed.
+    // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5990,6 +5996,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same spread past-the-schedule unit: 2708.
     // And the same spread replay-wait unit: 2709.
     // And the same two partial-summary units: 2684, listed.
+    // And the same ten idle-poller deadlock units: 2692.
+    // And the same TraceReplay-grant unit: 2693.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6108,6 +6116,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same fatal_core_capture leader-waits test: 694, listed.
     // And the same chaos_schedule_replay lit fixture: 695, listed.
     // And the same three fatal_core_capture tests: 696, listed.
+    // And scheduler_deadlock's poll-deadlock report: 694.
     ("test.hermit_integration_on_host", 694),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode

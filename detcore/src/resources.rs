@@ -623,6 +623,14 @@ pub struct Resources {
     /// whose outcome a host can change.
     #[serde(default)]
     pub(crate) polls_guest_state_only: bool,
+    /// Set beside `polls_guest_state_only` on a retry of a named FIFO that
+    /// joined internal polling (`DetFd::is_named_fifo`): a process outside
+    /// the container may hold its other end, so its attempts can succeed
+    /// without a guest action, and the poll never makes the run a deadlock
+    /// (`Scheduler::only_idle_guest_pollers_remain`). `false` for every other
+    /// request.
+    #[serde(default)]
+    pub(crate) polls_a_named_fifo: bool,
     /// Set by a blocking FIFO open waiting for a guest peer. When this polling
     /// turn commits and nothing else can run (`Scheduler::nothing_else_can_run`),
     /// the answer is `ResumeStatus::NothingElseCanRun`, and the open then waits
@@ -813,6 +821,9 @@ impl fmt::Debug for Resources {
         if self.polls_guest_state_only {
             debug.field("polls_guest_state_only", &true);
         }
+        if self.polls_a_named_fifo {
+            debug.field("polls_a_named_fifo", &true);
+        }
         if self.waits_until_nothing_else_can_run {
             debug.field("waits_until_nothing_else_can_run", &true);
         }
@@ -889,6 +900,7 @@ impl Resources {
             reads_signalfd: false,
             read_fd: None,
             polls_guest_state_only: false,
+            polls_a_named_fifo: false,
             waits_until_nothing_else_can_run: false,
             previous_attempt_made_progress: false,
             upgraded_from_attempt: 0,
@@ -958,6 +970,7 @@ impl Resources {
         self.private_sigchld_decides |= other.private_sigchld_decides;
         self.replay_served_from_log |= other.replay_served_from_log;
         self.polls_guest_state_only |= other.polls_guest_state_only;
+        self.polls_a_named_fifo |= other.polls_a_named_fifo;
         self.waits_until_nothing_else_can_run |= other.waits_until_nothing_else_can_run;
         // A combined operation is a zero-length sleep only if both parts are.
         self.zero_length_sleep &= other.zero_length_sleep;

@@ -20448,6 +20448,48 @@ fn happens_before_source_then_blocking_wait_lets_the_target_pass() {
     );
 }
 
+/// A schedule replay of a pipe reader whose writers wrote and exited after
+/// its last failed attempt is no deadlock: the reader's retry reads their
+/// bytes. In a replay the reader is held after that attempt, as the schedule
+/// runs a writer next, and its `TraceReplay` grant hands it its turn back
+/// before the retry. The idle-poller check counted that grant as the reader's
+/// latest attempt, so it judged the reader to have failed after everything
+/// the writers did, and reported a guest deadlock. Seeds 1, 5, 6 and 7,
+/// recorded under `--chaos`, each did, and must now replay to the
+/// recording's line with no desync.
+#[test]
+fn a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock() {
+    let program = pipe_reader_replay_guest()
+        .to_str()
+        .expect("pipe-reader-replay guest path should be UTF-8");
+    let dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    for seed in [1, 5, 6, 7] {
+        let record = dir.path().join(format!("seed-{seed}.json"));
+        let summary = dir.path().join(format!("seed-{seed}.summary.json"));
+        let seed_arg = format!("--seed={seed}");
+        let record_arg = format!("--record-preemptions-to={}", record.display());
+        let replay_arg = format!("--replay-schedule-from={}", record.display());
+        let summary_arg = format!("--summary-json={}", summary.display());
+        let run = |extra: &[&str]| {
+            let mut args = vec!["run", "--strict", "--epoch=2026-01-01T00:00:00Z"];
+            args.extend_from_slice(extra);
+            args.extend(["--", program]);
+            let output = hermit(&args);
+            assert_success(&output, &args);
+            stdout(&output)
+        };
+        let recorded = run(&["--chaos", seed_arg.as_str(), record_arg.as_str()]);
+        assert_eq!(
+            run(&[replay_arg.as_str(), summary_arg.as_str()]),
+            recorded,
+            "seed {seed}"
+        );
+        let summary: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&summary).unwrap()).unwrap();
+        assert_eq!(summary["schedevent_desynced"], 0, "seed {seed}: {summary}");
+    }
+}
+
 /// A gate whose BEFORE anchor can never fire, on the only thread left, is a
 /// deadlock to report (https://github.com/rrnewton/hermit/issues/3149). A held
 /// thread is in neither the run queue nor a blocked pool, so the scheduler loop
