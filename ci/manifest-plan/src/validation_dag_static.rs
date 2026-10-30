@@ -3342,7 +3342,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same eleven units on #4862's head on main 32f85d391 (2889): 2900.
     // The same eleven units on #4862's head on main dc85ec16a (3043): 3180,
     // listed.
-    ("test.detcore_unit", 3180),
+    // The same eleven units on #4862's head on main dc85ec16a (3043): 3054.
+    // And fd's
+    // a_receipt_shares_the_provenance_of_the_description_its_message_kept:
+    // 3181, listed.
+    ("test.detcore_unit", 3181),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5868,7 +5872,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same eleven units on main 32f85d391 (2889): 2900, listed.
     // The same eleven units on main 32f85d391 (2889): 2900.
     // The same eleven units on main dc85ec16a (3043): 3180, listed.
-    ("test.detcore_unit_on_host", 3180),
+    // The same eleven units on main dc85ec16a (3043): 3054.
+    // And the same receipt unit: 3181, listed.
+    ("test.detcore_unit_on_host", 3181),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
