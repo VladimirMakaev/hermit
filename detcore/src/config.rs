@@ -155,7 +155,7 @@ mod tests {
         // `GlobalRequest::NoteFatalDelivery` and
         // `GlobalResponse::NoteFatalDelivery`
         // (https://github.com/rrnewton/hermit/pull/4892).
-        (18, "795bea68654fbff1", "f8641fc93e7be026"),
+        (22, "104282c0296df23f", "f8641fc93e7be026"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
