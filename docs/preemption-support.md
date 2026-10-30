@@ -178,10 +178,14 @@ offsets when it has none, so a record made without the option is unchanged.
 The schedule trace carries them too. The timer's own batch of branches
 (`Op::Branch`, followed by the `Op::OtherInstructions` event that names the
 address the steps stopped at) holds the same `(rcb_target, k)` in
-`SchedEvent::instruction_offset`, and the recording that writes an offset
-states `"format_version": 2` (`PREEMPTION_RECORD_FORMAT`); one without is
-written as before, with neither field. An edit keeps the format of the record
-it edits. The format is one monotone counter: format N holds every feature numbered N
+`SchedEvent::instruction_offset`. Which format a record states depends on what
+wrote it. A run that records its schedule without replaying one states the
+current format (`PREEMPTION_RECORD_FORMAT`), whether or not it chose an offset.
+A run that replays a schedule and records its own leaves the field out unless
+it records an offset, which makes it state format 2. An edit keeps the offsets
+in the events it keeps, and with them format 2; it lowers format 3, whose
+background starts it drops, to 2, and keeps a lower format, or one this Hermit
+does not read (a newer one, or the invalid 0), as stated. The format is one monotone counter: format N holds every feature numbered N
 or lower, and a Hermit reads every format up to its own and refuses a newer
 one by name before reading anything else from the record, so a record that
 holds what it does not know is never read without it. (A Hermit from before

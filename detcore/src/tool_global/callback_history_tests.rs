@@ -1106,11 +1106,12 @@ async fn an_instruction_offset_slice_is_armed_recorded_and_replayed_alike() {
     let (_, _, rcbs, offset) = rows.next_with_offset().unwrap();
     assert_eq!((rcbs, offset), (Some(end), Some(armed)), "{record}");
     // The schedule trace records it too, on the timer's batch of branches,
-    // which the address the steps stopped at follows; the record says format 2.
+    // which the address the steps stopped at follows; the record states the
+    // run's format, which holds the offsets (format 2 or newer).
     let schedule = serde_json::from_str::<crate::preemptions::PreemptionRecord>(&record).unwrap();
     assert_eq!(
         schedule.format_version(),
-        crate::preemptions::INSTRUCTION_OFFSET_FORMAT,
+        crate::preemptions::PREEMPTION_RECORD_FORMAT,
         "{record}"
     );
     let events = schedule.schedevents();

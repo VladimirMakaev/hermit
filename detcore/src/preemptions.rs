@@ -1715,6 +1715,7 @@ mod tests {
             start_rip: None,
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(5)),
+            instruction_offset: None,
         };
         let read = |writer: PreemptionWriter| -> PreemptionRecord {
             serde_json::from_str(&writer.into_string()).unwrap()
@@ -2163,7 +2164,7 @@ mod tests {
         plain.insert_schedevent(branch(None));
         assert_eq!(
             plain.into_string(),
-            r#"{"per_thread":{},"global":[{"dettid":3,"op":"Branch","count":20,"start_rip":null,"end_rip":null,"end_time":null}]}"#
+            r#"{"per_thread":{},"global":[{"dettid":3,"op":"Branch","count":20,"start_rip":null,"end_rip":null,"end_time":null}],"rejoins":[]}"#
         );
         let unedited = PreemptionRecord::from_sched_events(vec![branch(None)]);
         assert_eq!(unedited.format_version, None);
@@ -2175,7 +2176,7 @@ mod tests {
         let json = writer.into_string();
         assert!(
             json.ends_with(
-                r#""instruction_offset":{"rcb_target":18,"instructions":4}}],"format_version":2}"#
+                r#""instruction_offset":{"rcb_target":18,"instructions":4}}],"format_version":2,"rejoins":[]}"#
             ),
             "{json}"
         );
@@ -2193,7 +2194,14 @@ mod tests {
         assert_eq!(rebuilt.schedevents()[1].instruction_offset, Some(offset));
         let mut split = record.clone();
         split.split_map(|event, _| vec![event]);
-        assert_eq!(split, record);
+        // An edit drops the record's readmissions (#4751), whatever it keeps.
+        assert_eq!(
+            split,
+            PreemptionRecord {
+                rejoins: None,
+                ..record.clone()
+            }
+        );
         let mut stripped = record.clone();
         stripped.strip_event_times();
         assert_eq!(stripped.format_version, Some(INSTRUCTION_OFFSET_FORMAT));
@@ -2311,8 +2319,9 @@ mod tests {
     }
 
     /// Every format a record can state, read from the file as a replay reads
-    /// it: formats 1 (absent or explicit) and 2 are read; 3 and 5, newer than
-    /// this Hermit, are refused by name with `RecordFormatRefusal`, kept typed
+    /// it: formats 1 (absent or explicit) through `PREEMPTION_RECORD_FORMAT`
+    /// are read; the next one and a later one, newer than this Hermit, are
+    /// refused by name with `RecordFormatRefusal`, kept typed
     /// through `Recording::decode` and `read_record_format`, for a legacy
     /// record and a slice-boundary one alike; 0 is malformed.
     #[test]
@@ -2341,19 +2350,27 @@ mod tests {
             ("legacy", &legacy as &dyn Fn(Option<u32>) -> String),
             ("boundary", &boundary),
         ] {
-            for format in [None, Some(1), Some(2), Some(3), Some(5), Some(0)] {
+            for format in [
+                None,
+                Some(1),
+                Some(INSTRUCTION_OFFSET_FORMAT),
+                Some(PREEMPTION_RECORD_FORMAT),
+                Some(PREEMPTION_RECORD_FORMAT + 1),
+                Some(PREEMPTION_RECORD_FORMAT + 3),
+                Some(0),
+            ] {
                 let bytes = make(format);
                 let path = directory.path().join(format!("{name}-{format:?}.json"));
                 std::fs::write(&path, &bytes).unwrap();
                 let decoded = boundary_recording::Recording::decode(bytes.as_bytes());
                 let stated = read_record_format(&path);
-                match format {
-                    None | Some(1) | Some(2) => {
+                match format.unwrap_or(1) {
+                    1..=PREEMPTION_RECORD_FORMAT => {
                         decoded.unwrap_or_else(|e| panic!("{name} {format:?}: {e:#}"));
                         assert_eq!(stated, Ok(format.unwrap_or(1)), "{name}");
                         assert_eq!(check_record_format(format.unwrap_or(1)), Ok(()));
                     }
-                    Some(0) => {
+                    0 => {
                         let error = decoded.unwrap_err();
                         assert!(
                             error.downcast_ref::<RecordFormatRefusal>().is_none(),
@@ -2364,7 +2381,7 @@ mod tests {
                             "{name}: {error:#}"
                         );
                     }
-                    Some(refused) => {
+                    refused => {
                         let error = decoded.unwrap_err();
                         assert_eq!(
                             error.downcast_ref::<RecordFormatRefusal>(),
@@ -2376,7 +2393,7 @@ mod tests {
                         assert!(
                             message.contains(&format!(
                                 "is format {refused}, written by a newer Hermit; this Hermit \
-                                 reads formats up to 2"
+                                 reads formats up to {PREEMPTION_RECORD_FORMAT}"
                             )),
                             "{message}"
                         );
@@ -2927,7 +2944,7 @@ mod tests {
     #[test]
     fn a_schedule_prefix_keeps_its_sources_record_format() {
         let tid = DetTid::from_raw(3);
-        for format in [None, Some(PREEMPTION_RECORD_FORMAT)] {
+        for format in [None, Some(INSTRUCTION_OFFSET_FORMAT)] {
             let mut record = PreemptionRecord::from_sched_events(vec![
                 SchedEvent::branches(tid, 10),
                 SchedEvent::branches(tid, 20),
@@ -3033,7 +3050,13 @@ mod tests {
         }
         for len in [0, 1] {
             let prefix = record.schedule_prefix(len);
-            assert_eq!(prefix.format_version, None, "prefix of {len} events");
+            // The format whose promises hold without the starts: the trace's
+            // instruction offsets ride with its events (format 2).
+            assert_eq!(
+                prefix.format_version,
+                Some(INSTRUCTION_OFFSET_FORMAT),
+                "prefix of {len} events"
+            );
             assert!(
                 prefix.background_starts().is_empty(),
                 "prefix of {len} events"

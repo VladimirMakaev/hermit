@@ -5845,7 +5845,8 @@ fn replay_of_instruction_offsets_is_refused_where_unsupported() {
         .unwrap();
         path
     };
-    for format in [3, 5] {
+    let current = detcore::preemptions::PREEMPTION_RECORD_FORMAT;
+    for format in [current + 1, current + 3] {
         let legacy = dir.path().join(format!("legacy-{format}.json"));
         {
             let mut json: serde_json::Value =
@@ -5863,7 +5864,7 @@ fn replay_of_instruction_offsets_is_refused_where_unsupported() {
                 let text = format!("{error:#}");
                 assert!(
                     text.contains(&format!("is format {format}, written by a newer Hermit"))
-                        && text.contains("this Hermit reads formats up to 2")
+                        && text.contains(&format!("this Hermit reads formats up to {current}"))
                         && text.contains(flag),
                     "{text}"
                 );

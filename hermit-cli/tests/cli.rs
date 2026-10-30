@@ -20276,7 +20276,11 @@ fn an_instruction_offset_record_replays_from_its_schedule_and_analyze_verifies_i
         assert_eq!(lost == 0, fixed, "{label} seed {seed}: {recorded}");
         let json: serde_json::Value =
             serde_json::from_slice(&fs::read(&record).expect("no preemption record")).unwrap();
-        assert_eq!(json["format_version"], 2, "{label}");
+        assert_eq!(
+            json["format_version"],
+            detcore::preemptions::PREEMPTION_RECORD_FORMAT,
+            "{label}"
+        );
         let events = json["global"].as_array().expect("schedule trace");
         let offsets: Vec<usize> = events
             .iter()

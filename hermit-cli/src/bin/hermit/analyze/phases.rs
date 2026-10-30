@@ -2931,6 +2931,10 @@ mod tests {
             json["format_version"] = (detcore::preemptions::PREEMPTION_RECORD_FORMAT + 1).into();
             json["epoch"] = "2001-02-03T04:05:06Z".into();
         });
+        let newer_format = format!(
+            "is format {}, written by a newer Hermit",
+            detcore::preemptions::PREEMPTION_RECORD_FORMAT + 1
+        );
         // Recorded under --chaos-per-thread-slowdown: its rows hold slowdown
         // epochs, which a schedule replay without chaos does not apply.
         let slowed = edited("slowed", &|json| {
@@ -2948,20 +2952,8 @@ mod tests {
                 "its schedule trace does not record the instruction offsets its rows hold",
             ),
             (&without, Some(&rows_only), &[], &[], "--run2-preemptions"),
-            (
-                &newer,
-                None,
-                &[],
-                epoch,
-                "is format 3, written by a newer Hermit",
-            ),
-            (
-                &without,
-                Some(&newer),
-                &[],
-                epoch,
-                "is format 3, written by a newer Hermit",
-            ),
+            (&newer, None, &[], epoch, newer_format.as_str()),
+            (&without, Some(&newer), &[], epoch, newer_format.as_str()),
             (&slowed, None, &[], &[], "recorded with it"),
             (
                 &with,

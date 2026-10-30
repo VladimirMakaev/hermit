@@ -323,7 +323,8 @@ mod tests {
         assert_eq!(trial.det_opts.det_config.chaos_instruction_offset, 0);
 
         let mut newer = bad.clone();
-        newer["format_version"] = serde_json::json!(3);
+        let newer_format = detcore::preemptions::PREEMPTION_RECORD_FORMAT + 1;
+        newer["format_version"] = serde_json::json!(newer_format);
         newer["epoch"] = serde_json::json!("2001-02-03T04:05:06Z");
         let newer_path = dir.path().join("newer.json");
         fs::write(&newer_path, newer.to_string()).unwrap();
@@ -332,7 +333,9 @@ mod tests {
         };
         assert!(error.downcast_ref::<PolicyRefusal>().is_some(), "{error:#}");
         assert!(
-            format!("{error:#}").contains("is format 3, written by a newer Hermit"),
+            format!("{error:#}").contains(&format!(
+                "is format {newer_format}, written by a newer Hermit"
+            )),
             "{error:#}"
         );
     }
