@@ -3370,6 +3370,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test::{a_finished_poll_beside_runnable_work_is_readmitted_at_the_logged_turn,
     // replay_ends_a_stalled_wait_once_a_thread_is_queued} (record readmits every
     // finished background call at once): 2684.
+    // And an_ignored_signal_shield_blocks_only_what_the_guest_ignores: 2696.
+    // And a_shield_dropped_with_its_handler_ends_quietly: 2697.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4762,6 +4764,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the four an_untraced_*_runs_as_natively tests: 641.
     // And implicit_binds_take_the_same_ports_on_every_run: 623, listed.
     // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 623.
+    // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 638.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5366,6 +5369,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And implicit_binds_take_the_same_ports_on_every_run, which starts no
     // LiteInst guest: 542, listed.
     // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 542.
+    // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 557.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5892,6 +5896,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same twenty implicit-bind port units: 2702, listed.
     // And resumed_kernel_wait_result_maps_only_erestartsys: 2683.
     // And the same two background-readmission units: 2684.
+    // And an_ignored_signal_shield_blocks_only_what_the_guest_ignores: 2696.
+    // And a_shield_dropped_with_its_handler_ends_quietly: 2697.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
