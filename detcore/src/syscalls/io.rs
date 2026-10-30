@@ -14,6 +14,10 @@ use std::net::Ipv4Addr;
 use std::net::Ipv6Addr;
 use std::os::unix::io::RawFd;
 use std::time::Duration;
+// Only the kernel-run `poll` restart reads the host clock, and only x86_64
+// has `poll`.
+#[cfg(target_arch = "x86_64")]
+use std::time::Instant;
 
 use nix::fcntl::OFlag;
 use reverie::Errno;
@@ -45,6 +49,8 @@ use crate::resources::ResourceID;
 use crate::resources::Resources;
 use crate::scheduler::runqueue::FIRST_PRIORITY;
 use crate::syscalls::files::SocketRole;
+#[cfg(target_arch = "x86_64")]
+use crate::syscalls::helpers::KernelPollDeadline;
 use crate::syscalls::helpers::KernelSignalWait;
 use crate::syscalls::helpers::NonblockableSyscall;
 use crate::syscalls::helpers::PublishedWaitMask;
@@ -967,11 +973,122 @@ where
 /// turns either code into `EINTR`. Under a tracer a default-ignored `SIGCHLD`
 /// is still queued, so a child that exits while its parent polls is such a
 /// signal, and so is the backend's own timer signal under `--imprecise-timers`.
-fn kernel_poll_result(call: &syscalls::Poll, result: Result<i64, Error>) -> Result<i64, Error> {
-    match result {
-        Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK)) => Err(call.kernel_restart_errno().into()),
-        result => result,
+///
+/// A poll that `keeps_record` (`RestartCall::KernelPoll`) always returns
+/// `ERESTART_RESTARTBLOCK` here, even a restart whose time is up, and keeps
+/// its record for `restart_syscall`; `kernel_poll_restart_code` then decides
+/// the code the guest gets.
+#[cfg(target_arch = "x86_64")]
+fn kernel_poll_result(
+    call: &syscalls::Poll,
+    result: Result<i64, Error>,
+    keeps_record: bool,
+) -> Result<i64, Error> {
+    if !poll_interrupted(&result) {
+        result
+    } else if keeps_record {
+        Err(Errno::ERESTART_RESTARTBLOCK.into())
+    } else {
+        Err(call.kernel_restart_errno().into())
     }
+}
+
+/// The code a `poll` with a positive timeout returns to the guest when a
+/// signal stopped it before it ran (`before_run`,
+/// `poll_stopped_before_it_ran`), from `kept`, the result
+/// `kernel_poll_result` gave it. The backend holds such a signal for the
+/// guest's resume, and passes a held signal on unreported when the guest's
+/// call returns `ERESTART_RESTARTBLOCK`. Record then took no turn for its
+/// delivery, while replay, which serves the poll from the recording without
+/// running it, took one where the signal reached the guest at an ordinary
+/// delivery stop, and refused at the next logged readmission. Such a poll
+/// returns `ERESTARTNOHAND` instead, as a wait that holds a signal does
+/// (`helpers::held_signal_restart_errno`), and still keeps its record. With no
+/// handler to run the kernel then runs the guest's call again: a resumed
+/// poll's `restart_syscall`, which finds the record, or the guest's own poll,
+/// which never ran and starts its timeout again (Linux's restart would keep
+/// the first end time; under `--no-sequentialize-threads` the end moves by
+/// the delivery's latency). A handler turns either code into `EINTR`. A
+/// signal that ends a poll that ran is not held: it reaches the guest at an
+/// ordinary delivery stop, which the backend reports. Any other result passes
+/// through.
+///
+/// Unlike `held_signal_restart_errno`, this does not know which signal the
+/// backend holds, so a held `SIGSTOP` also gets `ERESTARTNOHAND`. That is
+/// harmless: after the stop the kernel runs the guest's call again, as for
+/// any other held signal above. A resumed poll's `restart_syscall` still finds
+/// its record; a poll that never ran starts its timeout again, which loses
+/// nothing under record and replay and, under `--no-sequentialize-threads`,
+/// drops the end time Detcore read for it as described above.
+#[cfg(target_arch = "x86_64")]
+fn kernel_poll_restart_code(kept: Result<i64, Error>, before_run: bool) -> Result<i64, Error> {
+    match kept {
+        Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK)) if before_run => {
+            Err(Errno::ERESTARTNOHAND.into())
+        }
+        kept => kept,
+    }
+}
+
+/// Whether a signal stopped a `poll` before it ran: the backend reports that
+/// as `ERESTARTSYS` (`Guest::inject`), which Linux's poll never returns.
+#[cfg(target_arch = "x86_64")]
+fn poll_stopped_before_it_ran(raw: &Result<i64, Error>) -> bool {
+    matches!(raw, Err(Error::Errno(Errno::ERESTARTSYS)))
+}
+
+/// Whether a signal ended a `poll` Detcore ran in the kernel: Linux's own
+/// `ERESTART_RESTARTBLOCK`, or `ERESTARTSYS` when the signal stopped the call
+/// before it ran (`Guest::inject`). Linux's poll never returns `ERESTARTSYS`
+/// (`do_poll` reports any signal as `-ERESTARTNOHAND`, which `poll` turns
+/// into `ERESTART_RESTARTBLOCK`), so both are the same interruption, and
+/// passing `ERESTARTSYS` on would let `SA_RESTART` rerun a poll that Linux
+/// ends with `EINTR`, and rerun a `restart_syscall` that keeps no record.
+#[cfg(target_arch = "x86_64")]
+fn poll_interrupted(result: &Result<i64, Error>) -> bool {
+    matches!(
+        result,
+        Err(Error::Errno(
+            Errno::ERESTART_RESTARTBLOCK | Errno::ERESTARTSYS
+        ))
+    )
+}
+
+/// Whether a `poll` with a nonzero timeout runs in the kernel: under record and
+/// replay, whose replay cannot rely on the descriptors, and without
+/// sequentialized threads. A plain or strict run (`--strict` refuses
+/// `--no-sequentialize-threads`) emulates it on virtual time
+/// (`handle_internal_poll`), so the host clock `kernel_poll_deadline` reads
+/// never reaches such a run.
+#[cfg(target_arch = "x86_64")]
+fn polls_in_kernel(sequentialize_threads: bool, recordreplay_modes: bool) -> bool {
+    !sequentialize_threads || recordreplay_modes
+}
+
+/// The end of a positive timeout for a `poll` Detcore runs in the kernel
+/// (`RestartCall::KernelPoll`), read when the poll is first issued; `None`
+/// for a zero or infinite timeout, whose restart reruns the call
+/// (`kernel_poll_result`). Under record and replay the end holds no instant
+/// (`KernelPollDeadline`), so those modes read no host clock here.
+#[cfg(target_arch = "x86_64")]
+fn kernel_poll_deadline(
+    call: &syscalls::Poll,
+    recordreplay_modes: bool,
+) -> Option<KernelPollDeadline> {
+    call.restart_keeps_deadline().then(|| {
+        KernelPollDeadline(
+            (!recordreplay_modes)
+                .then(|| Instant::now() + Duration::from_millis(call.timeout() as u64)),
+        )
+    })
+}
+
+/// The timeout, in whole milliseconds rounded up, that a restarted kernel-run
+/// `poll` waits from `now` until `end`: 0 once `end` has passed.
+#[cfg(target_arch = "x86_64")]
+fn remaining_poll_millis(now: Instant, end: Instant) -> i32 {
+    let left = end.saturating_duration_since(now).as_nanos();
+    i32::try_from(left.div_ceil(1_000_000)).unwrap_or(i32::MAX)
 }
 
 impl<T: RecordOrReplay> Detcore<T> {
@@ -1001,11 +1118,12 @@ impl<T: RecordOrReplay> Detcore<T> {
                 crate::syscalls::timerfd::publish_expired(guest).await;
                 guest.inject(call).await
             };
-            kernel_poll_result(&call, result.map_err(Error::from))
-        } else if !self.cfg.sequentialize_threads || self.cfg.recordreplay_modes {
+            kernel_poll_result(&call, result.map_err(Error::from), false)
+        } else if polls_in_kernel(self.cfg.sequentialize_threads, self.cfg.recordreplay_modes) {
             // In replay mode, we cannot assume the existence of FILES during replay.
             // Thus we must record the poll and replay it from the trace.
-            Ok(self.handle_external_poll(guest, call).await?)
+            let deadline = kernel_poll_deadline(&call, self.cfg.recordreplay_modes);
+            Ok(self.handle_external_poll(guest, call, deadline).await?)
         } else {
             // TODO:
             // if is-external-poll { self.handle_external_poll(guest, call) }
@@ -2782,10 +2900,13 @@ impl<T: RecordOrReplay> Detcore<T> {
     }
 
     /// Handle a poll syscall that deponds on external, nondeterminstic IO.
-    pub async fn handle_external_poll<G: Guest<Self>>(
+    ///
+    /// `deadline` is the end of a positive timeout (`kernel_poll_deadline`).
+    pub(crate) async fn handle_external_poll<G: Guest<Self>>(
         &self,
         guest: &mut G,
         call: syscalls::Poll,
+        deadline: Option<KernelPollDeadline>,
     ) -> Result<i64, Error> {
         let len = call.nfds();
         let time_delta = Duration::from_millis(call.timeout() as u64);
@@ -2796,11 +2917,69 @@ impl<T: RecordOrReplay> Detcore<T> {
             Ok(0)
         } else {
             print_poll(&call);
-            let result = self
-                .record_or_replay_blocking(guest, Syscall::Poll(call))
-                .await;
-            kernel_poll_result(&call, result)
+            self.run_kernel_poll(guest, call, deadline).await
         }
+    }
+
+    /// Runs `call` in the kernel through the recorder. A signal that ends a
+    /// poll with a positive timeout there leaves `ERESTART_RESTARTBLOCK`, and
+    /// with no handler Linux restarts it through `restart_syscall` until the
+    /// end time it kept (`do_restart_poll`), so such a poll keeps `deadline`
+    /// for that restart (`RestartCall::KernelPoll`). A poll without a deadline
+    /// restarts by running again (`kernel_poll_result`), and one that a
+    /// signal stopped before it ran returns `ERESTARTNOHAND`
+    /// (`kernel_poll_restart_code`).
+    #[cfg(target_arch = "x86_64")]
+    async fn run_kernel_poll<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        call: syscalls::Poll,
+        deadline: Option<KernelPollDeadline>,
+    ) -> Result<i64, Error> {
+        debug_assert!(
+            polls_in_kernel(self.cfg.sequentialize_threads, self.cfg.recordreplay_modes),
+            "a plain or strict run emulates poll; it never runs one in the kernel"
+        );
+        let raw = self
+            .record_or_replay_blocking(guest, Syscall::Poll(call))
+            .await;
+        let before_run = poll_stopped_before_it_ran(&raw);
+        let result = kernel_poll_result(&call, raw, deadline.is_some());
+        if let Some(deadline) = deadline {
+            keep_restart_block(
+                guest,
+                &result,
+                RestartCall::KernelPoll(call, deadline),
+                None,
+            )
+            .await;
+        }
+        kernel_poll_restart_code(result, before_run)
+    }
+
+    /// The kernel's restart of a `poll` with a positive timeout that a signal
+    /// ended in the kernel (`RestartCall::KernelPoll`): the same poll with the
+    /// time left until `deadline`, as `do_restart_poll` reruns it until the
+    /// end time it kept. The time left is rounded up to whole milliseconds, so
+    /// the poll never ends before its deadline, and is 0 once the deadline has
+    /// passed: the poll then reports what is ready without waiting. Under
+    /// record and replay the poll keeps the timeout it was issued with
+    /// (`KernelPollDeadline`). It always
+    /// runs the recorded kernel call, never the zero-length sleep
+    /// `handle_external_poll` makes of a poll of no descriptors, so replay
+    /// serves it from the Poll event the recording holds.
+    #[cfg(target_arch = "x86_64")]
+    pub(crate) async fn resume_kernel_poll<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        call: syscalls::Poll,
+        deadline: KernelPollDeadline,
+    ) -> Result<i64, Error> {
+        let call = match deadline.0 {
+            Some(end) => call.with_timeout(remaining_poll_millis(Instant::now(), end)),
+            None => call,
+        };
+        self.run_kernel_poll(guest, call, Some(deadline)).await
     }
 
     /// epoll_create1 syscall
@@ -4446,33 +4625,133 @@ impl<T: RecordOrReplay> Detcore<T> {
 mod tests {
     use super::*;
 
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn only_record_replay_and_unsequentialized_runs_poll_in_the_kernel() {
+        // A plain or strict run sequentializes threads without record or replay.
+        assert!(!polls_in_kernel(true, false));
+        assert!(polls_in_kernel(true, true));
+        assert!(polls_in_kernel(false, false));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn a_restarted_kernel_poll_waits_only_until_its_deadline() {
+        // Only a positive timeout has an end to keep, and record and replay
+        // read no clock.
+        let poll = |timeout| syscalls::Poll::new().with_timeout(timeout);
+        assert_eq!(kernel_poll_deadline(&poll(0), false), None);
+        assert_eq!(kernel_poll_deadline(&poll(-1), false), None);
+        assert_eq!(
+            kernel_poll_deadline(&poll(100), true),
+            Some(KernelPollDeadline(None))
+        );
+        let before = Instant::now();
+        let end = kernel_poll_deadline(&poll(100), false)
+            .and_then(|deadline| deadline.0)
+            .unwrap();
+        assert!(end >= before + Duration::from_millis(100));
+        assert!(end <= Instant::now() + Duration::from_millis(100));
+        // The restart waits for the time left, rounded up to whole milliseconds.
+        let now = Instant::now();
+        let end = now + Duration::from_millis(100);
+        assert_eq!(remaining_poll_millis(now, end), 100);
+        assert_eq!(
+            remaining_poll_millis(now + Duration::from_nanos(1), end),
+            100
+        );
+        assert_eq!(
+            remaining_poll_millis(now + Duration::from_millis(99), end),
+            1
+        );
+        // At or past the end it only reports what is ready.
+        assert_eq!(remaining_poll_millis(end, end), 0);
+        assert_eq!(remaining_poll_millis(end + Duration::from_secs(1), end), 0);
+        // An end beyond the range of poll's timeout waits the longest it can.
+        assert_eq!(
+            remaining_poll_millis(now, now + Duration::from_secs(10_000_000)),
+            i32::MAX
+        );
+    }
+
+    #[cfg(target_arch = "x86_64")]
     #[test]
     fn a_kernel_poll_without_a_deadline_restarts_by_running_again() {
-        let restart_block = || Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK));
-        for timeout in [0, -1] {
-            let call = syscalls::Poll::new().with_timeout(timeout);
+        // Linux's code, and a signal that stopped the call before it ran.
+        let interrupted = [Errno::ERESTART_RESTARTBLOCK, Errno::ERESTARTSYS];
+        for errno in interrupted {
+            for timeout in [0, -1] {
+                let call = syscalls::Poll::new().with_timeout(timeout);
+                assert!(matches!(
+                    kernel_poll_result(&call, Err(Error::Errno(errno)), false),
+                    Err(Error::Errno(Errno::ERESTARTNOHAND))
+                ));
+            }
+            // A positive timeout keeps its deadline in the kernel's restart block.
+            let timed = syscalls::Poll::new().with_timeout(5);
             assert!(matches!(
-                kernel_poll_result(&call, restart_block()),
-                Err(Error::Errno(Errno::ERESTARTNOHAND))
+                kernel_poll_result(&timed, Err(Error::Errno(errno)), false),
+                Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK))
             ));
         }
-        // A positive timeout keeps its deadline in the kernel's restart block.
-        let timed = syscalls::Poll::new().with_timeout(5);
-        assert!(matches!(
-            kernel_poll_result(&timed, restart_block()),
-            Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK))
-        ));
         // Every other result is the call's own.
         let zero = syscalls::Poll::new().with_timeout(0);
-        assert!(matches!(kernel_poll_result(&zero, Ok(2)), Ok(2)));
+        assert!(matches!(kernel_poll_result(&zero, Ok(2), false), Ok(2)));
         assert!(matches!(
-            kernel_poll_result(&zero, Err(Error::Errno(Errno::EINTR))),
+            kernel_poll_result(&zero, Err(Error::Errno(Errno::EINTR)), false),
             Err(Error::Errno(Errno::EINTR))
         ));
         assert!(matches!(
-            kernel_poll_result(&zero, Err(Error::Errno(Errno::ERESTARTSYS))),
-            Err(Error::Errno(Errno::ERESTARTSYS))
+            kernel_poll_result(&zero, Err(Error::Errno(Errno::ERESTARTNOINTR)), false),
+            Err(Error::Errno(Errno::ERESTARTNOINTR))
         ));
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    #[test]
+    fn a_kernel_poll_that_keeps_a_record_restarts_through_restart_syscall() {
+        // Linux's code and a signal that stopped the call before it ran both
+        // restart a kept record, even once its time is up (timeout 0).
+        for errno in [Errno::ERESTART_RESTARTBLOCK, Errno::ERESTARTSYS] {
+            for timeout in [100, 0] {
+                let call = syscalls::Poll::new().with_timeout(timeout);
+                assert!(matches!(
+                    kernel_poll_result(&call, Err(Error::Errno(errno)), true),
+                    Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK))
+                ));
+            }
+        }
+        let call = syscalls::Poll::new().with_timeout(100);
+        assert!(matches!(kernel_poll_result(&call, Ok(1), true), Ok(1)));
+        assert!(matches!(
+            kernel_poll_result(&call, Err(Error::Errno(Errno::EINTR)), true),
+            Err(Error::Errno(Errno::EINTR))
+        ));
+        // A poll that a signal stopped before it ran gives the guest
+        // ERESTARTNOHAND, so the backend reports the signal it holds; one that
+        // ran keeps Linux's code.
+        let restart = || Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK));
+        assert!(poll_stopped_before_it_ran(&Err(Error::Errno(
+            Errno::ERESTARTSYS
+        ))));
+        for other in [Ok(0), restart(), Err(Error::Errno(Errno::EINTR))] {
+            assert!(!poll_stopped_before_it_ran(&other), "{other:?}");
+        }
+        assert!(matches!(
+            kernel_poll_restart_code(restart(), true),
+            Err(Error::Errno(Errno::ERESTARTNOHAND))
+        ));
+        assert!(matches!(
+            kernel_poll_restart_code(restart(), false),
+            Err(Error::Errno(Errno::ERESTART_RESTARTBLOCK))
+        ));
+        for before_run in [true, false] {
+            assert!(matches!(kernel_poll_restart_code(Ok(0), before_run), Ok(0)));
+            assert!(matches!(
+                kernel_poll_restart_code(Err(Error::Errno(Errno::EINTR)), before_run),
+                Err(Error::Errno(Errno::EINTR))
+            ));
+        }
     }
 
     #[test]

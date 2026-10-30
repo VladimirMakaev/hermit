@@ -181,6 +181,7 @@ static HB_POSTHOOK_FUTEX_INTERRUPT_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static HB_PIPE_READ_HELD_WRITER_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static POLL_TIMEOUT_VS_SPINNER_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static POLL_ZERO_TIMEOUT_RESTART_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static POLL_TIMEOUT_RESTART_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static VFORK_PARENT_KILLED_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static VFORK_KILL_EXEC_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static VFORK_EXEC_RESUME_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -35903,6 +35904,114 @@ fn a_zero_timeout_poll_ended_by_a_signal_restarts_as_on_linux() {
     assert_eq!(stdout(&output), expected, "{args:?}");
 }
 
+/// A signal that ends a `poll` with a positive timeout in the kernel leaves
+/// `ERESTART_RESTARTBLOCK`. With no handler to run, Linux restarts the poll
+/// through `restart_syscall` until the end time it kept (`do_restart_poll`,
+/// `fs/select.c`); with a handler it returns `EINTR`. Detcore runs such a poll
+/// in the kernel under record and replay and `--no-sequentialize-threads`,
+/// and refused the restart there as an unsupported syscall (exit 122). In the
+/// guest (`tests/c/poll_timeout_restart.c`) children that exit while their
+/// parent waits in 100 ms polls send SIGCHLD, which ptrace queues although it
+/// is ignored; a child sends 40 SIGWINCH, ignored by default, 20 ms apart, and
+/// the poll they end over and over must still time out after 100 ms, long
+/// before they stop; and a 30 ms ITIMER_REAL interrupts five more polls
+/// through a SIGALRM handler. Every mode must print native's lines, except that
+/// record compares only the storm's poll result (see the comment there). The
+/// strict and plain legs emulate the poll on virtual time and passed before;
+/// the `--no-sequentialize-threads` and record legs run it in the kernel.
+#[test]
+fn a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline() {
+    let _lock = hermit_run_guard();
+    let guest = compiled_c_guest(&POLL_TIMEOUT_RESTART_GUEST, "poll_timeout_restart");
+    let guest = guest.to_str().unwrap();
+    let expected = [
+        (
+            "chld",
+            "chld: 5 timed out, 0 ready, 0 EINTR, 0 other; late data: 1 revents 0x1; 9 children\n",
+        ),
+        (
+            "alrm",
+            "alrm: 0 timed out, 0 ready, 5 EINTR, 0 other, 5 alarms\n",
+        ),
+        (
+            "storm",
+            "storm: poll 0; the storm was still running when it returned: yes; 1 children\n",
+        ),
+    ];
+    // As in run_strict_flag_is_accepted_and_runs, the strict leg disables the
+    // PMU timer and CPUID faulting so it runs where those are unavailable.
+    let strict = [
+        "--strict",
+        "--max-timeslice=disabled",
+        "--no-virtualize-cpuid",
+    ];
+    for (mode, line) in expected {
+        let native = Command::new(guest)
+            .arg(mode)
+            .output()
+            .expect("failed to run the guest natively");
+        assert_eq!(
+            String::from_utf8_lossy(&native.stdout),
+            line,
+            "native {mode}"
+        );
+        for flags in [&strict[..], &[], &["--no-sequentialize-threads"]] {
+            let mut args = vec!["run", "--timeout", "120", "--base-env=minimal"];
+            args.extend_from_slice(flags);
+            args.extend(["--", guest, mode]);
+            let output = hermit(&args);
+            assert_success(&output, &args);
+            assert_eq!(stdout(&output), line, "{args:?}");
+        }
+        // The storm is recorded three times: its signals reach the restarted
+        // poll at host-timed points, and replay refused or diverged on most
+        // such recordings while record left a signal that stopped a restart
+        // before it ran out of its schedule (`kernel_poll_restart_code`).
+        // Two of them start each backgrounded call up to 10 ms late
+        // (docs/RACE_PROBES.md), so signals reach restarts before they run. Its sender's sleeps take virtual time under
+        // record, so only the poll's result is compared.
+        let recordings: &[bool] = if mode == "storm" {
+            &[true, true, false]
+        } else {
+            &[false]
+        };
+        for &probe in recordings {
+            let data_dir = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+                .expect("failed to create the recording data dir");
+            let data_dir_arg = format!("--data-dir={}", data_dir.path().display());
+            let args = [
+                "record",
+                "start",
+                "--verify",
+                "--verify-strict",
+                "--record-timeout",
+                "120",
+                &data_dir_arg,
+                "--",
+                guest,
+                mode,
+            ];
+            let mut command = hermit_command(&args);
+            if probe {
+                command
+                    .env("HERMIT_RACE_PROBE", "bg_pre_call=0-10")
+                    .env("HERMIT_RACE_PROBE_SEED", "7");
+            }
+            let output = hermit_test::hermit_output(&format!("hermit {args:?}"), &mut command);
+            assert_success(&output, &args);
+            let recorded = stdout(&output);
+            if mode == "storm" {
+                assert!(
+                    recorded.starts_with("storm: poll 0; "),
+                    "{args:?} (probe: {probe}): {recorded}"
+                );
+            } else {
+                assert_eq!(recorded, line, "{args:?}");
+            }
+        }
+    }
+}
+
 /// A `ppoll` with a timeout returns on time while another thread spins without
 /// syscalls (https://github.com/rrnewton/hermit/issues/3952). The guest waits
 /// five times for 50 ms each; every wait must return 0 after at least 50 ms and
@@ -37445,7 +37554,7 @@ fn the_4505_signal_guests_get_past_their_handlers_under_record() {
     };
     let mut metadata: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["version"], 0x18c, "RECORD_VERSION moved");
+    assert_eq!(metadata["version"], 0x18d, "RECORD_VERSION moved");
     metadata["version"] = serde_json::json!(0x17f);
     fs::write(&metadata_path, serde_json::to_string(&metadata).unwrap()).unwrap();
     let replay_args = ["replay", "--autopilot", "--data-dir", directory];
