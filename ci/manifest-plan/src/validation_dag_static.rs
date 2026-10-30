@@ -1216,6 +1216,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // JSON, binary encoding, Debug form, RIP refusal and same_operations): 1888.
     // And detcore-model's config::tests::replay_edited_preemptions_never_enters_the_legacy_form
     // and config::tests::replay_edited_preemptions_needs_a_replayed_record_and_round_trips: 1882.
+    // And hermit-verify's schedule_trace::tests::
+    // interpolate_refuses_schedules_recorded_under_different_sleep_registrations
+    // and detcore-model's config::tests::
+    // the_sleep_registration_is_printed_when_set_and_never_enters_the_legacy_form: 1882.
+    // config::tests::first_pass_sleep_registration_is_the_default_only_where_signal_state_is_read
+    // (https://github.com/rrnewton/hermit/pull/4682): 1883.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2043,6 +2049,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And schedule_search::tests::schedules_align_however_their_slice_ends_were_taken: 1161.
     // And analyze::rundata::tests::analyze_replays_only_its_edited_preemption_records_as_edited
     // and analyze::phases::tests::the_target_record_replays_as_edited_only_after_minimization: 1123.
+    // And run::replay_refuses_another_sleep_registration,
+    // analyze::phases::tests::analyze_runs_every_trial_under_the_targets_sleep_registration
+    // and bisect::tests::bisect_replays_under_the_bad_schedules_sleep_registration: 1163.
+    // And metadata::tests::record_and_replay_register_sleeps_when_chosen: 1164.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3386,6 +3396,23 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and only_serialized_ptrace_runs_without_a_gdbserver_retire_at_a_fatal_delivery,
     // and tool_global::tests::fatal_delivery_tests'
     // a_retired_siblings_late_request_stays_unanswered: 2688, listed.
+    // And scheduler::test::{a_queued_sleep_is_a_timed_waiter_from_the_first_pass,
+    // a_queued_sleep_registers_whatever_the_priorities} and
+    // scheduler::parked_tests::the_controlled_loop_registers_a_queued_sleep
+    // (a queued sleep registers at the first quiescent pass): 2697, listed.
+    // And scheduler::test::a_replay_registers_queued_sleeps_as_its_record_says and
+    // preemptions::tests::the_sleep_registration_rule_round_trips (--sleep-registration;
+    // race search keeps registering sleeps when chosen): 2699.
+    // And scheduler::test::{a_scheduler_signal_after_a_parked_nanosleep_deadline_leaves_it_to_complete,
+    // a_sleep_the_drain_admits_registers_in_the_same_pass} and
+    // scheduler::parked_tests::{the_controlled_loop_refresh_registers_a_sleep_filed_during_maintenance,
+    // the_controlled_loop_registers_a_sleep_its_drain_admits}
+    // (https://github.com/rrnewton/hermit/pull/4682): 2703.
+    // Plus the send-time and any-backend deadline units
+    // scheduler::test::{a_timed_signal_due_before_a_parked_nanosleep_deadline_ends_it_whenever_it_pops,
+    // a_signal_after_a_parked_nanosleep_deadline_leaves_it_to_complete_on_any_backend} and
+    // scheduler::posix_timer_coalesce_tests::a_timer_send_is_made_at_its_due_time
+    // (https://github.com/rrnewton/hermit/pull/4682): 2706.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4784,6 +4811,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_default_fatal_signal_ends_a_process_whose_other_threads_wait_on_a_futex:
     // 623, listed.
     // And a_schedule_replay_reads_a_trapped_rdtsc_before_switching_away: 623.
+    // And a_signal_after_a_sleeps_deadline_does_not_interrupt_it and
+    // an_ignored_or_blocked_sigchld_does_not_end_a_sleep
+    // (https://github.com/rrnewton/hermit/pull/4682): 639.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5393,6 +5423,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same fatal-signal futex-waiters test, not excluded: 542, listed.
     // And a_schedule_replay_reads_a_trapped_rdtsc_before_switching_away, which
     // is not among them: 542.
+    // And the same two sleep-signal guest tests, not excluded: 558.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5926,6 +5957,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three fatal-delivery retirement units: 2685, listed.
     // And the same three fatal-delivery predicate and late-request units:
     // 2688, listed.
+    // And the same three queued-sleep registration units: 2697, listed.
+    // And the same two registration-rule units: 2699.
+    // And the same four sleep-registration units: 2703.
+    // And the same three send-time and any-backend deadline units: 2706.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6349,6 +6384,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same record-version unit: 1157 (1156 on main plus one).
     // And the same schedule_search alignment test: 1155.
     // And the same two edited-record analyze tests: 1117.
+    // And the same three --sleep-registration units: 1157. And the same
+    // record/replay registration unit: 1158.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6569,6 +6606,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two detcore-model units: 1869.
     // And the same five schedule::sched_event_tests: 1874.
     // And the same two replay_edited_preemptions config tests: 1868.
+    // And the same sleep-registration interpolation and config tests: 1868.
+    // And the same default-rule unit: 1869.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
