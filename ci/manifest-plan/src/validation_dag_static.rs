@@ -1228,6 +1228,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_timed_wait_spread_registers_sleeps_at_the_first_pass_by_default: 1885.
     // summary::tests::a_summary_of_a_run_the_timeout_stopped_is_marked_partial:
     // 1881, listed.
+    // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1881.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3433,6 +3434,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test's ten idle-poller deadlock units (a reader beside
     // a writer nothing can wake, and nine states that still poll on): 2692.
     // And scheduler::test::a_trace_replay_grant_after_a_failed_attempt_is_no_attempt: 2693.
+    // And scheduler::tests::replay_stops_waiting_for_a_log_served_call_that_never_returns: 2683.
+    // And scheduler::tests::replay_refuses_a_call_that_never_returns_unless_it_is_a_background_call: 2684.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4839,6 +4842,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_of_a_timed_wait_spread_recording_follows_it: 639.
     // And run_timeout_prints_a_partial_summary_naming_the_deadline: 623,
     // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 623.
+    // And a_recording_that_ends_inside_a_blocked_call_replays: 623.
+    // And a_recording_cut_between_calls_is_refused_rather_than_parked: 624.
+    // And a_recording_killed_from_outside_is_refused_rather_than_parked: 625.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5453,6 +5459,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same spread schedule-replay test: 558.
     // And the same partial-summary test, not excluded: 542, listed.
     // And a_schedule_replay_of_a_pipe_reader_whose_writers_exited_is_no_deadlock: 542.
+    // And a_recording_that_ends_inside_a_blocked_call_replays: 542.
+    // And a_recording_cut_between_calls_is_refused_rather_than_parked: 543.
+    // And a_recording_killed_from_outside_is_refused_rather_than_parked: 544.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5998,6 +6007,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two partial-summary units: 2684, listed.
     // And the same ten idle-poller deadlock units: 2692.
     // And the same TraceReplay-grant unit: 2693.
+    // And the same two in-flight-exit scheduler tests as test.detcore_unit: 2684.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6651,6 +6661,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same spread registration config test: 1871.
     // And the same partial-summary detcore-model test, not excluded: 1867,
     // listed.
+    // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1867.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
