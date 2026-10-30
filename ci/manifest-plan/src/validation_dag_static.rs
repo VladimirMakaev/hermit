@@ -1276,7 +1276,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // summary::tests::a_summary_of_a_run_the_timeout_stopped_is_marked_partial:
     // 1974, listed.
     // And detcore-model host_input::tests::stdio_kinds_name_each_changed_descriptor: 1975.
-    ("test.regular_crates", 1975),
+    // And host_input::tests::terminal_devices_follow_the_kernels_driver_list: 1976.
+    ("test.regular_crates", 1976),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -4727,7 +4728,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // listed.
     // And a_schedule_replay_names_a_stdio_kind_changed_since_the_recording: 775.
     // And a_verify_run_records_the_stdio_kinds_its_guest_was_given: 776.
-    ("test.cli", 776),
+    // And a_library_run_records_the_stdio_kinds_of_its_commands_descriptors: 777.
+    ("test.cli", 777),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5331,7 +5333,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same partial-summary test, not excluded: 693, listed.
     // And the same stdio-kind replay test: 694.
     // And the same captured-run stdio-kind test: 695.
-    ("test.cli_on_host", 695),
+    // And the same library-run stdio-kind test: 696.
+    ("test.cli_on_host", 696),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5345,7 +5348,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the cases added since, as this twin's entry further down counts: 1959.
     // Kept equal to the second test.regular_crates_on_host entry below: 1960.
     // Kept equal to the second test.regular_crates_on_host entry below: 1961.
-    ("test.regular_crates_on_host", 1961),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1962.
+    ("test.regular_crates_on_host", 1962),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6562,7 +6566,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same partial-summary detcore-model test, not excluded: 1960,
     // listed.
     // And the same detcore-model stdio unit: 1961.
-    ("test.regular_crates_on_host", 1961),
+    // And the same terminal-device unit: 1962.
+    ("test.regular_crates_on_host", 1962),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
