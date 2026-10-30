@@ -485,6 +485,14 @@ pub struct AnalyzeOpts {
     #[clap(skip)]
     pub branch_counter_warning: Option<String>,
 
+    /// The per-run `--max-timeslice` the recordings state, which every trial
+    /// runs under and every trial-produced, minimized, synthetic and final
+    /// schedule analyze writes states (a supplied record analyze copies
+    /// unchanged, and its normalized copy, are not restamped); set by
+    /// [`AnalyzeOpts::adopt_recorded_timeslice`].
+    #[clap(skip)]
+    pub trial_chaos_timeslice: Option<std::num::NonZeroU64>,
+
     /// What the endpoint runs measured so far; the trials' bounds derive
     /// from it ([`AnalyzeOpts::trial_bound`],
     /// [`AnalyzeOpts::trial_virtual_bound`]). Every `RunData` copies these
