@@ -3503,6 +3503,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_former_leaders_id_reused_as_a_thread_joins_its_new_group: 2685, listed.
     // And syscalls::binder's five units (return-command and object parsing
     // for descriptors a binder read installs): 2700, listed.
+    // And a_binder_call_blocks_when_it_waits_for_another_process: 2701.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4930,6 +4931,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's CLI test: 638.
     // And a_descriptor_received_in_a_binder_transaction_is_usable (skips
     // where the kernel has no binder filesystem): 638.
+    // And a_blocking_binder_read_does_not_hold_the_guests_turn, which skips
+    // the same way: 639.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5558,6 +5561,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same test: 548.
     // And the same test: 557.
     // And the same binder descriptor test, not excluded: 557.
+    // And the same blocking binder read test: 558.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6121,6 +6125,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same test: 2696.
     // And the same three live-thread-group units: 2685, listed.
     // And the same five binder parsing units: 2700, listed.
+    // And the same blocking-classification unit: 2701.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
