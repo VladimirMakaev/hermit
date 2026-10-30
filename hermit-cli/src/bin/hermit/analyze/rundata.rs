@@ -397,6 +397,15 @@ impl RunData {
         }
     }
 
+    /// Settle the trial's options before anything reads them: the seeds of
+    /// the record it replays ([`RunOpts::adopt_replayed_rng_seed`], which
+    /// `RunOpts::run` repeats without change), then validation. The
+    /// reproducer written after this names the seeds the trial runs under.
+    pub(super) fn prepare_trial_options(&mut self) -> anyhow::Result<()> {
+        self.runopts.adopt_replayed_rng_seed()?;
+        self.runopts.validate_args()
+    }
+
     /// Execute the run. (Including setting up logging and temp dir binding.)
     ///
     /// Once a stop signal has arrived (`stop`), no run starts, and the run it
@@ -643,7 +652,7 @@ impl RunData {
             self.runopts.det_opts.det_config.record_preemptions_to = Some(temp_path);
         }
 
-        self.runopts.validate_args()?;
+        self.prepare_trial_options()?;
         // A trial starts through `RunOpts::run`, which applies none of the
         // preprocessing `RunOpts::main` does, so the trial runs the image its
         // reproducer names only if it is prepared here.
