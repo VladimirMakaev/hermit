@@ -192,6 +192,10 @@ impl BisectOpts {
 
         let good = read_schedule(&self.good, "good")?;
         let bad = read_schedule(&self.bad, "bad")?;
+        AnalyzeOpts::refuse_recordings_numbered_apart(&[
+            ("--good", &self.good),
+            ("--bad", &self.bad),
+        ])?;
         // Each trial's schedule is written anew, stamped with the trials'
         // epoch, and trials start through `RunOpts::run`, which does not read
         // the epoch a replayed record carries: the trials must start from
@@ -206,6 +210,9 @@ impl BisectOpts {
             ("--good", &self.good),
             ("--bad", &self.bad),
         ])?;
+        // Every replay's schedule is written anew, stamped with the replays'
+        // guest IDs, so they are resolved before the first.
+        analyzer.prepare_trial_guest_ids(&[("--good", &self.good), ("--bad", &self.bad)])?;
         analyzer.adopt_uncapped_slices(&[self.good.as_path(), self.bad.as_path()])?;
         analyzer.refuse_instruction_offsets(&[("--good", &self.good), ("--bad", &self.bad)])?;
         let (mut good, mut bad) = (good, bad);
@@ -367,6 +374,79 @@ mod tests {
             assert_eq!(trials.trial_pipe_wake_latency(), Some(3_000_000));
             assert!(trials.trial_signal_state_copy());
         }
+    }
+
+    /// Two `--no-namespace` records whose guest IDs start from different
+    /// bases are refused before any trial, as a policy refusal: every trial
+    /// numbers its guest alike, so none could follow both. Records numbered
+    /// alike are admitted where the trials number their guests that way too:
+    /// here, by a PID namespace.
+    #[test]
+    fn bisect_refuses_records_whose_guests_were_numbered_apart() {
+        use detcore_model::pid::GuestIds;
+        let chosen = |base| {
+            serde_json::to_value(GuestIds::Chosen {
+                base,
+                refuse_host_ids: true,
+            })
+            .unwrap()
+        };
+        let numbered = |count, ids: Option<serde_json::Value>| {
+            let mut record = search_record(vec![SchedEvent::branches(DetTid::from_raw(3), count)]);
+            if let Some(ids) = ids {
+                record["guest_ids"] = ids;
+            }
+            record
+        };
+        let error = prepare_search_records(
+            &numbered(4, Some(chosen(31744))),
+            &numbered(5, Some(chosen(40000))),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::container::PolicyRefusal>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("Record both runs under --no-namespace with the same --pid-base"),
+            "{error:#}"
+        );
+        let error = prepare_search_records(&numbered(4, Some(chosen(31744))), &numbered(5, None))
+            .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::container::PolicyRefusal>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert!(
+            error.to_string().contains("no trial could follow both"),
+            "{error:#}"
+        );
+        // Numbered alike, but by chosen IDs, which these trials, each in a
+        // PID namespace of its own, cannot follow.
+        let error = prepare_search_records(
+            &numbered(4, Some(chosen(31744))),
+            &numbered(5, Some(chosen(31744))),
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .downcast_ref::<crate::container::PolicyRefusal>()
+                .is_some(),
+            "{error:#}"
+        );
+        assert!(
+            error
+                .to_string()
+                .contains("numbers its guest by its own PID namespace"),
+            "{error:#}"
+        );
+        prepare_search_records(&numbered(4, None), &numbered(5, None)).unwrap();
     }
 
     #[test]
@@ -572,6 +652,11 @@ mod tests {
                 "refuse --preemption-stacktrace-log-file in the run arguments",
             ),
         ] {
+            // Where this host may choose IDs, --no-namespace is admitted and
+            // its replays take chosen IDs (`RunOpts::prepare_trial_guest_ids`).
+            if run_args == ["--no-namespace"] && crate::guest_ids::may_choose_ids().is_ok() {
+                continue;
+            }
             let error = bisect(run_args);
             assert!(
                 error
@@ -581,8 +666,9 @@ mod tests {
             );
             assert!(error.to_string().contains(named), "{run_args:?}: {error:#}");
         }
-        // `--no-namespace` is refused above: schedule replay, which every
-        // bisect trial is, needs stable namespace PIDs.
+        // `--no-namespace` is refused above where Hermit cannot choose the
+        // guest's IDs: schedule replay, which every bisect trial is, needs IDs
+        // that do not change from run to run.
         for admitted in [&["--stacktrace-event=5"][..], &["--timeout=3"][..]] {
             let error = bisect(admitted);
             assert!(

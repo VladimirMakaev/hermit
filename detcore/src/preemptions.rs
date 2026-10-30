@@ -750,6 +750,17 @@ impl PreemptionRecord {
             .unwrap_or(0)
     }
 
+    /// The same record, stating how the runs it came from numbered their
+    /// guest (`Config::guest_ids`), as `PreemptionWriter::with_guest_ids`
+    /// stores it: nothing for a PID namespace's numbering. Every record
+    /// analyze, minimize or bisect writes for `--no-namespace` trials carries
+    /// the trials' numbering, so that a trial replaying it is not refused as
+    /// one numbered by a PID namespace.
+    pub fn with_guest_ids(mut self, ids: detcore_model::pid::GuestIds) -> Self {
+        self.guest_ids = (ids != detcore_model::pid::GuestIds::Namespace).then_some(ids);
+        self
+    }
+
     /// Make a copy of everything in the `PreemptionRecord` in a public format.
     pub fn extract_all(&self) -> BTreeMap<DetTid, ThreadHistory> {
         self.per_thread.clone()
@@ -1883,7 +1894,16 @@ mod tests {
             assert_eq!(back.clone_preemptions_only().guest_ids(), Some(ids));
             std::fs::write(&path, &written).unwrap();
             assert_eq!(read_recorded_guest_ids(&path), Ok(ids));
+            // A record analyze writes for a trial states the trials' numbering
+            // the same way.
+            let stamped = PreemptionRecord::from_sched_events(Vec::new()).with_guest_ids(ids);
+            stamped.write_to_disk(&path).unwrap();
+            assert_eq!(read_recorded_guest_ids(&path), Ok(ids));
         }
+        let unstamped = PreemptionRecord::from_sched_events(Vec::new())
+            .with_guest_ids(chosen(4000, true))
+            .with_guest_ids(GuestIds::Namespace);
+        assert_eq!(unstamped.guest_ids(), None);
         for (recorded, replay, refused) in [
             (GuestIds::Namespace, GuestIds::Namespace, false),
             (chosen(4000, false), chosen(4000, true), false),

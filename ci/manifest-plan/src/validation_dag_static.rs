@@ -2204,6 +2204,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (--chaos-instruction-offset): 1164.
     // And the eight pinned_cpu::tests units of CPU reservations across
     // concurrent runs: 1143.
+    // And this change's two no-namespace analyze tests: 1171 + 2 = 1173.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5213,6 +5214,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And chaos_instruction_offset_splits_a_branch_free_window and
     // a_chaos_instruction_offset_run_verifies_and_replays_at_its_offsets
     // (tests/c/branch_free_race.c, x86_64 only): 646.
+    // And no_namespace_bisect_replays_the_schedules_it_writes: 648 + 1 = 649.
+    // And no_namespace_minimize_replays_its_candidate_records: 649 + 1 = 650.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5868,6 +5871,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same tests: 542.
     // And the same four --watch tests, not excluded: 550.
     // And the same two --chaos-instruction-offset tests, not excluded: 565.
+    // And the same --no-namespace bisect test, not excluded: 567 + 1 = 568.
+    // And the same --minimize test, not excluded: 568 + 1 = 569.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6934,6 +6939,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two reproducer units: 1117, listed.
     // And the same two --chaos-instruction-offset run units: 1158.
     // And the same eight reservation units: 1137.
+    // And the same two: 1165 + 2 = 1167.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
