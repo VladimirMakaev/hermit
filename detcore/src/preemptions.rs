@@ -715,6 +715,16 @@ impl PreemptionRecord {
         self
     }
 
+    /// The same record, stating the guest random seed (`--rng-seed`) of the
+    /// trials it came from (`None` for unknown). Every record analyze,
+    /// minimize or bisect writes from trials carries it, so that replaying it
+    /// gives the guest the trials' random values
+    /// (https://github.com/rrnewton/hermit/issues/4868).
+    pub fn with_rng_seed(mut self, rng_seed: Option<u64>) -> Self {
+        self.rng_seed = rng_seed;
+        self
+    }
+
     /// The same record, stating whether the trials it came from capped
     /// preemption charges, as it states the pipe-wake latency.
     pub fn with_cap_preemption_charge(mut self, on: bool) -> Self {
