@@ -3795,6 +3795,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the two aarch64 exclusive-loop units for Rust std's loop shapes (a
     // flag-setting read-modify-write, a compare-and-swap that retries
     // elsewhere): 2741.
+    // And the CPU-clock fix-forward's five units (cpu_clock's
+    // the_resolution_is_the_kernels_for_each_kind, cpu_clock::handler_tests'
+    // a_cpu_clock_sleep_that_would_wait_is_refused and
+    // timer_create_checks_the_task_a_cpu_clock_names, thread_cpu_time_tests'
+    // an_exited_leaders_clock_keeps_its_final_time and scheduler's
+    // a_cpu_clock_names_only_tasks_linux_still_has): 2727, listed.
+    // And cpu_clock::handler_tests'
+    // timer_settime_on_a_timer_whose_thread_exited_is_esrch: 2728, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6574,6 +6582,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same backend-failure-cleanup panic unit: 2694, listed.
     // And the same tests: 2698.
     // And the same two aarch64 exclusive-loop units: 2741.
+    // And the same five CPU-clock fix-forward units: 2727, listed.
+    // And the same timer_settime ESRCH unit: 2728, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
