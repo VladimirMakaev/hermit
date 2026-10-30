@@ -1240,6 +1240,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (the run summary's binder count): 1881, listed.
     // config::tests::access_trace_never_enters_the_legacy_form_and_round_trips
     // (--record-access-trace-to): 1887.
+    // And detcore-model's untrap_passthrough_syscalls_is_opt_in_and_round_trips and
+    // untrap_passthrough_syscalls_never_enters_the_legacy_form: 1882, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2108,6 +2110,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // /tmp or /etc/group, as Android): 1124, listed.
     // And run::tests::the_sanitizer_warning_is_for_a_leak_check_turned_off and
     // run::tests::only_a_leak_sanitizer_build_is_taken_for_one: 1098.
+    // And run::untrap_passthrough_syscalls_is_an_opt_in_refused_where_its_calls_are_counted: 1122, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3568,6 +3571,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the four robust-list record units and two SIGKILL record-keeping
     // units for robust-futex owner death by SIGKILL: 2701, listed.
     // And syscalls::misc::tests::set_ptracer_reaches_the_kernel: 2683.
+    // And subscription_tests::untrap_passthrough_syscalls_unsubscribes_exactly_its_list and
+    // untrapped_passthrough_syscalls_are_plain_passthroughs: 2684, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6236,6 +6241,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three uncapped-slices units: 2698.
     // And the same six SIGKILL robust-list units: 2701, listed.
     // And syscalls::misc::tests::set_ptracer_reaches_the_kernel: 2683.
+    // And the same two --untrap-passthrough-syscalls subscription units: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6677,6 +6683,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four racing-accesses report tests: 1181.
     // And the same three host-layout units: 1118, listed.
     // And the same two sanitizer-warning units: 1098.
+    // And the same --untrap-passthrough-syscalls CLI unit: 1116, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6910,6 +6917,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same test: 1867.
     // And the same binder-count summary test: 1867, listed.
     // And the same access-trace tests as test.regular_crates: 1873.
+    // And the same two --untrap-passthrough-syscalls detcore-model units: 1868, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
