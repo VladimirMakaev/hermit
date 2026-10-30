@@ -2168,8 +2168,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         let (maybe_res, untraced_refusal) = match clone_plan {
             // A call Detcore issues itself goes through `inject_clone_planned`: a chosen ID
             // (clone3 with set_tid, from a copy of the call's clone_args without
-            // CLONE_UNTRACED), a call the kernel refuses, and a vfork whose host ID is
-            // reported while its parent waits.
+            // CLONE_UNTRACED) and a call the kernel refuses.
             plan @ (super::chosen_ids::ClonePlan::Chosen(_)
             | super::chosen_ids::ClonePlan::KernelRefuses
             | super::chosen_ids::ClonePlan::KernelRefusesUntraced) => (
@@ -2177,11 +2176,19 @@ impl<T: RecordOrReplay> Detcore<T> {
                     .await,
                 None,
             ),
-            plan @ super::chosen_ids::ClonePlan::AsMade { .. } if is_vfork => (
-                self.inject_clone_planned(guest, Syscall::from(clone_family), plan, is_vfork)
-                    .await,
-                None,
-            ),
+            // An as-made vfork's task is reported before the call, since its
+            // parent returns only after the task has run, and the call is then
+            // issued traced like every other.
+            super::chosen_ids::ClonePlan::AsMade { reason } if is_vfork => {
+                self.vfork_gets_host_id(guest, &reason).await;
+                let (result, refusal) = match inject_traced_clone(guest, clone_family, flags).await
+                {
+                    CloneInjection::Ran(result) => (result, None),
+                    CloneInjection::Refused(reason) => (Err(Errno::ENOMEM), Some(reason)),
+                };
+                super::chosen_ids::note_unborn_reported_vfork(guest, &result);
+                (result, refusal)
+            }
             plan => match inject_traced_clone(guest, clone_family, flags).await {
                 CloneInjection::Ran(result) => {
                     if let (super::chosen_ids::ClonePlan::AsMade { reason }, Ok(child)) =
