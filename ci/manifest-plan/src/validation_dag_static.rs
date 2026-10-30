@@ -1226,6 +1226,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (legacy form, round trip): 1884.
     // And detcore-model's config::tests::
     // a_timed_wait_spread_registers_sleeps_at_the_first_pass_by_default: 1885.
+    // summary::tests::a_summary_of_a_run_the_timeout_stopped_is_marked_partial:
+    // 1881, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3424,6 +3426,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // timed_waiters test, two scheduler tests and one preemptions test: 2707.
     // And scheduler::test::a_schedule_replay_spreads_no_wait_filed_past_its_schedule: 2708.
     // And scheduler::test::a_schedule_replay_waits_for_its_next_thread_put_back_to_sleep: 2709.
+    // And tool_global::tests'
+    // a_run_the_timeout_stopped_is_summarized_before_its_recording_is_flushed
+    // and scheduler::boundary_controller::tests'
+    // only_a_finished_runs_summary_requires_its_replay_to_have_ended: 2684,
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4827,6 +4833,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (https://github.com/rrnewton/hermit/pull/4682): 639.
     // And chaos_timed_wait_spread_reorders_a_wait_against_work_and_keeps_the_clock_honest: 638.
     // And a_schedule_replay_of_a_timed_wait_spread_recording_follows_it: 639.
+    // And run_timeout_prints_a_partial_summary_naming_the_deadline: 623,
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5439,6 +5446,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two sleep-signal guest tests, not excluded: 558.
     // And the same --chaos-timed-wait-spread guest test: 557.
     // And the same spread schedule-replay test: 558.
+    // And the same partial-summary test, not excluded: 542, listed.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5981,6 +5989,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seven --chaos-timed-wait-spread tests: 2707.
     // And the same spread past-the-schedule unit: 2708.
     // And the same spread replay-wait unit: 2709.
+    // And the same two partial-summary units: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6631,6 +6640,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same default-rule unit: 1869.
     // And the same two --chaos-timed-wait-spread config tests: 1870.
     // And the same spread registration config test: 1871.
+    // And the same partial-summary detcore-model test, not excluded: 1867,
+    // listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
