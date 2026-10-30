@@ -1999,6 +1999,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run::a_small_max_timeslice_gets_a_notice and
     // analyze::phases::tests::trials_get_the_small_max_timeslice_notice_from_their_run_arguments
     // (the small --max-timeslice notice): 1162 (1160 on main plus two).
+    // And run::tests::image_env_replaces_only_the_minimal_defaults_it_declares: 1122.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -4615,6 +4616,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_pi_mutex_condition_variable_queue_matches_linux join them: 641.
     // And a_pi_owner_that_exits_or_is_killed_is_dead_from_its_committed_end and
     // futex_lock_pi_in_a_nested_pid_namespace_is_refused_by_name: 643.
+    // And run_minimal_base_env_names_the_guests_own_user_and_home and
+    // run_explicit_env_replaces_the_minimal_user_and_home: 624.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5165,6 +5168,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same replay-continuation slice test: 543.
     // The same renamed requeue-PI refusal test and four PI futex tests: 560.
     // And the same owner-end race and nested-PID refusal tests: 562.
+    // The two --base-env=minimal identity tests start only ptrace guests, so
+    // test.cli_on_host selects both: 543.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6074,6 +6079,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same single-stream record-version test: 1155.
     // And the same two small --max-timeslice notice units: 1156 (1154 on main
     // plus two).
+    // And the same --image environment unit test: 1116.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
