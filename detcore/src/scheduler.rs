@@ -28711,6 +28711,7 @@ mod test {
                 turn: 14,
                 wakes: 0,
                 calls: vec![(op_id.tid, 4)],
+                popped: None,
             }],
         );
         let refused = scheduler.replay_call_never_returns(op_id.tid);
