@@ -2229,6 +2229,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 1163, listed.
+    // And run::detlog_anon_is_ptrace_only: 1115.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3776,6 +3777,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 2741, listed.
     // And this branch's Detcore unit tests: 2712.
+    // And procmaps' three --detlog-anon units: 2684, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5280,6 +5282,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 640, listed.
+    // And detlog_anon_records_a_write_to_an_anonymous_mapping: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5942,6 +5945,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 559, listed.
+    // And detlog_anon_records_a_write_to_an_anonymous_mapping: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6548,6 +6552,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 2741, listed.
     // And the same tests: 2712.
+    // And procmaps' three --detlog-anon units: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
