@@ -1222,6 +1222,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // the_sleep_registration_is_printed_when_set_and_never_enters_the_legacy_form: 1882.
     // config::tests::first_pass_sleep_registration_is_the_default_only_where_signal_state_is_read
     // (https://github.com/rrnewton/hermit/pull/4682): 1883.
+    // And detcore-model's two config::tests of --chaos-timed-wait-spread
+    // (legacy form, round trip): 1884.
+    // And detcore-model's config::tests::
+    // a_timed_wait_spread_registers_sleeps_at_the_first_pass_by_default: 1885.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2053,6 +2057,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // analyze::phases::tests::analyze_runs_every_trial_under_the_targets_sleep_registration
     // and bisect::tests::bisect_replays_under_the_bad_schedules_sleep_registration: 1163.
     // And metadata::tests::record_and_replay_register_sleeps_when_chosen: 1164.
+    // And run::chaos_timed_wait_spread_parses_round_trips_and_is_refused_where_inert and
+    // run::a_replay_under_another_timed_wait_spread_is_refused: 1166.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3413,6 +3419,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_signal_after_a_parked_nanosleep_deadline_leaves_it_to_complete_on_any_backend} and
     // scheduler::posix_timer_coalesce_tests::a_timer_send_is_made_at_its_due_time
     // (https://github.com/rrnewton/hermit/pull/4682): 2706.
+    // race search keeps registering sleeps when chosen): 2700.
+    // And --chaos-timed-wait-spread: three scheduler::timed_wait_spread::tests, one
+    // timed_waiters test, two scheduler tests and one preemptions test: 2707.
+    // And scheduler::test::a_schedule_replay_spreads_no_wait_filed_past_its_schedule: 2708.
+    // And scheduler::test::a_schedule_replay_waits_for_its_next_thread_put_back_to_sleep: 2709.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4814,6 +4825,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_signal_after_a_sleeps_deadline_does_not_interrupt_it and
     // an_ignored_or_blocked_sigchld_does_not_end_a_sleep
     // (https://github.com/rrnewton/hermit/pull/4682): 639.
+    // And chaos_timed_wait_spread_reorders_a_wait_against_work_and_keeps_the_clock_honest: 638.
+    // And a_schedule_replay_of_a_timed_wait_spread_recording_follows_it: 639.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5424,6 +5437,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_reads_a_trapped_rdtsc_before_switching_away, which
     // is not among them: 542.
     // And the same two sleep-signal guest tests, not excluded: 558.
+    // And the same --chaos-timed-wait-spread guest test: 557.
+    // And the same spread schedule-replay test: 558.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5961,6 +5976,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two registration-rule units: 2699.
     // And the same four sleep-registration units: 2703.
     // And the same three send-time and any-backend deadline units: 2706.
+    // And the same three queued-sleep registration units: 2698, listed.
+    // And the same two registration-rule units: 2700.
+    // And the same seven --chaos-timed-wait-spread tests: 2707.
+    // And the same spread past-the-schedule unit: 2708.
+    // And the same spread replay-wait unit: 2709.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6386,6 +6406,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two edited-record analyze tests: 1117.
     // And the same three --sleep-registration units: 1157. And the same
     // record/replay registration unit: 1158.
+    // And the same two --chaos-timed-wait-spread run tests: 1160.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6608,6 +6629,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two replay_edited_preemptions config tests: 1868.
     // And the same sleep-registration interpolation and config tests: 1868.
     // And the same default-rule unit: 1869.
+    // And the same two --chaos-timed-wait-spread config tests: 1870.
+    // And the same spread registration config test: 1871.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
