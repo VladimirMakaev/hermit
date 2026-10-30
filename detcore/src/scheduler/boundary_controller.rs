@@ -209,6 +209,14 @@ impl Scheduler {
                 );
                 self.requeue_with_new_priority(current, REPLAY_DEFERRED_PRIORITY);
                 self.requeue_with_new_priority(next, REPLAY_FOREGROUND_PRIORITY);
+                // A timeslice-end marker also switches before its request, but
+                // that request resumes guest code: only a syscall prehook hands
+                // its call a turn (`replay_prehook_handoff`).
+                let at_syscall_prehook = matches!(
+                    observed,
+                    Record::Event(event) if super::observed_is_syscall_prehook(event)
+                );
+                self.note_replay_switch(current, next, at_syscall_prehook);
                 // The expectation rides the existing grant. No old leader's
                 // legacy duration may leak into this new-format continuation.
                 self.timeslices.remove(&next);
@@ -242,6 +250,7 @@ mod tests {
     use crate::preemptions::PreemptionWriter;
     use crate::scheduler::boundary_replayer::BoundaryReplayer;
     use crate::scheduler::runqueue::DEFAULT_PRIORITY;
+    use crate::types::SyscallPhase;
 
     fn marker(tid: i32, slice: u64) -> Record {
         Record::TimesliceEnd(Boundary {
@@ -570,6 +579,37 @@ mod tests {
         );
         assert_eq!((scheduler.turn, scheduler.committed_time), before);
         assert!(!scheduler.replay_priorities_released);
+    }
+
+    /// The boundary replayer switches away before the next thread's record at
+    /// a syscall prehook and at a timeslice-end marker alike. Only the prehook
+    /// leaves the thread a call to carry out (`replay_prehook_handoff`): the
+    /// request after a marker resumes guest code, which records events, so it
+    /// is not handed a turn ahead of the other deferred threads.
+    #[test]
+    fn only_a_prehook_switch_leaves_its_thread_a_call_to_carry_out() {
+        let (current, next) = (DetTid::from_raw(3), DetTid::from_raw(4));
+        let prehook = Record::Event(
+            SchedEvent::syscall(current, Sysno::clone3, SyscallPhase::Prehook)
+                .with_time(LogicalTime::from_nanos(10_000)),
+        );
+        let following = Record::Event(SchedEvent::branches(next, 10));
+        for (observed, hands_over) in [(prehook, true), (marker(3, 1), false)] {
+            let mut scheduler = scheduler(vec![observed.clone(), following.clone()]);
+            for tid in [current, next] {
+                scheduler.priorities.insert(tid, DEFAULT_PRIORITY);
+                scheduler.runqueue_push_back(tid);
+            }
+            let result = scheduler.consume_boundary_record(&observed).unwrap();
+            assert!(result.keep_running, "{observed:?}");
+            assert_eq!(scheduler.priorities[&current], REPLAY_DEFERRED_PRIORITY);
+            assert_eq!(scheduler.priorities[&next], REPLAY_FOREGROUND_PRIORITY);
+            assert_eq!(
+                scheduler.replay_prehook_callers.contains(&current),
+                hands_over,
+                "{observed:?}"
+            );
+        }
     }
 
     #[test]
