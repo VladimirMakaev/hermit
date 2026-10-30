@@ -206,6 +206,9 @@ static LAST_BAND_BACKGROUND_CALL_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static CHAOS_POLLER_BESIDE_SLEEPERS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static TIMED_WAIT_POLLERS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SOCKET_READER_BESIDE_SPINNER_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static HANDOFF_BESIDE_NEWCOMER_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static SLEEPER_BESIDE_NEWCOMER_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static POLLERS_BESIDE_WORKER_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SCHEDULER_SIGNAL_WAITING_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SIGNAL_WAITING_BESIDE_BACKGROUND_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static FUTEX_WAIT_UNREADABLE_WORD_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -46384,6 +46387,511 @@ fn a_socket_reader_beside_a_spinner_is_retried_within_a_poll_upgrade_period() {
             .collect::<Vec<_>>()
             .join("\n")
     );
+}
+
+/// Two threads hand a turn back and forth through a condition variable, with
+/// no timeout, while main creates a third thread and joins it
+/// (tests/c/handoff_beside_newcomer.c). Each hand-off is a turn charged half
+/// a millisecond of virtual time but costs its thread microseconds of its
+/// own, and chaos change points came only when a thread's own-time slice
+/// ended. On main 46be6638, at `--chaos --seed=1` and `--seed=6` the new
+/// thread drew a worse band than both players and waited 13.3 s and 7.6 s
+/// of virtual time for its first instruction, and at seeds 2 and 4 main
+/// itself waited through 17,000-26,000 hand-offs to create it. Turns now
+/// count toward a chaos slice, so a change point comes within about 400
+/// turns and the starvation bound acts: on this head the new thread waits at
+/// most 0.24 s and a run takes at most 1,728 hand-offs. Each seed must give
+/// it its first turn within 1 s and finish in fewer than 10,000 hand-offs. A
+/// chaos run also verifies at bitwise parity. The seed-6 recording, whose
+/// slices the bound ended, replays as recorded under `--chaos
+/// --replay-schedule-from` (as analyze trials run). A preemption replay ends
+/// such a slice at its recorded branch count, which can fall just before the
+/// syscall check-in it ended at, so until
+/// https://github.com/rrnewton/hermit/pull/4597 lands its run can differ by
+/// a turn: at seeds 2, 6 and 11 the new thread's wait comes out one turn
+/// charge (0.5 ms) different. The seed-6 preemption replay must stay within
+/// one turn of the recording (0.6 ms of wait, one hand-off), and the seed-3
+/// recording, whose slices the bound leaves alone, must replay exactly under
+/// `--chaos --replay-preemptions-from` at another seed.
+///
+/// PMU REQUIRED: chaos change points come where the PMU timer ends a slice,
+/// and `--strict` refuses a host whose retired-branch counter fails Reverie's
+/// validation. test.cli and test.cli_on_host skip it by exact name;
+/// privileged-test.pmu_cli_cases runs it.
+#[test]
+fn chaos_change_points_come_within_a_timeslice_of_turn_charges() {
+    let _guard = hermit_run_guard();
+    let guest = futex_c_guest(&HANDOFF_BESIDE_NEWCOMER_GUEST, "handoff_beside_newcomer")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let measure = |stdout: &str| -> (u64, u64) {
+        let mut words = stdout.split_whitespace();
+        let waited = words.nth(2).and_then(|w| w.parse().ok());
+        let handoffs = words.nth(1).and_then(|w| w.parse().ok());
+        waited
+            .zip(handoffs)
+            .unwrap_or_else(|| panic!("unexpected output {stdout:?}"))
+    };
+    for seed in ["1", "2", "3", "4", "5", "6"] {
+        let output = hermit(&[
+            "run",
+            "--strict",
+            "--timeout",
+            "120",
+            "--chaos",
+            "--seed",
+            seed,
+            "--",
+            &guest,
+        ]);
+        let out = stdout(&output);
+        assert!(output.status.success(), "seed {seed}: {}", stderr(&output));
+        let (waited_us, handoffs) = measure(&out);
+        assert!(
+            waited_us < 1_000_000 && handoffs < 10_000,
+            "seed {seed}: the new thread waited {waited_us} us for its first turn, after \
+             {handoffs} hand-offs in all"
+        );
+    }
+
+    let verdict = directory.path().join("verify.json");
+    let verdict_arg = verdict.to_str().unwrap().to_owned();
+    let verified = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "1",
+        "--verify",
+        "--verify-strict",
+        "--verify-json",
+        &verdict_arg,
+        "--",
+        &guest,
+    ]);
+    assert!(verified.status.success(), "{}", stderr(&verified));
+    let report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&verdict).expect("failed to read the verify verdict"),
+    )
+    .expect("the verify verdict is not JSON");
+    assert_eq!(report["verdict"], "matched", "{report}");
+    assert_eq!(report["bitwise_parity"], true, "{report}");
+    for side in ["left", "right"] {
+        assert!(
+            report["compared_log_messages"][side].as_u64().unwrap_or(0) > 0,
+            "no INFO messages compared: {report}"
+        );
+    }
+
+    let schedule = directory.path().join("schedule.json");
+    let record = format!("--record-preemptions-to={}", schedule.display());
+    let recorded = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "6",
+        &record,
+        "--",
+        &guest,
+    ]);
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    let replay = format!("--replay-schedule-from={}", schedule.display());
+    let replayed = hermit(&[
+        "--log=info",
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "6",
+        &replay,
+        "--",
+        &guest,
+    ]);
+    let log = stderr(&replayed);
+    assert!(
+        replayed.status.success() && log.contains("(0 desynced)"),
+        "the schedule replay must not desync:\n{}",
+        log.lines()
+            .filter(|line| line.contains("desync") || line.contains("expected to be running"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(
+        stdout(&replayed),
+        stdout(&recorded),
+        "the schedule replay must print what the recording printed"
+    );
+    let shaped = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "7",
+        &format!("--replay-preemptions-from={}", schedule.display()),
+        "--",
+        &guest,
+    ]);
+    assert!(shaped.status.success(), "{}", stderr(&shaped));
+    let (recorded_wait, recorded_handoffs) = measure(&stdout(&recorded));
+    let (shaped_wait, shaped_handoffs) = measure(&stdout(&shaped));
+    assert!(
+        recorded_wait.abs_diff(shaped_wait) <= 600
+            && recorded_handoffs.abs_diff(shaped_handoffs) <= 1,
+        "the preemption replay of slices the bound ended must stay within one turn of the \
+         recording until #4597: {} vs {}",
+        stdout(&shaped),
+        stdout(&recorded)
+    );
+    let preemption_schedule = directory.path().join("preemptions.json");
+    let preemption_record = format!("--record-preemptions-to={}", preemption_schedule.display());
+    let recorded = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "3",
+        &preemption_record,
+        "--",
+        &guest,
+    ]);
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    let fresh = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "7",
+        "--",
+        &guest,
+    ]);
+    assert!(fresh.status.success(), "{}", stderr(&fresh));
+    assert_ne!(
+        stdout(&fresh),
+        stdout(&recorded),
+        "seed 7 must schedule differently for the replay below to show anything"
+    );
+    let preemptions = format!(
+        "--replay-preemptions-from={}",
+        preemption_schedule.display()
+    );
+    let preempted = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "7",
+        &preemptions,
+        "--",
+        &guest,
+    ]);
+    assert!(preempted.status.success(), "{}", stderr(&preempted));
+    assert_eq!(
+        stdout(&preempted),
+        stdout(&recorded),
+        "the preemption replay must print what the recording printed"
+    );
+}
+
+/// A thread sleeps for 100 us in a loop, less than a scheduler turn charge, so
+/// its sleep is always due when it is next selected, while main creates a
+/// second thread (tests/c/sleeper_beside_newcomer.c). The sleeper's turns end
+/// timed waits at their deadlines and do not count toward its chaos slice, so
+/// its slices run on its own time. On main 288c4e60, at `--chaos --seed=9`,
+/// `23` and `24` the new thread drew a worse band and waited 6.3 s, 16.9 s and
+/// 19.9 s of virtual time for its first instruction. A thread that has not
+/// yet run and loses 400 grants in a row on priority now makes every grant
+/// end its slice at the next check-in, and the starvation bound puts the
+/// threads ahead behind it: it waits 0.25 s at each of these seeds. Each must
+/// give it its first turn within 1 s, a chaos run verifies at bitwise parity,
+/// and the seed-9 recording replays as recorded under `--chaos
+/// --replay-schedule-from` (as analyze trials run). Its preemption replay is
+/// one turn off until https://github.com/rrnewton/hermit/pull/4597 lands, as
+/// for chaos_change_points_come_within_a_timeslice_of_turn_charges.
+///
+/// PMU REQUIRED: chaos change points come where the PMU timer ends a slice,
+/// and `--strict` refuses a host whose retired-branch counter fails Reverie's
+/// validation. test.cli and test.cli_on_host skip it by exact name;
+/// privileged-test.pmu_cli_cases runs it.
+#[test]
+fn a_new_thread_behind_a_short_sleep_loop_gets_its_first_turn_within_a_second() {
+    let _guard = hermit_run_guard();
+    let guest = futex_c_guest(&SLEEPER_BESIDE_NEWCOMER_GUEST, "sleeper_beside_newcomer")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    for seed in ["9", "23", "24"] {
+        let output = hermit(&[
+            "run",
+            "--strict",
+            "--timeout",
+            "120",
+            "--chaos",
+            "--seed",
+            seed,
+            "--",
+            &guest,
+        ]);
+        let out = stdout(&output);
+        assert!(output.status.success(), "seed {seed}: {}", stderr(&output));
+        let waited_us: u64 = out
+            .split_whitespace()
+            .nth(3)
+            .and_then(|word| word.parse().ok())
+            .unwrap_or_else(|| panic!("seed {seed}: unexpected output {out:?}"));
+        assert!(
+            waited_us < 1_000_000,
+            "seed {seed}: the new thread waited {waited_us} us for its first turn"
+        );
+    }
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let verdict = directory.path().join("verify.json");
+    let verdict_arg = verdict.to_str().unwrap().to_owned();
+    let verified = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "9",
+        "--verify",
+        "--verify-strict",
+        "--verify-json",
+        &verdict_arg,
+        "--",
+        &guest,
+    ]);
+    assert!(verified.status.success(), "{}", stderr(&verified));
+    let report: serde_json::Value = serde_json::from_str(
+        &fs::read_to_string(&verdict).expect("failed to read the verify verdict"),
+    )
+    .expect("the verify verdict is not JSON");
+    assert_eq!(report["verdict"], "matched", "{report}");
+    assert_eq!(report["bitwise_parity"], true, "{report}");
+    for side in ["left", "right"] {
+        assert!(
+            report["compared_log_messages"][side].as_u64().unwrap_or(0) > 0,
+            "no INFO messages compared: {report}"
+        );
+    }
+
+    let schedule = directory.path().join("schedule.json");
+    let record = format!("--record-preemptions-to={}", schedule.display());
+    let recorded = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "9",
+        &record,
+        "--",
+        &guest,
+    ]);
+    assert!(recorded.status.success(), "{}", stderr(&recorded));
+    let replay = format!("--replay-schedule-from={}", schedule.display());
+    let replayed = hermit(&[
+        "--log=info",
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "9",
+        &replay,
+        "--",
+        &guest,
+    ]);
+    let log = stderr(&replayed);
+    assert!(
+        replayed.status.success() && log.contains("(0 desynced)"),
+        "the schedule replay must not desync:\n{}",
+        log.lines()
+            .filter(|line| line.contains("desync") || line.contains("expected to be running"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+    assert_eq!(
+        stdout(&replayed),
+        stdout(&recorded),
+        "the schedule replay must print what the recording printed"
+    );
+}
+
+/// The same 100 us sleep loop beside a thread that has already run
+/// (tests/c/sleeper_beside_newcomer.c `existing`): the thread sleeps 50 ms and
+/// wakes, due, behind the loop. Neither rule frees a thread that has run, so
+/// it waits as on main: at `--chaos --seed=4` it wakes 5.8 s late on main
+/// 288c4e60 and on this head, and 0.30 s late when every turn counted. This
+/// holding is what reproduces a real use-after-free (main held off for 3.8 s
+/// behind a 200 us sleep loop), so the test guards it: the thread must wake
+/// at least 1 s late.
+///
+/// PMU REQUIRED: chaos change points come where the PMU timer ends a slice,
+/// and `--strict` refuses a host whose retired-branch counter fails Reverie's
+/// validation. test.cli and test.cli_on_host skip it by exact name;
+/// privileged-test.pmu_cli_cases runs it.
+#[test]
+fn a_thread_that_has_run_still_waits_behind_a_short_sleep_loop() {
+    let _guard = hermit_run_guard();
+    let guest = futex_c_guest(&SLEEPER_BESIDE_NEWCOMER_GUEST, "sleeper_beside_newcomer")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let output = hermit(&[
+        "run",
+        "--strict",
+        "--timeout",
+        "120",
+        "--chaos",
+        "--seed",
+        "4",
+        "--",
+        &guest,
+        "existing",
+    ]);
+    let out = stdout(&output);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let late_us: u64 = out
+        .split_whitespace()
+        .nth(3)
+        .and_then(|word| word.parse().ok())
+        .unwrap_or_else(|| panic!("unexpected output {out:?}"));
+    assert!(
+        late_us >= 1_000_000,
+        "the thread that had run woke only {late_us} us late behind the sleep loop; if \
+         priorities are now drawn differently, check that seed 4 still draws it behind the \
+         loop (5.8 s late on main 288c4e60)"
+    );
+}
+
+/// The same guest with `zero` (tests/c/sleeper_beside_newcomer.c): the loop
+/// sleeps for no time (`nanosleep` of zero, a yield idiom) beside the thread
+/// that has run. `sleep_request` marks each of those sleeps a zero-length
+/// sleep (`Resources::zero_length_sleep`), so unlike a 100 us sleep's their
+/// turns count toward the loop's chaos slice: within about 400 of them a
+/// change point comes, and the starvation bound puts the loop behind the
+/// thread it passed over. At `--chaos --seed=4` and `--seed=8`, where the
+/// thread is drawn behind the loop, it wakes 0.30 s late. With the mark lost
+/// (`zero_length_sleep` left false), each zero-length sleep is due at its
+/// grant and leaves the count, and the thread wakes 5.8 s and 19.9 s late.
+/// Each seed must wake it within 1 s, and at least 0.1 s late: at seeds where
+/// the thread is not drawn behind the loop it wakes within 51 ms, and such a
+/// seed would prove nothing. Seed 4 is also the seed of
+/// a_thread_that_has_run_still_waits_behind_a_short_sleep_loop.
+///
+/// PMU REQUIRED: chaos change points come where the PMU timer ends a slice,
+/// and `--strict` refuses a host whose retired-branch counter fails Reverie's
+/// validation. test.cli and test.cli_on_host skip it by exact name;
+/// privileged-test.pmu_cli_cases runs it.
+#[test]
+fn a_thread_that_has_run_does_not_wait_behind_a_zero_length_sleep_loop() {
+    let _guard = hermit_run_guard();
+    let guest = futex_c_guest(&SLEEPER_BESIDE_NEWCOMER_GUEST, "sleeper_beside_newcomer")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    for seed in ["4", "8"] {
+        let output = hermit(&[
+            "run",
+            "--strict",
+            "--timeout",
+            "120",
+            "--chaos",
+            "--seed",
+            seed,
+            "--",
+            &guest,
+            "zero",
+        ]);
+        let out = stdout(&output);
+        assert!(output.status.success(), "seed {seed}: {}", stderr(&output));
+        let late_us: u64 = out
+            .split_whitespace()
+            .nth(3)
+            .and_then(|word| word.parse().ok())
+            .unwrap_or_else(|| panic!("seed {seed}: unexpected output {out:?}"));
+        assert!(
+            late_us >= 100_000,
+            "seed {seed}: the thread that had run woke only {late_us} us late, so this seed no \
+             longer draws it behind the loop of zero-length sleeps; pick seeds that do (0.30 s \
+             late at seeds 4 and 8 when they were chosen)"
+        );
+        assert!(
+            late_us < 1_000_000,
+            "seed {seed}: the thread that had run woke {late_us} us late behind a loop of \
+             zero-length sleeps; check that sleep_request still marks them \
+             (Resources::zero_length_sleep) and that their turns count toward a chaos slice"
+        );
+    }
+}
+
+/// Four threads loop on a 10 us `pthread_cond_timedwait` that nobody signals,
+/// beside a compute-bound worker (tests/c/pollers_beside_worker.c). Each
+/// timed-out wait is a turn charged half a millisecond of virtual time for a
+/// few microseconds of the poller's own time. Unlike a due sleep's, those
+/// turns count toward the pollers' chaos slices: a futex wait that times out
+/// waits for another thread, and letting its loop hold the CPU starves that
+/// thread. When they did not count, as on main c7e03195, the worker was held
+/// off for 17-28 s at a time at `--chaos` seeds 1-6, and at two of them did
+/// not finish within 60 s. Here it is held off for at most 1.2 s at a time
+/// and finishes within 10 s of virtual time. Each seed must finish and keep
+/// the worker's longest gap under 5 s.
+///
+/// PMU REQUIRED: chaos change points come where the PMU timer ends a slice,
+/// and `--strict` refuses a host whose retired-branch counter fails Reverie's
+/// validation. test.cli and test.cli_on_host skip it by exact name;
+/// privileged-test.pmu_cli_cases runs it.
+#[test]
+fn a_worker_is_not_held_off_by_futex_waits_that_time_out() {
+    let _guard = hermit_run_guard();
+    let guest = futex_c_guest(&POLLERS_BESIDE_WORKER_GUEST, "pollers_beside_worker")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    for seed in ["1", "2"] {
+        let output = hermit(&[
+            "run",
+            "--strict",
+            "--timeout",
+            "120",
+            "--chaos",
+            "--seed",
+            seed,
+            "--",
+            &guest,
+        ]);
+        let out = stdout(&output);
+        assert!(output.status.success(), "seed {seed}: {}", stderr(&output));
+        let gap_us: u64 = out
+            .split_whitespace()
+            .nth(6)
+            .and_then(|word| word.parse().ok())
+            .unwrap_or_else(|| panic!("seed {seed}: unexpected output {out:?}"));
+        assert!(
+            gap_us < 5_000_000,
+            "seed {seed}: the worker was held off for {gap_us} us beside the pollers"
+        );
+    }
 }
 
 /// Run tests/c/scheduler_signal_waiting.c under `run --strict` in each mode

@@ -883,6 +883,12 @@
       "why": "tests/c/guest_sigchld.c is owned by hermit-cli/tests/cli.rs: The Rust CLI integration test a_guests_sigchld_to_a_sleeping_sibling_ends_its_sleep_as_on_linux compiles this guest, in which one thread sends SIGCHLD to a sibling asleep in nanosleep or pause while a third spins, and requires each mode's native output (https://github.com/rrnewton/hermit/issues/4132); it remains a guest fixture because its CLI test checks the exact status and stdout of strict runs."
     },
     {
+      "disposition": "guest-fixture",
+      "path": "tests/c/handoff_beside_newcomer.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/handoff_beside_newcomer.c is owned by hermit-cli/tests/cli.rs: The integration test chaos_change_points_come_within_a_timeslice_of_turn_charges runs this guest under run --strict --chaos at seeds 1-6 and requires the newly created thread's first turn within 1 s of virtual time and fewer than 10,000 hand-offs, verifies a chaos run at bitwise parity, and replays a chaos recording under --chaos --replay-schedule-from without a desync and under --chaos --replay-preemptions-from with the same output; a generic manifest cannot express the measured bounds, the parity check or the replay, and the case needs the PMU timer, so it runs in privileged-test.pmu_cli_cases."
+    },
+    {
       "disposition": "manifest-test",
       "path": "tests/c/hardware_trap_identity.c",
       "runner": "target/debug/test-harness via tests/e2e/manifests/c-programs.yaml (explicit mode selection; ci=false)",
@@ -1703,6 +1709,12 @@
       "path": "tests/c/poll_zero_timeout_restart.c",
       "runner": "hermit-cli/tests/cli.rs",
       "why": "tests/c/poll_zero_timeout_restart.c is owned by hermit-cli/tests/cli.rs: a_zero_timeout_poll_ended_by_a_signal_restarts_as_on_linux runs it natively, under ptrace with --strict, plain and with --no-sequentialize-threads, and under record start --verify --verify-strict, and requires native's fixed line: 2000 zero-timeout polls of an empty pipe all return 0 while 200 children exit, even when a child's SIGCHLD ends a poll with ERESTART_RESTARTBLOCK in the kernel. It stays a fixture because the test compares native and Hermit output."
+    },
+    {
+      "disposition": "guest-fixture",
+      "path": "tests/c/pollers_beside_worker.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/pollers_beside_worker.c is owned by hermit-cli/tests/cli.rs: The integration test a_worker_is_not_held_off_by_futex_waits_that_time_out runs this guest under run --strict --chaos and requires the compute-bound worker to finish with its longest gap under 5 s of virtual time beside four pollers whose 10 us futex waits time out; a generic manifest cannot express the measured bound, and the case needs the PMU timer, so it runs in privileged-test.pmu_cli_cases."
     },
     {
       "disposition": "manifest-test",
@@ -2783,6 +2795,12 @@
       "path": "tests/c/sleep_sigchld_taker.c",
       "runner": "hermit-cli/tests/external_signal_interrupt.rs",
       "why": "tests/c/sleep_sigchld_taker.c is owned by hermit-cli/tests/external_signal_interrupt.rs: The integration suite compiles this guest and checks that a pause or nanosleep of the thread that forked a child, beside a sibling spinning without system calls, takes the child's SIGCHLD and returns EINTR with the handler on the sleeping thread, as on Linux."
+    },
+    {
+      "disposition": "guest-fixture",
+      "path": "tests/c/sleeper_beside_newcomer.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/sleeper_beside_newcomer.c is owned by hermit-cli/tests/cli.rs: The integration tests a_new_thread_behind_a_short_sleep_loop_gets_its_first_turn_within_a_second, a_thread_that_has_run_still_waits_behind_a_short_sleep_loop and a_thread_that_has_run_does_not_wait_behind_a_zero_length_sleep_loop run this guest under run --strict --chaos: a newly created thread must get its first turn within 1 s of virtual time beside a loop of 100 us sleeps (seeds 9, 23 and 24, with a bitwise-parity verify and a schedule replay), a thread that has run must still wake at least 1 s late behind it (seed 4), and with the zero argument, behind a loop of zero-length sleeps, it must wake within 1 s (seeds 4 and 8); a generic manifest cannot express the measured bounds or the parity and replay checks, and the cases need the PMU timer, so they run in privileged-test.pmu_cli_cases."
     },
     {
       "disposition": "manifest-test",
