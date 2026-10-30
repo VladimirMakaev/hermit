@@ -1974,6 +1974,16 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_realized_pair_passes_over_a_creator_and_a_thread_start,
     // a_creator_is_passed_over_only_when_it_only_finishes_creating_another_thread,
     // phase6_takes_stack2_where_the_plan_says}: 1220.
+    // And analyze's budget and resume: five budget::tests, four
+    // checkpoint::tests, seven rundata::tests (journaled runs, budget bounds,
+    // a cut run, the key's input digest, the reproducer's own bound), nine
+    // phases::tests (budget-ended prefix search and its resume, bracket,
+    // partial reports, resume refusal, restart from a whole interval, the
+    // kept workspace, a resume through the journal) and two
+    // schedule_search::tests (a stopped search's closest pair and its resume,
+    // a search started from an observed interval): 1236.
+    // And phases::tests::a_budget_hit_after_the_decision_reports_it: 1237.
+    // And phases::tests::a_trial_budget_that_ends_at_the_stack_trace_runs_reports_the_decision: 1238.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5874,6 +5884,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seven trial-log-level tests: 1210.
     // And the same five report-stack tests: 1208.
     // And the same six stack2 thread-choice tests: 1214.
+    // And the same twenty-seven budget-and-resume tests: 1230.
+    // And the same decided-budget test: 1231.
+    // And the same cut-path decided-budget test: 1232.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
