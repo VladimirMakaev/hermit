@@ -2029,6 +2029,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_virtual_bound_boundary_is_reported_as_a_hang_without_a_longer_bound}:
     // 1145.
     // And metadata::tests::record_version_rejects_polled_dontwait_socketpair_recordings: 1163.
+    // And container::tests::superblock_options_leave_out_the_owner: 1161.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3921,6 +3922,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And record_replay_keeps_eventfds_received_over_scm_rights_coherent: 224.
     // And record_replay_reads_an_inotify_instance_received_over_scm_rights: 225.
     // And record_replay_shares_memory_between_mappings_of_one_memfd: 226.
+    // And record_replay_gives_the_guest_a_private_dev_shm: 222.
     ("test.record_replay", 226),
     // Seven proc-fallback, warning, and record/replay tests retain all 80
     // selected identities under the unchanged shipped CLI skip filters.
@@ -4689,6 +4691,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // split from the own-process refusal test
     // (https://github.com/rrnewton/hermit/issues/4034): 657.
     // And a_schedule_replay_delivers_a_process_directed_signal_as_its_recording_did: 658.
+    // And a_run_gets_a_private_empty_dev_shm,
+    // concurrent_runs_do_not_share_dev_shm and
+    // host_dev_shm_sources_stay_the_hosts: 640.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5253,6 +5258,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And msg_errqueue_returns_at_once_on_inet_sockets_and_waits_on_unix_sockets: 565.
     // And the same three process-directed signal tests: 576.
     // And the same process-directed signal schedule-replay test: 577.
+    // And the three private /dev/shm tests: 559.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6182,6 +6188,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three --virtual-timeout units: 1202.
     // And the same seven virtual-time trial-bound tests: 1209.
     // And the same MSG_DONTWAIT record-version unit: 1157.
+    // And the container's superblock-owner test: 1155.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
