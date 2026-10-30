@@ -2849,6 +2849,10 @@ mod tests {
                 "--replay-preemptions-from=requested.preempts",
                 "--replay-preemptions-from",
             ),
+            (
+                "--record-access-trace-to=requested.access",
+                "--record-access-trace-to",
+            ),
         ] {
             let error = options(&[run_arg])
                 .refuse_outputs_trials_overwrite()

@@ -1031,6 +1031,29 @@ mod tests {
                 "--rewrite-exclusives-also=/tmp/liblse.so",
             ],
         ),
+        (
+            "record-access-trace-to",
+            &[
+                "--record-preemptions-to=/tmp/p.json",
+                "--record-access-trace-to=/tmp/a.access",
+            ],
+        ),
+        (
+            "access-trace-from",
+            &[
+                "--record-preemptions-to=/tmp/p.json",
+                "--record-access-trace-to=/tmp/a.access",
+                "--access-trace-from=5",
+            ],
+        ),
+        (
+            "access-trace-max-records",
+            &[
+                "--record-preemptions-to=/tmp/p.json",
+                "--record-access-trace-to=/tmp/a.access",
+                "--access-trace-max-records=9",
+            ],
+        ),
         ("scheduler-turn-cost", &["--scheduler-turn-cost=10000"]),
         ("virtual-timeout", &["--virtual-timeout=1000"]),
         ("cap-preemption-charge", &["--cap-preemption-charge"]),
