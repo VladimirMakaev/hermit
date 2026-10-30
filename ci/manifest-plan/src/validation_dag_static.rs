@@ -2030,6 +2030,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1145.
     // And metadata::tests::record_version_rejects_polled_dontwait_socketpair_recordings: 1163.
     // And container::tests::superblock_options_leave_out_the_owner: 1161.
+    // And metadata::tests::record_version_rejects_restarted_kernel_poll_recordings
+    // (the kernel poll's interruption code): 1163 (1162 on main plus one).
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3338,6 +3340,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // dumper, a core without its dumping thread refused, the thread order, the
     // leader's state, the kernel's note order, the offered thread's
     // registers, every thread's frames in the Stack tier): 2691, listed.
+    // And a_restarted_kernel_poll_waits_only_until_its_deadline,
+    // only_record_replay_and_unsequentialized_runs_poll_in_the_kernel and
+    // a_kernel_poll_that_keeps_a_record_restarts_through_restart_syscall: 2725.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4710,6 +4715,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_parents_sigchld_is_not_held_behind_a_sibling_that_never_blocks
     // (https://github.com/rrnewton/hermit/issues/4132), which needs no PMU;
     // its PMU sibling runs in privileged-test.pmu_cli_cases: 623, listed.
+    // And a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline: 645.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5281,6 +5287,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the two private IPC namespace tests: 561.
     // a_parents_sigchld_is_not_held_behind_a_sibling_that_never_blocks needs
     // neither a PMU nor CPUID faulting: 542, listed.
+    // And a_kernel_run_poll_a_signal_ends_restarts_until_its_deadline: 564.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5794,6 +5801,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same commit-guard unit: 2752.
     // And the same three bounded SIGCHLD-deferral units: 2685, listed.
     // And the same nine fatal_core::tests: 2691, listed.
+    // And a_restarted_kernel_poll_waits_only_until_its_deadline,
+    // only_record_replay_and_unsequentialized_runs_poll_in_the_kernel and
+    // a_kernel_poll_that_keeps_a_record_restarts_through_restart_syscall: 2725.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6214,6 +6224,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seven virtual-time trial-bound tests: 1209.
     // And the same MSG_DONTWAIT record-version unit: 1157.
     // And the container's superblock-owner test: 1155.
+    // And the same record-version unit: 1157 (1156 on main plus one).
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

@@ -1600,11 +1600,12 @@ fn ptrace_records_a_self_aliased_word_woken_once_and_refuses_older_recordings() 
     // 0x189 MAP_SHARED mappings of one file share memory in replay,
     // 0x18a status files show TracerPid 0 on every path,
     // 0x18b gives each random-device open file its own stream,
-    // and 0x18c runs a MSG_DONTWAIT call on a socketpair end once),
+    // 0x18c runs a MSG_DONTWAIT call on a socketpair end once,
+    // and 0x18d a kernel poll a signal stopped before it ran returns),
     // and a recording from before the change, 0x14f, is still refused by
     // the exact-match gate.
     assert_eq!(
-        metadata["version"], 0x18c,
+        metadata["version"], 0x18d,
         "RECORD_VERSION moved; point this test at the current version and the one before"
     );
     metadata["version"] = serde_json::json!(0x14f);
