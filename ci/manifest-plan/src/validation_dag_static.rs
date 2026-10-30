@@ -3559,6 +3559,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_clear_child_tid_wake_is_a_join_edge: 2714, listed.
     // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
     // And the_uncapped_slices_mark_is_written_only_when_set, an_uncapped_records_backstop_outlasts_its_latest_event and an_uncapped_replay_ends_slices_at_its_backstop_while_the_record_lasts: 2698.
+    // And the four robust-list record units and two SIGKILL record-keeping
+    // units for robust-futex owner death by SIGKILL: 2701, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3976,6 +3978,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_schedule_replay_hands_the_guest_the_recorded_random_values (a replay
     // adopts the recorded --rng-seed and refuses another): 347, listed.
     // And scheduler_deadlock's poll-deadlock report: 347.
+    // And robust_futex_owner_death's native and ptrace SIGKILL owner-death
+    // tests: 349, listed.
     ("test.hermit_integration_3", 347),
     ("test.arbitrary_binaries", 4),
     // Every record_replay identity but one (`cargo nextest list` lists 110):
@@ -6207,6 +6211,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same fifteen sync-edge tests as test.detcore_unit: 2714.
     // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
     // And the same three uncapped-slices units: 2698.
+    // And the same six SIGKILL robust-list units: 2701, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6326,6 +6331,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same chaos_schedule_replay lit fixture: 695, listed.
     // And the same three fatal_core_capture tests: 696, listed.
     // And scheduler_deadlock's poll-deadlock report: 694.
+    // And robust_futex_owner_death's two SIGKILL owner-death tests: 696, listed.
     ("test.hermit_integration_on_host", 694),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode
