@@ -3281,7 +3281,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (https://github.com/rrnewton/hermit/issues/4876): 3149.
     // And a_schedule_prefix_keeps_the_background_starts_only_for_the_whole_schedule,
     // for main's prefix records: 3150.
-    ("test.detcore_unit", 3150),
+    // And format_version_round_trips_through_the_record_serde and
+    // background_starts_round_trip_through_the_record_serde, for main's
+    // record serde: 3152.
+    ("test.detcore_unit", 3152),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5745,7 +5748,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same six background-start units: 3147, listed.
     // And the same two untaken-background-start units: 3149.
     // And the same prefix-record unit: 3150.
-    ("test.detcore_unit_on_host", 3150),
+    // And the same two record-serde round-trip units: 3152.
+    ("test.detcore_unit_on_host", 3152),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
