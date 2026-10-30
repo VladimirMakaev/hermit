@@ -1214,6 +1214,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and summary::tests::a_count_of_slice_ends_without_a_stop_is_shown_when_known: 1883.
     // And detcore-model's five schedule::sched_event_tests (the stopless mark's
     // JSON, binary encoding, Debug form, RIP refusal and same_operations): 1888.
+    // And detcore-model's config::tests::replay_edited_preemptions_never_enters_the_legacy_form
+    // and config::tests::replay_edited_preemptions_needs_a_replayed_record_and_round_trips: 1882.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2039,6 +2041,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And metadata::tests::record_version_rejects_restarted_kernel_poll_recordings
     // (the kernel poll's interruption code): 1163 (1162 on main plus one).
     // And schedule_search::tests::schedules_align_however_their_slice_ends_were_taken: 1161.
+    // And analyze::rundata::tests::analyze_replays_only_its_edited_preemption_records_as_edited
+    // and analyze::phases::tests::the_target_record_replays_as_edited_only_after_minimization: 1123.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3372,6 +3376,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // finished background call at once): 2684.
     // And an_ignored_signal_shield_blocks_only_what_the_guest_ignores: 2696.
     // And a_shield_dropped_with_its_handler_ends_quietly: 2697.
+    // And the eight edited-record replay tests in tool_local::timeslice_tests and the one
+    // in edited_replay_hook_tests: 2691.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5902,6 +5908,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two background-readmission units: 2684.
     // And an_ignored_signal_shield_blocks_only_what_the_guest_ignores: 2696.
     // And a_shield_dropped_with_its_handler_ends_quietly: 2697.
+    // And the same nine edited-record replay tests: 2691.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6324,6 +6331,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the container's superblock-owner test: 1155.
     // And the same record-version unit: 1157 (1156 on main plus one).
     // And the same schedule_search alignment test: 1155.
+    // And the same two edited-record analyze tests: 1117.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6543,6 +6551,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same detcore-model unit: 1867.
     // And the same two detcore-model units: 1869.
     // And the same five schedule::sched_event_tests: 1874.
+    // And the same two replay_edited_preemptions config tests: 1868.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
