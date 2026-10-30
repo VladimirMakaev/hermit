@@ -219,6 +219,18 @@ pub(super) const ACCEPT_SLOT_REFUSAL: &str = "replay refused: an accepted connec
 /// 32-bit initial value; a guest eventfd created with this value, or counted
 /// up to it, in a diverged slot would read as a stand-in.
 const ACCEPT_STAND_IN_COUNT: u32 = 0x3880_acc7;
+/// The initial count of the eventfd that stands in for a descriptor an
+/// `SCM_RIGHTS` receive installed. Detcore replaces it with a live duplicate
+/// when the recording found the received file already in the receiver's
+/// table (`Detcore::install_live_alias`); one that remains names a file this
+/// process held nowhere else, which replay does not have. Replay serves every
+/// operation on it from the log. No recorded eventfd operation names one:
+/// Detcore records a received eventfd only as an alias of a descriptor the
+/// receiving table holds, which replay makes live, and leaves any other
+/// received anonymous inode but an inotify instance unrecorded. Nothing reads
+/// the count back; it is distinctive only so that a stand-in can be told
+/// apart from a guest eventfd in a replay's `/proc/<pid>/fdinfo`.
+pub(super) const RECEIVED_STAND_IN_COUNT: u32 = 0x5c3d_f0d5;
 
 /// The `eventfd-count` line of an fdinfo file, present for eventfds. Linux
 /// prints the count in hexadecimal.
@@ -1463,6 +1475,23 @@ impl Replayer {
         cloexec: bool,
     ) {
         if let Err(placeholder) = self.try_reserve_replay_fd(guest, fd, cloexec, 0).await {
+            panic!("{}", slot_divergence_message(guest.tid(), fd, placeholder));
+        }
+    }
+
+    /// Installs the stand-in for a descriptor an `SCM_RIGHTS` receive put in
+    /// slot `fd` (`RECEIVED_STAND_IN_COUNT`), which must be the lowest free
+    /// descriptor.
+    pub(super) async fn reserve_received_stand_in<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        fd: i32,
+        cloexec: bool,
+    ) {
+        if let Err(placeholder) = self
+            .try_reserve_replay_fd(guest, fd, cloexec, RECEIVED_STAND_IN_COUNT)
+            .await
+        {
             panic!("{}", slot_divergence_message(guest.tid(), fd, placeholder));
         }
     }

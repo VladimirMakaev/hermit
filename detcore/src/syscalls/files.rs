@@ -962,6 +962,26 @@ fn resolved_open_path(
     link.is_absolute().then_some(link)
 }
 
+/// What Detcore knows about a socket whose peer it classifies
+/// (`Detcore::classify_socket_peer`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SocketRole {
+    /// `connect` connected it or `accept` returned it, so it has a peer.
+    Connected,
+    /// Received over `SCM_RIGHTS`; it may be a listener, which has no peer.
+    Received,
+}
+
+/// The buffer `Detcore::probe_socket_option` lends the kernel: an option
+/// value and its length, in one reservation so that the guest bytes under
+/// both are saved and put back together.
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct SocketOptionProbe<V: Copy> {
+    value: V,
+    length: libc::socklen_t,
+}
+
 /// The scope `pidfd_send_signal`'s flags select (Linux's `pidfd_send_signal`
 /// since 6.9; <https://github.com/rrnewton/hermit/issues/4108>).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1614,6 +1634,13 @@ mod fdinfo_refusal_tests {
         assert_eq!(fdinfo_inode(fdinfo).as_deref(), Some("1234"));
         assert_eq!(fdinfo_inode(b"pos:\t0\n"), None);
         assert_eq!(fdinfo_inode(b"ino:\tx\n"), None);
+    }
+}
+
+/// Puts back the guest bytes under a `Detcore::probe_socket_option` buffer.
+fn restore_socket_option_probe<M: MemoryAccess>(memory: &mut M, buffer: AddrMut<u8>, saved: &[u8]) {
+    if memory.write_exact(buffer, saved).is_err() {
+        info!("Could not restore the guest bytes under a socket option probe.");
     }
 }
 
@@ -3783,6 +3810,180 @@ impl<T: RecordOrReplay> Detcore<T> {
             .thread_state()
             .add_fd(fd, flags, ty, host_stat.map(Into::into))?;
         Ok(host_stat)
+    }
+
+    /// Under replay, makes descriptor `fd`, which an `SCM_RIGHTS` receive
+    /// installed and which the recording found to name the open file of `other`
+    /// in this table, name that file in the kernel too.
+    ///
+    /// Replay serves the receive from the log and holds a placeholder eventfd
+    /// in `fd`, but the guest keeps using both descriptors: a write to a
+    /// received eventfd must reach the reader of the original, as it does in
+    /// the recording, and replay applies eventfd reads and writes in the kernel
+    /// (`ReplayFdKind::Eventfd`). `dup3` replaces the placeholder with `other`'s
+    /// file, which is the live object the recording's file corresponds to: the
+    /// open file the descriptor table names at `other` in both runs.
+    pub(crate) async fn install_live_alias<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        other: RawFd,
+        fd: RawFd,
+        flags: OFlag,
+    ) -> Result<(), Errno> {
+        let installed = guest
+            .inject_with_retry(
+                syscalls::Dup3::new()
+                    .with_oldfd(other)
+                    .with_newfd(fd)
+                    .with_flags(flags & OFlag::O_CLOEXEC),
+            )
+            .await?;
+        if installed != i64::from(fd) {
+            warn!("[detcore] replay's alias of {other} landed in {installed}, not {fd}");
+            return Err(Errno::EBADF);
+        }
+        Ok(())
+    }
+
+    /// Marks a socket whose peer is a guest of this container as internal
+    /// (`DetFd::set_guest_peer`), so record and replay poll a blocking call on
+    /// it in the caller's turn, as they do on a pipe or a socketpair endpoint,
+    /// instead of running it outside the turn as external I/O.
+    ///
+    /// Outside the turn, the kernel completed such a call at a host-timed
+    /// moment relative to the other threads' calls. A `recvmsg` that receives
+    /// descriptors over `SCM_RIGHTS` then took descriptor slots at that moment,
+    /// while replay, which serves the call from the log, reserves them when the
+    /// call rejoins the schedule; another thread's open in between took a
+    /// different slot in each, and replay refused with "replay FD namespace
+    /// diverged". In the turn, no other guest thread runs between the attempt
+    /// that receives and the reservation that replays it.
+    ///
+    /// The peer's credentials decide. Only `AF_UNIX` stream and seqpacket
+    /// sockets carry a peer's; Linux reports any other socket's, and a peer
+    /// outside the recording's PID namespace, as pid 0, which leaves the socket
+    /// external. So a pid above 0 names a guest only because `hermit record`
+    /// runs its guests in a PID namespace of their own (`cred_to_ucred` maps
+    /// the peer's pid into the caller's namespace, `pid_nr_ns`); a recording
+    /// that shared the host's PID namespace would count a host process's
+    /// socket as internal, and poll a wait on it in the caller's turn. Every
+    /// probe goes through the recording, so replay, which holds
+    /// placeholders, classifies the socket exactly as the recording did. A run
+    /// without sequentialized threads, or with `--debug-externalize-sockets`,
+    /// keeps every socket external; a plain run polls every socket already.
+    pub(crate) async fn classify_socket_peer<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        fd: RawFd,
+        role: SocketRole,
+    ) {
+        if !self.cfg.recordreplay_modes || !self.cfg.use_nonblocking_sockets() {
+            return;
+        }
+        match self.mark_guest_peer(guest, fd, role).await {
+            Ok(true) => trace!("[detcore] socket {fd} has a guest peer: polled as internal"),
+            Ok(false) => trace!("[detcore] socket {fd} has no guest peer: stays external"),
+            Err(errno) => {
+                trace!("[detcore] socket {fd} stays external: peer probe failed with {errno}")
+            }
+        }
+    }
+
+    /// [`Self::classify_socket_peer`]'s probes. Returns whether it marked the
+    /// socket.
+    async fn mark_guest_peer<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        fd: RawFd,
+        role: SocketRole,
+    ) -> Result<bool, Errno> {
+        // A listener reports its own credentials as SO_PEERCRED, not a peer's
+        // (sock_getsockopt in net/core/sock.c).
+        if role == SocketRole::Received
+            && self
+                .probe_socket_option::<_, libc::c_int>(guest, fd, libc::SO_ACCEPTCONN)
+                .await?
+                != 0
+        {
+            return Ok(false);
+        }
+        let peer: libc::ucred = self
+            .probe_socket_option(guest, fd, libc::SO_PEERCRED)
+            .await?;
+        if peer.pid <= 0 {
+            return Ok(false);
+        }
+        let (physically_nonblocking, status_flags) =
+            guest.thread_state().with_detfd(fd, |detfd| {
+                (detfd.physically_nonblocking(), detfd.status_flags())
+            })?;
+        if !physically_nonblocking {
+            // The guest's flags are unchanged: F_GETFL reports the logical ones.
+            self.record_or_replay(
+                guest,
+                syscalls::Fcntl::new()
+                    .with_fd(fd)
+                    .with_cmd(F_SETFL(status_flags | OFlag::O_NONBLOCK.bits())),
+            )
+            .await?;
+            guest
+                .thread_state()
+                .with_detfd(fd, |detfd| detfd.set_physically_nonblocking())?;
+        }
+        guest
+            .thread_state()
+            .with_detfd(fd, |detfd| detfd.set_guest_peer())?;
+        Ok(true)
+    }
+
+    /// Reads the `SOL_SOCKET` option `optname` of `fd` through the recording
+    /// into a buffer borrowed from the guest stack scratch, whose bytes are put
+    /// back afterwards, as `inject_stat_on_stack` borrows its buffer.
+    async fn probe_socket_option<G: Guest<Self>, V: Copy>(
+        &self,
+        guest: &mut G,
+        fd: RawFd,
+        optname: libc::c_int,
+    ) -> Result<V, Errno> {
+        let mut stack = guest.stack().await;
+        let probe: AddrMut<SocketOptionProbe<V>> = stack.reserve();
+        let value: AddrMut<V> = probe.cast();
+        let length = AddrMut::<libc::socklen_t>::from_raw(
+            probe.as_raw() + std::mem::offset_of!(SocketOptionProbe<V>, length),
+        )
+        .ok_or(Errno::EFAULT)?;
+        // Ptrace lends bytes below the guest's red zone; save them before
+        // commit can write the reservation.
+        let mut saved = vec![0u8; std::mem::size_of::<SocketOptionProbe<V>>()];
+        guest.memory().read_exact(probe.cast(), &mut saved)?;
+        let guard = match stack.commit() {
+            Ok(guard) => guard,
+            Err(errno) => {
+                restore_socket_option_probe(&mut guest.memory(), probe.cast(), &saved);
+                return Err(errno);
+            }
+        };
+        let probed = match guest
+            .memory()
+            .write_value(length, &(std::mem::size_of::<V>() as libc::socklen_t))
+        {
+            Ok(()) => self
+                .record_or_replay(
+                    guest,
+                    syscalls::Getsockopt::new()
+                        .with_fd(fd)
+                        .with_level(libc::SOL_SOCKET)
+                        .with_optname(optname)
+                        .with_optval(Some(value.cast()))
+                        .with_optlen(Some(length)),
+                )
+                .await
+                .and_then(|_| guest.memory().read_value(value)),
+            Err(errno) => Err(errno),
+        };
+        restore_socket_option_probe(&mut guest.memory(), probe.cast(), &saved);
+        drop(guard);
+        probed
     }
 
     pub(crate) async fn release_port_for_open_file<G: Guest<Self>>(
@@ -6018,6 +6219,29 @@ impl<T: RecordOrReplay> Detcore<T> {
         Ok(crate::fd::is_random_device(stat.st_mode, stat.st_rdev))
     }
 
+    /// [`Self::recorded_fstat`] of a descriptor an `SCM_RIGHTS` receive
+    /// installed (`Detcore::record_received_descriptors`). A failed call,
+    /// recorded or not, is its errno, which leaves the descriptor unrecorded.
+    /// Under record and replay a buffer that cannot be prepared ends the run
+    /// instead, as an open's classification does: it recorded no event, so
+    /// the other run could consume a different one.
+    pub(crate) async fn received_descriptor_fstat<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        raw_fd: RawFd,
+    ) -> Result<libc::stat, Error> {
+        match self.recorded_fstat(guest, raw_fd).await {
+            Ok(stat) => Ok(stat),
+            Err(StatFailure::Scratch(errno)) if self.cfg.recordreplay_modes => {
+                Err(Error::Tool(anyhow::anyhow!(
+                    "cannot record descriptor {raw_fd}, received over SCM_RIGHTS, under \
+                     record and replay: no buffer for its fstat ({errno})"
+                )))
+            }
+            Err(failure) => Err(failure.errno().into()),
+        }
+    }
+
     /// `fstat(fd)` through the recording, with [`Self::inject_fstat`]'s buffer
     /// placement and retry: recorded under record, served from the recording
     /// under replay, injected otherwise. Every attempt, including an
@@ -6084,24 +6308,48 @@ impl<T: RecordOrReplay> Detcore<T> {
     }
 
     /// What descriptor `fd` of the calling process names, as its
-    /// `/proc/self/fd` link reads, through the recording: the recording reads
-    /// the kernel's link and keeps its bytes, and replay, whose descriptor is
-    /// an eventfd, returns the same bytes. `None` for a deleted or anonymous
-    /// target, a link that cannot be read, or one too long for the 256 bytes
-    /// read: every path Detcore classifies is far shorter, and a truncated
-    /// one must not match.
-    ///
-    /// The link's name and the buffer go in the guest stack scratch, below the
-    /// red zone, or, where that memory is not writable (a stack pointer just
-    /// above a guard page or the lowest page of the main-thread stack), in a
-    /// transient private page, as `inject_fstat` does
-    /// (<https://github.com/rrnewton/hermit/issues/3328>): Detcore's
-    /// bookkeeping must never fail the guest's open.
+    /// `/proc/thread-self/fd` link reads, through the recording
+    /// ([`Self::recorded_descriptor_link`]): `None` for an anonymous target,
+    /// a link that cannot be read, one too long for the 256 bytes read (every
+    /// path Detcore classifies is far shorter, and a truncated one must not
+    /// match), or one Detcore had no buffer to read into, which must never
+    /// fail the guest's open.
     async fn recorded_open_path<G: Guest<Self>>(
         &self,
         guest: &mut G,
         fd: RawFd,
     ) -> Result<Option<PathBuf>, Error> {
+        let bytes = self
+            .recorded_descriptor_link(guest, fd)
+            .await
+            .unwrap_or(None);
+        Ok(bytes.and_then(|bytes| {
+            let path = PathBuf::from(
+                <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(bytes),
+            );
+            path.is_absolute().then_some(path)
+        }))
+    }
+
+    /// The bytes of descriptor `fd`'s `/proc/thread-self/fd` link, through the
+    /// recording ([`Self::recorded_readlink`]): the recording reads the
+    /// kernel's link and keeps its bytes, and replay, whose slot may hold a
+    /// stand-in eventfd, returns the same bytes. `None` for a link that cannot
+    /// be read or fills the 256 bytes read.
+    ///
+    /// The link's name and the buffer go in the guest stack scratch, below the
+    /// red zone, or, where that memory is not writable (a stack pointer just
+    /// above a guard page or the lowest page of the main-thread stack), in a
+    /// transient private page, as `inject_fstat` does
+    /// (<https://github.com/rrnewton/hermit/issues/3328>). Neither placement
+    /// consumes an event. `Err` when neither could be prepared: no readlink
+    /// ran, so no event was recorded or consumed, and a caller under record
+    /// and replay decides whether that may end the run.
+    pub(crate) async fn recorded_descriptor_link<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        fd: RawFd,
+    ) -> Result<Option<Vec<u8>>, Errno> {
         const LINK_CAPACITY: usize = 32;
         const TARGET_CAPACITY: usize = 256;
         let link_name = rendered_procfs::c_string::<LINK_CAPACITY>(
@@ -6110,13 +6358,13 @@ impl<T: RecordOrReplay> Detcore<T> {
         let mut stack = guest.stack().await;
         let link = stack.push(link_name);
         let target = stack.reserve::<[u8; TARGET_CAPACITY]>();
-        let bytes = match stack.commit() {
+        match stack.commit() {
             Ok(stack_guard) => {
                 let bytes = self
                     .recorded_readlink(guest, link.as_raw(), target.as_raw(), TARGET_CAPACITY)
                     .await;
                 drop(stack_guard);
-                bytes
+                Ok(bytes)
             }
             Err(_) => {
                 info!(
@@ -6136,23 +6384,23 @@ impl<T: RecordOrReplay> Detcore<T> {
                             .with_offset(0),
                     ))
                     .await;
-                let Some(page) = mapped
-                    .ok()
-                    .and_then(|mapped| usize::try_from(mapped).ok())
-                    .and_then(AddrMut::<u8>::from_raw)
-                else {
-                    return Ok(None);
-                };
-                let bytes = if guest.memory().write_exact(page, &link_name).is_ok() {
-                    self.recorded_readlink(
-                        guest,
-                        page.as_raw(),
-                        page.as_raw() + LINK_CAPACITY,
-                        TARGET_CAPACITY,
-                    )
-                    .await
+                let page = mapped.and_then(|mapped| {
+                    usize::try_from(mapped)
+                        .ok()
+                        .and_then(AddrMut::<u8>::from_raw)
+                        .ok_or(Errno::ENOMEM)
+                })?;
+                let bytes = if let Err(errno) = guest.memory().write_exact(page, &link_name) {
+                    Err(errno)
                 } else {
-                    None
+                    Ok(self
+                        .recorded_readlink(
+                            guest,
+                            page.as_raw(),
+                            page.as_raw() + LINK_CAPACITY,
+                            TARGET_CAPACITY,
+                        )
+                        .await)
                 };
                 if let Err(errno) = guest
                     .inject_with_retry(Syscall::Munmap(
@@ -6169,18 +6417,14 @@ impl<T: RecordOrReplay> Detcore<T> {
                 }
                 bytes
             }
-        };
-        Ok(bytes.and_then(|bytes| {
-            let path = PathBuf::from(
-                <std::ffi::OsString as std::os::unix::ffi::OsStringExt>::from_vec(bytes),
-            );
-            path.is_absolute().then_some(path)
-        }))
+        }
     }
 
     /// `readlink(link, target, capacity)` through the recording, both at guest
     /// addresses: the bytes it read, or `None` if it failed or filled the
-    /// buffer (a link that may be truncated).
+    /// buffer (a link that may be truncated). Retried while a signal stops it
+    /// before it runs; every attempt is an event, so replay retries as the
+    /// recording did.
     async fn recorded_readlink<G: Guest<Self>>(
         &self,
         guest: &mut G,
@@ -6188,17 +6432,20 @@ impl<T: RecordOrReplay> Detcore<T> {
         target: usize,
         capacity: usize,
     ) -> Option<Vec<u8>> {
+        const ATTEMPTS: usize = 64;
         let target = AddrMut::<u8>::from_raw(target)?;
-        let length = self
-            .record_or_replay(
-                guest,
-                syscalls::Readlink::new()
-                    .with_path(PathPtr::from_ptr(link as *const libc::c_char))
-                    .with_buf(Some(target.cast::<libc::c_char>()))
-                    .with_bufsize(capacity),
-            )
-            .await
-            .ok()?;
+        let readlink = syscalls::Readlink::new()
+            .with_path(PathPtr::from_ptr(link as *const libc::c_char))
+            .with_buf(Some(target.cast::<libc::c_char>()))
+            .with_bufsize(capacity);
+        let mut answer = Err(Errno::ERESTARTSYS);
+        for _ in 0..ATTEMPTS {
+            answer = self.record_or_replay(guest, readlink).await;
+            if !matches!(answer, Err(Errno::EINTR | Errno::ERESTARTSYS)) {
+                break;
+            }
+        }
+        let length = answer.ok()?;
         let length = usize::try_from(length)
             .ok()
             .filter(|length| *length < capacity)?;
@@ -10164,13 +10411,15 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// Outside record/replay that holds for every scheduler-managed type. In
     /// record/replay it holds only for a container-internal channel that is
     /// already physically nonblocking: a pipe, which is how `handle_pipe2`
-    /// leaves every guest-created pipe in both phases, or a socketpair endpoint,
-    /// which is how `handle_socketpair` leaves both ends. Forwarding the guest's
+    /// leaves every guest-created pipe in both phases, or an internal socket (a
+    /// socketpair endpoint, which is how `handle_socketpair` leaves both ends, or
+    /// a socket whose peer `classify_socket_peer` found to be a guest, which it
+    /// makes physically nonblocking). Forwarding the guest's
     /// clear would make the recording's next read on that channel a blocking
     /// read on an fd that `syscall_targets_internal_fd` calls internal, which
     /// deadlocks the sequentialized scheduler while the writer waits for its
     /// turn. Both phases take the same branch, because `fd_type`,
-    /// `socketpair_endpoint` and `physically_nonblocking` are Detcore
+    /// `internal_socket` and `physically_nonblocking` are Detcore
     /// bookkeeping that record and replay evolve identically: an F_SETFL is
     /// still recorded and replayed, with the kernel given `flags | O_NONBLOCK`
     /// in record and the recorded result returned in replay; a FIONBIO returns
@@ -10182,7 +10431,7 @@ impl<T: RecordOrReplay> Detcore<T> {
     fn keeps_physically_nonblocking(
         &self,
         fd_type: FdType,
-        socketpair_endpoint: bool,
+        internal_socket: bool,
         physically_nonblocking: bool,
         inherited_external_read: bool,
     ) -> bool {
@@ -10190,7 +10439,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             && !inherited_external_read
             && match fd_type {
                 FdType::Pipe => !self.cfg.recordreplay_modes || physically_nonblocking,
-                FdType::Socket if socketpair_endpoint => {
+                FdType::Socket if internal_socket => {
                     !self.cfg.recordreplay_modes || physically_nonblocking
                 }
                 FdType::Socket | FdType::Eventfd => !self.cfg.recordreplay_modes,
@@ -10289,18 +10538,18 @@ impl<T: RecordOrReplay> Detcore<T> {
                 }
             }
             F_SETFL(flags) => {
-                let (fd_type, socketpair_endpoint, physically_nonblocking, inherited_external_read) =
+                let (fd_type, internal_socket, physically_nonblocking, inherited_external_read) =
                     guest.thread_state().with_detfd(fd, |detfd| {
                         (
                             detfd.ty(),
-                            detfd.is_socketpair_endpoint(),
+                            detfd.is_internal_socket(),
                             detfd.physically_nonblocking(),
                             detfd.inherited_external_read().is_some(),
                         )
                     })?;
                 let force_nonblocking = self.keeps_physically_nonblocking(
                     fd_type,
-                    socketpair_endpoint,
+                    internal_socket,
                     physically_nonblocking,
                     inherited_external_read,
                 );
@@ -11322,18 +11571,18 @@ impl<T: RecordOrReplay> Detcore<T> {
         // ioctl to their proxied pipe fd, and clearing it would violate the scheduler's
         // nonblockize-and-retry invariant. This mirrors F_SETFL's forced state split.
         if let Some(enabled) = nonblocking {
-            let (fd_type, socketpair_endpoint, physically_nonblocking, inherited_external_read) =
+            let (fd_type, internal_socket, physically_nonblocking, inherited_external_read) =
                 guest.thread_state().with_detfd(fd, |detfd| {
                     (
                         detfd.ty(),
-                        detfd.is_socketpair_endpoint(),
+                        detfd.is_internal_socket(),
                         detfd.physically_nonblocking(),
                         detfd.inherited_external_read().is_some(),
                     )
                 })?;
             if self.keeps_physically_nonblocking(
                 fd_type,
-                socketpair_endpoint,
+                internal_socket,
                 physically_nonblocking,
                 inherited_external_read,
             ) && physically_nonblocking
@@ -13712,6 +13961,8 @@ impl<T: RecordOrReplay> Detcore<T> {
         if physically_nonblocking {
             self.maybe_set_nonblocking_fd(guest, fd);
         }
+        self.classify_socket_peer(guest, fd, SocketRole::Connected)
+            .await;
 
         Ok(fd as i64)
     }
