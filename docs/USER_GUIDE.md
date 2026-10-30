@@ -557,9 +557,34 @@ its schedule has run out, since the run then continues without chaos. `hermit an
 minimize such a run: its trials replay schedules found under different
 scheduler seeds, and the spread's factors are keyed on the seed.
 
+Which slice length exposes a race depends on the race: some need a preemption
+in a short window (fine slices), others a long uninterrupted run of one thread
+(coarse slices), and a seed sweep under one `--max-timeslice` explores mostly
+one scale. `--chaos-timeslice-range=MIN..MAX` draws each slice's mean
+log-uniformly from MIN..MAX virtual nanoseconds, so every run mixes all the
+scales in the range, and caps every slice at MAX. Slices are still random
+around the drawn mean, so some fall below MIN:
+
+```bash
+for seed in $(seq 1 32); do
+  hermit run --chaos --sched-seed="$seed" --chaos-timeslice-range=1000..200000000 \
+    -- ./target/debug/hello_race
+done
+```
+
+The draws come from the scheduler seed, so a seed reproduces its run. The
+range sets the run's `--max-timeslice` to MAX; give one or the other, and do
+not combine it with `--target-timeslice`. It needs PMU-backed preemption. A
+small MIN makes runs slower, because fine slices mean many preemptions.
+
 Advanced investigations can save preemption decisions with
 `--record-preemptions-to=FILE` and replay them with
-`--replay-preemptions-from=FILE`. A record edited after it was recorded (for
+`--replay-preemptions-from=FILE`. A record pins every slice end, so a run under
+`--chaos-timeslice-range` replays from it exactly; give the replay the same
+range, or `--max-timeslice=MAX`, so slices past the end of the record are
+capped as in the recording.
+
+A record edited after it was recorded (for
 example, with preemptions removed, as `hermit analyze --minimize` does) can
 bring a thread to recorded slices that have already ended. A faithful replay
 never does, so Hermit stops it there; add `--replay-edited-preemptions` to skip
@@ -1130,6 +1155,7 @@ hermit analyze --prefix-search --time-budget=30m --run1-seed=1 \
 | `--preemption-timeout=N` | Deprecated alias for `--max-timeslice=N`. |
 | `--cap-preemption-charge` | Charges a turn that ends an expired timeslice at most the time its thread ran since its previous turn. |
 | `--chaos-timed-wait-spread=R` | Ends each sleep and futex timeout after its duration times a seeded factor in `[1/R, R]`, never before its deadline on the guest's clock. |
+| `--chaos-timeslice-range=MIN..MAX` | With `--chaos`, draws each slice's mean log-uniformly from MIN..MAX virtual nanoseconds and caps slices at MAX (the run's `--max-timeslice`). Not with `--chaos-seeded-timeslice`, which draws the maximum instead. |
 
 `--no-sequentialize-threads` is useful for compatibility experiments and
 workloads such as virtual machines that need real host parallelism. It removes
