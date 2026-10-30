@@ -1072,6 +1072,19 @@ Run `hermit analyze --help` before using this workflow. Search, minimization,
 and schedule replay can perform many guest executions and require a reliably
 reproducible target condition.
 
+When `hermit analyze` (`--run1-preemptions`, `--run2-preemptions`) or
+`hermit bisect` (`--good`, `--bad`) replays recorded runs, every trial uses
+the virtual-time epoch and the guest random seed (`--rng-seed`) the records
+were made under, as `hermit run` does when it replays one. Without such
+records, every trial uses the target's guest random seed (that of
+`--run1-seed`, else the run arguments'), so a `--run2-seed` baseline always
+differs from the target only in its schedule.
+These are refused before any trial (exit 122): records made under two
+different epochs or seeds, an explicit `--epoch` or `--rng-seed` in the run
+arguments that differs from the records', and a `--run1-seed` target whose
+guest random seed differs from the records'. To compare two chaos runs, record
+them with the same `--rng-seed`; their `--seed` may differ.
+
 Analyze keeps every run's schedules, logs, output and reproducer command in a
 workspace, a `hermit_analyze*` directory it creates in `--tmp-dir`, or else in
 `$TMPDIR` (`/tmp` when TMPDIR is unset); the paths it prints name that

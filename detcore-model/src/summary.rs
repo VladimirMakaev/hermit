@@ -699,10 +699,6 @@ pub struct DesyncNote {
 }
 
 /// The full human-readable report, including recorded launch configuration.
-fn is_zero(value: &u64) -> bool {
-    *value == 0
-}
-
 impl fmt::Display for RunSummary {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.fmt_summary(f, true, self.reprio_descrip.as_deref())
