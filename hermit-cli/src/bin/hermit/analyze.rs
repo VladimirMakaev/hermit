@@ -11,6 +11,7 @@
 mod budget;
 mod checkpoint;
 mod consts;
+mod memory;
 mod minimize;
 mod phases;
 // The report (the next change in this stack) is the first caller.
@@ -23,6 +24,7 @@ mod workspace;
 
 pub use budget::TimeBudget;
 pub use budget::TrialBudget;
+pub use memory::MemoryBudget;
 pub use types::AnalyzeOpts;
 pub use types::ContinuationTimeslice;
 pub use types::ExitStatusConstraint;

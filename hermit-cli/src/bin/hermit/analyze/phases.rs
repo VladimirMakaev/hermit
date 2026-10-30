@@ -4266,6 +4266,7 @@ impl AnalyzeOpts {
         // The budget counts from here, before anything that takes time.
         self.budget = Budget::new(self.time_budget, self.trial_budget);
         self.prepare(global)?;
+        let _watchdog = self.max_memory.enforce("hermit analyze")?;
         // From here SIGTERM, SIGINT and SIGHUP end the run in progress and
         // the analysis, which then removes what it created like any other
         // ending, and the process dies of the signal (`raise_or_exit`).
