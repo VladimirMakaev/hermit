@@ -3557,6 +3557,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_futex_wake_edge_names_the_waiter_the_wake_took,
     // a_requeue_edge_waits_for_the_moved_waiters_return and
     // a_clear_child_tid_wake_is_a_join_edge: 2714, listed.
+    // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6201,6 +6202,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two binder policy units: 2714.
     // And the same seventeen access-trace tests as test.detcore_unit: 2699.
     // And the same fifteen sync-edge tests as test.detcore_unit: 2714.
+    // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
