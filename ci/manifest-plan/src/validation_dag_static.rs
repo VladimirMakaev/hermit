@@ -3807,7 +3807,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And record_replay_receives_descriptors_over_a_guests_own_unix_listener: 223.
     // And record_replay_keeps_eventfds_received_over_scm_rights_coherent: 224.
     // And record_replay_reads_an_inotify_instance_received_over_scm_rights: 225.
-    ("test.record_replay", 225),
+    // And record_replay_shares_memory_between_mappings_of_one_memfd: 226.
+    ("test.record_replay", 226),
     // Seven proc-fallback, warning, and record/replay tests retain all 80
     // selected identities under the unchanged shipped CLI skip filters.
     // The successful-exec POSIX timer regression retains all 87 prior CLI cases.
