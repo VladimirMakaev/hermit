@@ -2130,6 +2130,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And analyze's analyze_final_schedules_carry_a_drawn_timeslice_into_bisect: 1171.
     // And analyze's analyze_replays_a_run_argument_record_from_the_epoch_it_was_recorded_under: 1172.
     // And the lib's preemption_admission::tests::a_validated_stacktrace_log_file_is_refused_by_its_own_name: 1173.
+    // And the four timeout_survivors report units: 1125.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5076,6 +5077,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And liteinst_replay_with_a_conflicting_epoch_is_refused_in_every_build,
     // no longer ignored: a replay's preemption admission now follows the
     // replay-epoch check, so the epoch refusal it asserts comes first: 639.
+    // And run_timeout_names_the_guest_process_left_running_after_its_root_exited: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5724,6 +5726,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_timerless_backend_refuses_a_drawn_record_by_its_maximum: 557.
     // And liteinst_replay_with_a_conflicting_epoch_is_refused_in_every_build,
     // no longer ignored: 558.
+    // And the same timeout-survivor CLI test: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6749,6 +6752,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same analyze-to-bisect unit: 1165.
     // And the same run-argument epoch unit: 1166.
     // And the same stacktrace-log-file unit: 1167.
+    // And the same four timeout_survivors report units: 1119.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
