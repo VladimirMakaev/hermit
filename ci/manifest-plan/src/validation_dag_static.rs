@@ -3333,6 +3333,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the commit-guard unit (second review of #4625): 2752.
     // And the three bounded SIGCHLD-deferral units
     // (https://github.com/rrnewton/hermit/issues/4132): 2685, listed.
+    // And nine fatal_core::tests for cores that hold every thread (one
+    // decision per death, a reused TGID, the PF_DUMPCORE thread as the
+    // dumper, a core without its dumping thread refused, the thread order, the
+    // leader's state, the kernel's note order, the offered thread's
+    // registers, every thread's frames in the Stack tier): 2691, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3695,6 +3700,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // condition variable): 287, listed.
     // And lit's chaos_schedule_replay fixture (a --chaos recording replayed
     // with --die-on-desync): 287, listed.
+    // And fatal_core_capture's three tests of cores that hold every thread
+    // (the note layout and each thread's registers, gdb, two identical runs):
+    // 289, listed.
     ("test.hermit_integration_2", 287),
     // And standalone's 13 internal standalone targets, one ignored for the
     // per-test CPU budget, in the third shard: 60 + 263 + 244 = 567.
@@ -5785,6 +5793,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same own-process walk unit: 2751.
     // And the same commit-guard unit: 2752.
     // And the same three bounded SIGCHLD-deferral units: 2685, listed.
+    // And the same nine fatal_core::tests: 2691, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5902,6 +5911,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same random_determinism schedule-replay test: 694, listed.
     // And the same fatal_core_capture leader-waits test: 694, listed.
     // And the same chaos_schedule_replay lit fixture: 695, listed.
+    // And the same three fatal_core_capture tests: 696, listed.
     ("test.hermit_integration_on_host", 694),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode
