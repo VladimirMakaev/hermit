@@ -80,13 +80,58 @@ fn yellow_msg(msg: &str) {
 /// one the scheduler runs there without that event (`instead`, `None` when
 /// the run without it ended first). Two threads are a pair whose order
 /// decides the outcome. One thread is not a pair at all: the scheduler runs
-/// it there either way, so the report says so instead of calling the thread
-/// a race with itself.
+/// it there either way, so stack2 is the thread that runs after its slice
+/// without the event (`next`: that event and thread), when one does; else
+/// the report says that both are one thread instead of calling the thread a
+/// race with itself. `partner`, when stack2 is another thread than those
+/// ([`partner_turn`], [`moved_past`]), says which and why.
 fn stack_pair_sentences(
     chosen: detcore::types::DetTid,
     instead: Option<detcore::types::DetTid>,
+    next: Option<(usize, detcore::types::DetTid)>,
+    partner: Option<&Partner>,
 ) -> String {
-    if instead == Some(chosen) {
+    if let Some(Partner {
+        side,
+        thread,
+        event,
+        why,
+    }) = partner
+    {
+        let side = side.name();
+        return if instead == Some(chosen) {
+            format!(
+                "The scheduler runs thread {chosen} at that point with or without the event, so \
+                 the event does not choose between two threads there. stack1 is thread {chosen} \
+                 there; stack2 is thread {thread}, at event #{event} of the continuation {side} \
+                 the event: {why}.\nWhat the event can change is how the threads run from \
+                 there: look at what thread {chosen} does until then, and at thread {thread}.\n"
+            )
+        } else {
+            let instead = instead.map_or(String::new(), |instead| {
+                format!("; without the event the scheduler runs thread {instead} there instead")
+            });
+            format!(
+                "stack1 is thread {chosen}, which the target schedule runs at that \
+                 point{instead}. stack2 is thread {thread}, at event #{event} of the \
+                 continuation {side} the event: {why}.\nThe outcome depends on which of threads \
+                 {chosen} and {thread} runs first: add synchronization that makes the order \
+                 irrelevant, or that enforces the passing order.\n"
+            )
+        };
+    }
+    if instead == Some(chosen)
+        && let Some((index, next)) = next
+    {
+        format!(
+            "The scheduler runs thread {chosen} at that point with or without the event, so \
+             the event does not choose between two threads there. stack1 is thread {chosen} \
+             there; stack2 is thread {next}, which runs after thread {chosen}'s slice without the \
+             event, at event #{index} of that continuation.\nWhat the event can change is how \
+             thread {chosen} runs from there: look at what it does before thread {next} runs, \
+             and at thread {next}.\n"
+        )
+    } else if instead == Some(chosen) {
         format!(
             "stack1 and stack2 both belong to thread {chosen}: the scheduler runs it at that \
              point with or without the event, so they are not two threads racing.\nWhat the \
@@ -614,6 +659,9 @@ struct Slice {
     next: Option<(usize, DetTid)>,
 }
 
+/// The schedule a prefix trial realized, and where it was recorded.
+type Continued<'a> = (&'a [SchedEvent], &'a Path);
+
 /// A record that replays `continued`, the schedule a prefix trial of the
 /// first `len` events of `schedule` realized, under the callback checkpoints
 /// of that prefix (a replay records none of its own), unless they no longer
@@ -649,6 +697,420 @@ fn slice_from(schedule: &[SchedEvent], from: usize, thread: DetTid) -> Slice {
     slice
 }
 
+/// One thread's run of consecutive events in a realized schedule.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Turn {
+    thread: DetTid,
+    /// Its first and last events.
+    start: usize,
+    end: usize,
+    /// The retired conditional branches it ran.
+    branches: u64,
+    /// The thread's first turn in the schedule. Its first event is where the
+    /// thread starts, which says nothing about what it does.
+    first: bool,
+    /// It only finishes creating a thread or process: it is not the
+    /// thread's first turn (a forked child's begins with the fork's return
+    /// too), it begins by returning from a clone, clone3, fork or vfork, and
+    /// after that makes no call but the ones pthread_create ends with
+    /// (restoring the signal mask, waking the new thread's start-up lock)
+    /// and runs at most [`CREATION_EPILOGUE_BRANCHES`] branches.
+    creates: bool,
+    /// The call the turn ends at, entering it, if it does: where the thread
+    /// blocks or waits. A turn that ends elsewhere was preempted.
+    ends_at: Option<reverie::syscalls::Sysno>,
+}
+
+/// The most branches a creator's turn runs after its clone or fork returns
+/// for the turn to count as only finishing the creation ([`Turn::creates`]).
+/// pthread_create's own epilogue, from the clone's return to its own, ran
+/// 159 in bionic (Android's libc; a thread-pool harness: rt_sigprocmask and
+/// two futex calls) and 13 in glibc 2.34 (x86-64, clone3: one
+/// rt_sigprocmask), measured as the retired conditional branches Hermit
+/// recorded between the clone's return and the caller's next call.
+const CREATION_EPILOGUE_BRANCHES: u64 = 256;
+
+impl Turn {
+    fn events(&self) -> usize {
+        self.end + 1 - self.start
+    }
+
+    /// Where the thread's stack shows what it does in this turn: its first
+    /// event, where it resumes, unless that is where it starts; then its
+    /// last.
+    fn telling_event(&self) -> usize {
+        if self.first { self.end } else { self.start }
+    }
+
+    /// For a thread that starts in this turn, where its stack is taken and
+    /// what that is, as the end of a report sentence.
+    fn start_sentence(&self) -> String {
+        let end = match self.ends_at {
+            Some(sysno) => format!("at its {} call, where it blocks or waits", sysno.name()),
+            None => "where it was preempted, at an arbitrary instruction".to_owned(),
+        };
+        format!(
+            ". Thread {} starts in that turn, so its stack is where the turn ends, {end}",
+            self.thread
+        )
+    }
+}
+
+/// Whether `creator`'s turn (which returns from a clone or fork) returns
+/// from creating `child`: `child` has no event before the creator's call.
+/// Such a creator is never passed over for `child`: what it does next is
+/// what its new thread races with.
+fn created(schedule: &[SchedEvent], creator: &Turn, child: DetTid) -> bool {
+    use detcore_model::schedule::Op;
+    use detcore_model::schedule::SyscallPhase;
+    let call = schedule[..creator.start].iter().rposition(|event| {
+        event.dettid == creator.thread
+            && matches!(event.op, Op::Syscall(sysno, SyscallPhase::Prehook) if creates_a_task(sysno))
+    });
+    call.is_some_and(|call| schedule[..call].iter().all(|event| event.dettid != child))
+}
+
+/// Whether stack2 passes over `turn`: it only finishes creating a thread
+/// ([`Turn::creates`]), and not the thread `related` (the deciding thread,
+/// or the other side's).
+fn passed_over(schedule: &[SchedEvent], turn: &Turn, related: DetTid) -> bool {
+    turn.creates && !created(schedule, turn, related)
+}
+
+/// Whether `sysno` creates a thread or process.
+fn creates_a_task(sysno: reverie::syscalls::Sysno) -> bool {
+    use reverie::syscalls::Sysno;
+    #[cfg(target_arch = "x86_64")]
+    if matches!(sysno, Sysno::fork | Sysno::vfork) {
+        return true;
+    }
+    matches!(sysno, Sysno::clone | Sysno::clone3)
+}
+
+/// The turns of `schedule` from event `from` on.
+fn turns(schedule: &[SchedEvent], from: usize) -> impl Iterator<Item = Turn> + '_ {
+    use detcore_model::schedule::Op;
+    use detcore_model::schedule::SyscallPhase;
+    let mut seen: std::collections::BTreeSet<DetTid> = schedule
+        .iter()
+        .take(from)
+        .map(|event| event.dettid)
+        .collect();
+    use reverie::syscalls::Sysno;
+    let mut at = from;
+    std::iter::from_fn(move || {
+        let thread = schedule.get(at)?.dettid;
+        let start = at;
+        let mut branches = 0;
+        // Returned from creating a task, and since then only the epilogue's
+        // calls and this many branches.
+        let mut epilogue: Option<u64> = None;
+        let mut creates = true;
+        let mut first_call = true;
+        let mut ends_at = None;
+        while let Some(event) = schedule.get(at).filter(|event| event.dettid == thread) {
+            ends_at = None;
+            match event.op {
+                Op::Branch => {
+                    branches += u64::from(event.count);
+                    if let Some(after) = epilogue.as_mut() {
+                        *after += u64::from(event.count);
+                    }
+                }
+                Op::Syscall(sysno, phase) => {
+                    if first_call {
+                        if phase == SyscallPhase::Posthook && creates_a_task(sysno) {
+                            epilogue = Some(0);
+                        } else {
+                            creates = false;
+                        }
+                    } else if !matches!(sysno, Sysno::rt_sigprocmask | Sysno::futex) {
+                        creates = false;
+                    }
+                    first_call = false;
+                    if phase == SyscallPhase::Prehook {
+                        ends_at = Some(sysno);
+                    }
+                }
+                _ => {}
+            }
+            at += 1;
+        }
+        let first = seen.insert(thread);
+        Some(Turn {
+            thread,
+            start,
+            end: at - 1,
+            branches,
+            first,
+            creates: creates
+                && !first
+                && epilogue.is_some_and(|after| after <= CREATION_EPILOGUE_BRANCHES),
+            ends_at,
+        })
+    })
+}
+
+/// The continuation of a `--prefix-search` trial a stack comes from: the one
+/// that replays the deciding event, or the one without it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Side {
+    With,
+    Without,
+}
+
+impl Side {
+    fn name(self) -> &'static str {
+        match self {
+            Side::With => "with",
+            Side::Without => "without",
+        }
+    }
+}
+
+/// stack2's thread for a `--prefix-search` report, the event its stack is
+/// taken at in the continuation `side`, and why that thread.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct Partner {
+    side: Side,
+    thread: DetTid,
+    event: usize,
+    why: String,
+}
+
+/// Which of `moved`, the turns `schedule` runs before the deciding thread's
+/// turn (which the other continuation runs first), stack2 shows: the first
+/// that does more than finish creating a thread ([`passed_over`]), unless
+/// none does. Such a turn only finishes the creation, so its thread's order
+/// does not matter unless nothing else moved, or unless it created the
+/// deciding thread.
+fn first_moved(
+    schedule: &[SchedEvent],
+    side: Side,
+    moved: &[Turn],
+    deciding: DetTid,
+) -> Option<Partner> {
+    let passed = moved
+        .iter()
+        .take_while(|turn| passed_over(schedule, turn, deciding))
+        .count();
+    let (turn, passed) = match moved.get(passed) {
+        Some(turn) => (turn, &moved[..passed]),
+        None => (moved.first()?, &moved[..0]),
+    };
+    let other = match side {
+        Side::Without => "with",
+        Side::With => "without",
+    };
+    let mut why = format!(
+        "thread {} runs before thread {deciding}'s turn {} the event and after it {other} it",
+        turn.thread,
+        side.name(),
+    );
+    for creator in passed {
+        why.push_str(&format!(
+            "; thread {}, which runs before it, only returns from creating a thread",
+            creator.thread
+        ));
+    }
+    if passed_over(schedule, turn, deciding) {
+        why.push_str(", and only returns from creating a thread, as every thread that moved does");
+    } else if turn.creates {
+        why.push_str(&format!(
+            "; it returns from creating thread {deciding}, which its next steps race with"
+        ));
+    }
+    if turn.first {
+        why.push_str(&turn.start_sentence());
+    }
+    Some(Partner {
+        side,
+        thread: turn.thread,
+        event: turn.telling_event(),
+        why,
+    })
+}
+
+/// stack2's thread when the deciding event runs `deciding`'s turn first in
+/// one continuation and `other`, which runs other threads first, does not:
+/// the threads `other` runs from event `from` until `deciding`'s turn are
+/// those that turn moves past ([`first_moved`]).
+fn moved_past(other: &[SchedEvent], side: Side, from: usize, deciding: DetTid) -> Option<Partner> {
+    let moved: Vec<Turn> = turns(other, from)
+        .take_while(|turn| turn.thread != deciding)
+        .collect();
+    first_moved(other, side, &moved, deciding)
+}
+
+/// stack2's thread for a `--prefix-search` report, from the continuations
+/// with the deciding event (`with`) and without it (`without`), from that
+/// event `from` on; `deciding` is its thread. The two run the same turns
+/// until one differs:
+/// - the same thread for a different number of events: that thread, at the
+///   last event both continuations give it, where they part;
+/// - `deciding` in one and another thread in the other: the threads the
+///   other runs before `deciding`'s turn ([`moved_past`]);
+/// - two other threads: the one without the event, unless only it returns
+///   from creating a thread.
+///
+/// `None` when one continuation ends before they differ.
+fn partner_turn(
+    with: &[SchedEvent],
+    without: &[SchedEvent],
+    from: usize,
+    deciding: DetTid,
+) -> Option<Partner> {
+    let (with_turn, without_turn) = turns(with, from)
+        .zip(turns(without, from))
+        .find(|(a, b)| (a.thread, a.events(), a.branches) != (b.thread, b.events(), b.branches))?;
+    if with_turn.thread == without_turn.thread {
+        let shared = with_turn.events().min(without_turn.events());
+        return Some(Partner {
+            side: Side::Without,
+            thread: without_turn.thread,
+            event: without_turn.start + shared - 1,
+            why: format!(
+                "the continuations run the same turns until thread {}'s from event #{}, which \
+                 runs {} events with the event and {} without it; its stack is where the two \
+                 part",
+                without_turn.thread,
+                without_turn.start,
+                with_turn.events(),
+                without_turn.events(),
+            ),
+        });
+    }
+    if with_turn.thread == deciding {
+        return moved_past(without, Side::Without, without_turn.start, deciding);
+    }
+    if without_turn.thread == deciding {
+        return moved_past(with, Side::With, with_turn.start, deciding);
+    }
+    let (side, turn) = if passed_over(without, &without_turn, deciding)
+        && !passed_over(with, &with_turn, deciding)
+    {
+        (Side::With, with_turn)
+    } else {
+        (Side::Without, without_turn)
+    };
+    let mut why = format!(
+        "the continuations first run different threads at event #{}: thread {} with the event, \
+         thread {} without it",
+        without_turn.start, with_turn.thread, without_turn.thread,
+    );
+    if turn.first {
+        why.push_str(&turn.start_sentence());
+    }
+    Some(Partner {
+        side,
+        thread: turn.thread,
+        event: turn.telling_event(),
+        why,
+    })
+}
+
+/// Where phase 6 takes a `--prefix-search` report's stack2 ([`stack2_plan`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Stack2Plan {
+    /// Another thread runs at the decision without the event: the replay of
+    /// that continuation takes the stack at `at`, the decision itself unless
+    /// `partner`, a thread the deciding turn moved past, says otherwise.
+    Instead { at: usize, partner: Option<Partner> },
+    /// The deciding thread runs there either way: the first thread whose
+    /// turn differs between the continuations ([`partner_turn`]).
+    Changed(Partner),
+    /// The deciding thread runs there either way and the continuations do
+    /// not differ before one ends: the thread after its slice without the
+    /// event, at `index`.
+    NextSlice { index: usize, thread: DetTid },
+    /// The continuation without the event ends at the decision or before.
+    Nothing,
+}
+
+/// Where phase 6 takes stack2 for the decision at `decision` of thread
+/// `deciding`, from the continuation without the event (`without`) and, when
+/// the deciding thread runs there either way, the one with it (`with`).
+fn stack2_plan(
+    deciding: DetTid,
+    decision: usize,
+    without: &[SchedEvent],
+    with: Option<&[SchedEvent]>,
+) -> Stack2Plan {
+    let Some(instead) = without.get(decision) else {
+        return Stack2Plan::Nothing;
+    };
+    if instead.dettid != deciding {
+        return match moved_past(without, Side::Without, decision, deciding) {
+            Some(moved) if moved.event != decision => Stack2Plan::Instead {
+                at: moved.event,
+                partner: Some(moved),
+            },
+            _ => Stack2Plan::Instead {
+                at: decision,
+                partner: None,
+            },
+        };
+    }
+    if let Some(changed) = with.and_then(|with| partner_turn(with, without, decision, deciding)) {
+        return Stack2Plan::Changed(changed);
+    }
+    match slice_from(without, decision, deciding).next {
+        Some((index, thread)) => Stack2Plan::NextSlice { index, thread },
+        None => Stack2Plan::Nothing,
+    }
+}
+
+/// Where a stack shows the thread that runs at an event where two realized
+/// schedules first run different threads ([`telling_event_at`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Telling {
+    event: usize,
+    thread: DetTid,
+    /// The thread passed over, whose turn there only returns from creating
+    /// a thread.
+    creator: Option<DetTid>,
+    /// The thread starts in the turn, so `event` is where the turn ends.
+    starts: bool,
+    /// The call the turn ends at, if it does ([`Turn::ends_at`]).
+    ends_at: Option<reverie::syscalls::Sysno>,
+}
+
+/// Where `schedule`'s stack shows the thread that runs at event `at`, where
+/// two realized schedules first run different threads (`other` is the one
+/// the other schedule runs there): `at` itself, unless a turn starts there
+/// that only finishes creating a thread other than `other` ([`passed_over`];
+/// then the next turn's) or is its thread's first, whose start says nothing
+/// (then where it ends). A turn that runs on from before `at` stays at `at`,
+/// where the two schedules part.
+fn telling_event_at(schedule: &[SchedEvent], at: usize, other: DetTid) -> Option<Telling> {
+    let thread = schedule.get(at)?.dettid;
+    if at > 0 && schedule[at - 1].dettid == thread {
+        return Some(Telling {
+            event: at,
+            thread,
+            creator: None,
+            starts: false,
+            ends_at: None,
+        });
+    }
+    let mut from_at = turns(schedule, at);
+    let mut turn = from_at.next()?;
+    let mut creator = None;
+    if passed_over(schedule, &turn, other)
+        && let Some(next) = from_at.next()
+    {
+        creator = Some(turn.thread);
+        turn = next;
+    }
+    Some(Telling {
+        event: turn.telling_event(),
+        thread: turn.thread,
+        creator,
+        starts: turn.first,
+        ends_at: turn.ends_at,
+    })
+}
+
 /// Whether two stacks have the same frames, whichever threads they belong
 /// to.
 fn same_frames(first: &PrettyBacktrace, second: &PrettyBacktrace) -> bool {
@@ -678,8 +1140,10 @@ fn slice_end_events(
 /// The header of a `--prefix-search` report whose deciding event `event`,
 /// #`decision`, is a timing decision: `with` and `without` are how long its
 /// thread then runs with and without that event replayed. `slice_ends`, the
-/// last events of those slices, is set when stack1 and stack2 show where the
-/// deciding thread stops instead of the thread that runs next.
+/// last events of those slices, is set when stack1 shows where the deciding
+/// thread stops with the event instead of the thread that runs next, whose
+/// stack (the same in both continuations) is stack2, from the continuation
+/// without it.
 fn timing_decision_header(
     decision: usize,
     event: &SchedEvent,
@@ -689,12 +1153,12 @@ fn timing_decision_header(
     slice_ends: Option<[usize; 2]>,
 ) -> String {
     let thread = event.dettid;
-    let then = |slice: &Slice, stack: &str| match slice.next {
-        Some((index, next)) if slice_ends.is_none() => {
+    let then = |slice: &Slice, stack: Option<&str>| match (slice.next, stack) {
+        (Some((index, next)), Some(stack)) => {
             format!("then thread {next} runs at event #{index} ({stack})")
         }
-        Some((index, next)) => format!("then thread {next} runs at event #{index}"),
-        None => "and no other thread runs after it".to_owned(),
+        (Some((index, next)), None) => format!("then thread {next} runs at event #{index}"),
+        (None, _) => "and no other thread runs after it".to_owned(),
     };
     let mut header = format!(
         "The scheduling decision at event #{decision} of the target schedule decides the \
@@ -706,18 +1170,18 @@ fn timing_decision_header(
          runs {} events ({} retired conditional branches), {}, and the run does not.\n",
         with.events,
         with.branches,
-        then(with, "stack1"),
+        then(with, slice_ends.is_none().then_some("stack1")),
         describe_continuation(continuation),
         without.events,
         without.branches,
-        then(without, "stack2"),
+        then(without, Some("stack2")),
     );
     if let Some([with_end, without_end]) = slice_ends {
         header.push_str(&format!(
             "The thread that runs next has the same stack in both continuations (often a \
-             thread just started), so stack1 and stack2 show where thread {thread} is when its \
-             slice ends instead: at event #{with_end} with the event, at event #{without_end} \
-             without it.\n"
+             thread just started), so stack1 shows where thread {thread} is when its slice ends \
+             with the event, at event #{with_end}, and stack2 is that next thread, without the \
+             event (where thread {thread}'s slice ends at event #{without_end}).\n"
         ));
     }
     header.push_str(&format!(
@@ -739,15 +1203,31 @@ struct StackReplay {
     stacks: [Option<PrettyBacktrace>; 2],
     /// Where it left its schedule before passing event `index`, if it did.
     left_schedule: Option<Departure>,
-    /// The threads it ran at events `index - 1` and `index`, if it
+    /// The first event of its schedule it recorded at another position,
+    /// after a branch event the schedule leaves out ([`follow`]), if any.
+    shifted_at: Option<usize>,
+    /// The threads it ran at positions `index - 1` and `index` of its
+    /// realized schedule, where the scheduler took its stacks, if it
     /// recorded them.
     ran: [Option<DetTid>; 2],
+    /// The schedule it realized (empty if it recorded none), recorded at
+    /// `realized_path`.
+    realized: Vec<SchedEvent>,
+    realized_path: PathBuf,
 }
 
 impl StackReplay {
-    /// Whether the replay followed its schedule through event `event`, so
-    /// that a stack it took there is that event's.
+    /// Whether the replay followed its schedule through event `event`, each
+    /// event at its own position, so that a stack it took there is that
+    /// event's: the scheduler counts the events it ran, so one it recorded
+    /// that the schedule leaves out moves the positions after it.
     fn followed_through(&self, event: usize) -> bool {
+        self.reached(event) && self.shifted_at.is_none_or(|shifted| shifted > event)
+    }
+
+    /// Whether the replay ran its schedule's events through event `event`,
+    /// at whatever positions.
+    fn reached(&self, event: usize) -> bool {
         match &self.left_schedule {
             None => true,
             Some(Departure::OtherEvent { index, .. }) => *index > event,
@@ -794,33 +1274,90 @@ impl std::fmt::Display for Departure {
     }
 }
 
-/// Whether `ran` is the event `expected`, as the scheduler compares them when
-/// it takes a stack: the count and the time aside.
+/// Whether `ran` is the event `expected`, as the replayer matches them: the
+/// count and the time aside, and an instruction pointer compared only where
+/// `expected` has one. A replay records the end of a slice a timer cut, which
+/// the recording it replays may leave out; that is the same event.
 fn same_event(expected: &SchedEvent, ran: &SchedEvent) -> bool {
     expected.dettid == ran.dettid
         && expected.op == ran.op
-        && expected.start_rip == ran.start_rip
-        && expected.end_rip == ran.end_rip
+        && (expected.start_rip.is_none() || expected.start_rip == ran.start_rip)
+        && (expected.end_rip.is_none() || expected.end_rip == ran.end_rip)
 }
 
-/// The first of the first `until` events of `requested` at which `realized`
-/// ran another event, or ended.
-fn departure(requested: &[SchedEvent], realized: &[SchedEvent], until: usize) -> Option<Departure> {
+/// How `realized` follows the first `until` events of `requested`: the
+/// position in `realized` of each requested event it ran, in order, and
+/// where it left them, if it did. A replay can record a branch event its
+/// schedule leaves out: the search's interleavings of two runs keep only the
+/// events both runs share, and branch events whose counts differ are not
+/// shared, yet the thread still runs those branches before its next event.
+/// Such a branch event, on the thread the schedule runs next, is passed
+/// over, not a departure.
+fn follow(
+    requested: &[SchedEvent],
+    realized: &[SchedEvent],
+    until: usize,
+) -> (Vec<usize>, Option<Departure>) {
     let until = until.min(requested.len());
+    let mut positions = Vec::with_capacity(until);
+    let mut next = 0;
     for (index, expected) in requested[..until].iter().enumerate() {
-        match realized.get(index) {
-            None => return Some(Departure::Ended { events: index }),
-            Some(ran) if !same_event(expected, ran) => {
-                return Some(Departure::OtherEvent {
-                    index,
-                    expected: expected.clone(),
-                    ran: ran.clone(),
-                });
+        loop {
+            match realized.get(next) {
+                None => return (positions, Some(Departure::Ended { events: index })),
+                Some(ran) if same_event(expected, ran) => break,
+                Some(ran)
+                    if ran.op == detcore_model::schedule::Op::Branch
+                        && ran.dettid == expected.dettid =>
+                {
+                    next += 1;
+                }
+                Some(ran) => {
+                    let departure = Departure::OtherEvent {
+                        index,
+                        expected: expected.clone(),
+                        ran: ran.clone(),
+                    };
+                    return (positions, Some(departure));
+                }
             }
-            Some(_) => {}
         }
+        positions.push(next);
+        next += 1;
     }
-    None
+    (positions, None)
+}
+
+/// How a stack-trace replay that realized `realized` followed `requested`
+/// through the critical pair at `index - 1` and `index`: where it left it,
+/// the first event it recorded at another position, and the threads it ran
+/// at positions `index - 1` and `index`, where the scheduler, which counts
+/// the events it ran, took its stacks.
+fn replay_positions(
+    requested: &[SchedEvent],
+    realized: &[SchedEvent],
+    index: usize,
+) -> (Option<Departure>, Option<usize>, [Option<DetTid>; 2]) {
+    let (positions, left_schedule) = follow(requested, realized, index + 1);
+    let ran_at = |position: usize| realized.get(position).map(|event| event.dettid);
+    let shifted_at = positions
+        .iter()
+        .enumerate()
+        .position(|(event, position)| event != *position);
+    (
+        left_schedule,
+        shifted_at,
+        [ran_at(index - 1), ran_at(index)],
+    )
+}
+
+/// The first event at which two realized schedules run different threads,
+/// if both reach one: where two replays that share a schedule prefix part.
+fn first_thread_difference(first: &[SchedEvent], second: &[SchedEvent]) -> Option<usize> {
+    first
+        .iter()
+        .zip(second)
+        .position(|(a, b)| a.dettid != b.dettid)
 }
 
 /// The thread a stack was taken on, as the guest numbers it (which is the
@@ -863,23 +1400,195 @@ fn merge_stacks(
                 (replay.stacks[*stack].clone().unwrap(), (*name).to_owned())
             })
             .or_else(|| {
-                candidates.iter().find_map(|(name, replay, stack, _)| {
+                candidates.iter().find_map(|(name, replay, stack, event)| {
                     let taken = replay.stacks[*stack].as_ref()?;
-                    let on_its_thread = replay.ran[*stack] == Some(threads[slot])
-                        || stack_thread(taken) == Some(threads[slot]);
-                    on_its_thread.then_some(())?;
-                    replay.stacks[*stack].clone().map(|stack| {
-                        (
-                            stack,
-                            format!(
-                                "{name}, which left its schedule before this operation, so the \
-                                 stack may be another occurrence of it"
-                            ),
-                        )
-                    })
+                    // The stack's own thread decides; without one, the
+                    // thread the replay ran where it took the stack.
+                    let taken_on = stack_thread(taken).or(replay.ran[*stack]);
+                    (taken_on == Some(threads[slot])).then_some(())?;
+                    let why = match &replay.left_schedule {
+                        Some(_) if !replay.reached(*event) => "left its schedule",
+                        _ => "recorded branch events its schedule leaves out",
+                    };
+                    Some((
+                        taken.clone(),
+                        format!(
+                            "{name}, which {why} before this operation, so the stack may be \
+                             another occurrence of it"
+                        ),
+                    ))
                 })
             })
     })
+}
+
+/// Whether [`merge_stacks`] takes slot `slot`'s stack from a replay that
+/// followed its schedule through that operation, each event at its own
+/// position, so that the stack is that operation's.
+fn exact_stack(baseline: &StackReplay, target: &StackReplay, index: usize, slot: usize) -> bool {
+    let other = 1 - slot;
+    (baseline.stacks[slot].is_some() && baseline.followed_through(index - 1 + slot))
+        || (target.stacks[other].is_some() && target.followed_through(index - 1 + other))
+}
+
+/// The opening of an order-of-events report, true to what its stacks show,
+/// and whether they show two threads racing. `threads` are the threads of
+/// the two operations. Two operations of one thread are no interleaving;
+/// two stacks taken on one thread, a stack taken on another thread than its
+/// operation's, or a pair with a stack missing, do not show the race, and
+/// the report says so instead of claiming one.
+fn racing_pair_opening(
+    threads: [DetTid; 2],
+    stacks: [Option<&PrettyBacktrace>; 2],
+) -> (String, bool) {
+    let [first, second] = threads;
+    if first == second {
+        return (
+            format!(
+                "Both operations belong to thread {first}: swapping two events of one thread is \
+                 not an interleaving, so they are not two threads racing.\n"
+            ),
+            false,
+        );
+    }
+    let one_thread = matches!(
+        stacks,
+        [Some(one), Some(other)]
+            if stack_thread(one).is_some() && stack_thread(one) == stack_thread(other)
+    );
+    let elsewhere = [0, 1].into_iter().find_map(|slot| {
+        let taken_on = stack_thread(stacks[slot]?)?;
+        (taken_on != threads[slot]).then_some((slot, taken_on))
+    });
+    if !one_thread && let Some((slot, taken_on)) = elsewhere {
+        return (
+            format!(
+                "These two operations are on threads {first} and {second}, but stack{} was \
+                 taken on thread {taken_on}, not thread {}, so the stacks do not show the two \
+                 threads.\n",
+                slot + 1,
+                threads[slot]
+            ),
+            false,
+        );
+    }
+    match stacks {
+        [Some(one), Some(other)]
+            if stack_thread(one).is_some() && stack_thread(one) == stack_thread(other) =>
+        {
+            (
+                format!(
+                    "These two operations are on threads {first} and {second}, but both stacks \
+                     were taken on thread {}, so they do not show the two threads.\n",
+                    stack_thread(one).unwrap_or(first)
+                ),
+                false,
+            )
+        }
+        [Some(_), Some(_)] => (
+            format!(
+                "These two operations, on threads {first} and {second}, are RACING with each other.\n"
+            ),
+            true,
+        ),
+        [None, None] => (
+            format!(
+                "These two operations are on threads {first} and {second}; neither has a stack \
+                 (see below), so this report cannot show them racing.\n"
+            ),
+            false,
+        ),
+        _ => (
+            format!(
+                "These two operations are on threads {first} and {second}; only one has a stack \
+                 (see below), so this report cannot show both sides of the race.\n"
+            ),
+            false,
+        ),
+    }
+}
+
+/// The stacks of two operations the replays of the passing and failing
+/// schedules realized, when those replays could not follow their schedules
+/// through the critical pair: around `event`, the first event at which the
+/// two realized schedules run different threads, `at[0]` in the passing one
+/// and `at[1]` in the failing one ([`telling_event_at`]).
+struct RealizedPair {
+    event: usize,
+    at: [Telling; 2],
+    stacks: [PrettyBacktrace; 2],
+}
+
+/// What a [`RealizedPair`]'s stack of the replay `which` ("passing" or
+/// "failing") shows, when not the thread that runs at `event` there.
+fn telling_sentence(which: &str, slot: &str, event: usize, at: &Telling) -> Option<String> {
+    let Telling {
+        event: shown,
+        thread,
+        creator,
+        starts,
+        ends_at,
+    } = *at;
+    let mut sentence = match creator {
+        Some(creator) => format!(
+            "In the replay of the {which} schedule, thread {creator} at event #{event} only \
+             returns from creating a thread, so {slot} is thread {thread}, which runs next"
+        ),
+        None if starts => {
+            format!("In the replay of the {which} schedule, {slot} is thread {thread}")
+        }
+        None => return None,
+    };
+    if starts {
+        let end = match ends_at {
+            Some(sysno) => format!("at its {} call, where it blocks or waits", sysno.name()),
+            None => "where it was preempted, at an arbitrary instruction".to_owned(),
+        };
+        sentence.push_str(&format!(
+            ", which starts in that turn: it is shown where the turn ends, at event #{shown}, \
+             {end}"
+        ));
+    } else {
+        sentence.push_str(&format!(", at event #{shown}"));
+    }
+    sentence.push_str(".\n");
+    Some(sentence)
+}
+
+/// Why the replays of the passing and failing schedules (`baseline`,
+/// `target`) did not give the stacks of the critical pair at `index - 1` and
+/// `index`, for a report whose stacks come from a [`RealizedPair`].
+fn realized_pair_reason(baseline: &StackReplay, target: &StackReplay, index: usize) -> String {
+    let departed = [("passing", baseline), ("failing", target)]
+        .into_iter()
+        .find_map(|(which, replay)| match &replay.left_schedule {
+            Some(departure @ Departure::OtherEvent { index: at, .. }) if *at <= index => {
+                Some((which, departure))
+            }
+            _ => None,
+        });
+    match departed {
+        Some((which, departure)) => format!(
+            "the replay of the {which} schedule {departure}. The passing and failing schedules \
+             are the search's interleavings of the two runs, and this one cannot be realized \
+             there"
+        ),
+        None if baseline.shifted_at.is_some() || target.shifted_at.is_some() => {
+            "the replays recorded branch events the schedules leave out (the search's \
+             interleavings keep only the events both runs share), so the stacks they took by \
+             position are not those operations'"
+                .to_owned()
+        }
+        None => "the stacks they took are not those operations'".to_owned(),
+    }
+}
+
+/// The last component of `path`, as the report names a workspace file.
+fn file_name(path: &Path) -> String {
+    path.file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned()
 }
 
 /// Why neither replay captured `which` (the stack at the passing schedule's
@@ -890,14 +1599,20 @@ fn missing_stack_reason(
     baseline: &StackReplay,
     target: &StackReplay,
 ) -> String {
-    let describe = |replay: &StackReplay, event: usize| match &replay.left_schedule {
-        Some(departure) if !replay.followed_through(event) => {
-            format!("left its schedule: it {departure}")
-        }
-        _ => format!(
-            "followed its schedule through event #{event}, but left no readable stack there"
-        ),
-    };
+    let describe =
+        |replay: &StackReplay, event: usize| match (&replay.left_schedule, replay.shifted_at) {
+            (Some(departure), _) if !replay.followed_through(event) => {
+                format!("left its schedule: it {departure}")
+            }
+            (_, Some(shifted)) if shifted <= event => format!(
+                "followed its schedule through event #{event}, but from event #{shifted} on it \
+             recorded branch events the schedule leaves out, so its stacks were taken at other \
+             events"
+            ),
+            _ => format!(
+                "followed its schedule through event #{event}, but left no readable stack there"
+            ),
+        };
     let unfinished = [baseline, target]
         .iter()
         .any(|replay| replay.left_schedule == Some(Departure::Unknown));
@@ -1069,6 +1784,70 @@ impl AnalyzeOpts {
         Ok((is_match, run.into_runopts()))
     }
 
+    /// The stacks of where the replays of the passing and failing schedules
+    /// (`baseline`, `target`) part: the first event at which their realized
+    /// schedules run different threads, each from a replay of that realized
+    /// schedule, which follows it exactly. Otherwise why not: they do not
+    /// part before one of them ends, a replay does not take a stack there on
+    /// that event's thread, or it fails to run. A fallback never fails the
+    /// analysis.
+    fn realized_pair(
+        &self,
+        baseline: &StackReplay,
+        target: &StackReplay,
+    ) -> Result<RealizedPair, String> {
+        let Some(event) = first_thread_difference(&baseline.realized, &target.realized) else {
+            return Err(
+                "the schedules the two replays realized do not run different threads at any \
+                 event both reach"
+                    .to_owned(),
+            );
+        };
+        let mut stacks = Vec::with_capacity(2);
+        let mut tellings = Vec::with_capacity(2);
+        for (runname, replay, other) in [
+            ("final_baseline_realized_for_stacktraces", baseline, target),
+            ("final_target_realized_for_stacktraces", target, baseline),
+        ] {
+            let telling = telling_event_at(&replay.realized, event, other.realized[event].dettid)
+                .expect("both reach the event");
+            let at = telling.event;
+            // The replay also asks for the stack at the next event, which
+            // must exist.
+            if at + 1 >= replay.realized.len() {
+                return Err(format!(
+                    "the schedule {} realized ends at event #{at}",
+                    file_name(&replay.realized_path)
+                ));
+            }
+            let again = self
+                .replay_for_stacks(runname, &replay.realized_path, &replay.realized, at + 1)
+                .map_err(|error| format!("the replay {runname} failed to run ({error:#})"))?;
+            let thread = telling.thread;
+            match &again.stacks[0] {
+                Some(stack)
+                    if again.followed_through(at) && stack_thread(stack) == Some(thread) =>
+                {
+                    stacks.push(stack.clone());
+                    tellings.push(telling);
+                }
+                _ => {
+                    return Err(format!(
+                        "the replay {runname} of a realized schedule did not take thread \
+                         {thread}'s stack at its event #{at}"
+                    ));
+                }
+            }
+        }
+        let [first, second]: [PrettyBacktrace; 2] = stacks.try_into().expect("two replays");
+        let at: [Telling; 2] = tellings.try_into().expect("two replays");
+        Ok(RealizedPair {
+            event,
+            at,
+            stacks: [first, second],
+        })
+    }
+
     /// Replay `schedule` (written at `schedule_path`) for the stacks of the
     /// critical pair, its events `index - 1` and `index`, recording the
     /// schedule the replay realized. A replay that a bound stops or Hermit
@@ -1133,22 +1912,28 @@ impl AnalyzeOpts {
                 ),
             }
         }
-        let (left_schedule, ran) = if realized.exists() {
-            let realized = PreemptionReader::new(&realized).load_all().into_global();
-            let ran_at = |event: usize| realized.get(event).map(|event| event.dettid);
-            (
-                departure(schedule, &realized, index + 1),
-                [ran_at(index - 1), ran_at(index)],
-            )
+        let realized_path = realized;
+        let realized = if realized_path.exists() {
+            PreemptionReader::new(&realized_path)
+                .load_all()
+                .into_global()
         } else {
-            (Some(Departure::Unknown), [None, None])
+            Vec::new()
+        };
+        let (left_schedule, shifted_at, ran) = if realized_path.exists() {
+            replay_positions(schedule, &realized, index)
+        } else {
+            (Some(Departure::Unknown), None, [None, None])
         };
         Ok(StackReplay {
             finished,
             met_target: finished && run.is_a_match(),
             stacks,
             left_schedule,
+            shifted_at,
             ran,
+            realized,
+            realized_path,
         })
     }
 
@@ -1487,7 +2272,7 @@ impl AnalyzeOpts {
             unfinished,
             continuation,
         } = found;
-        let notes: Vec<String> = [refused, unfinished.clone()]
+        let mut notes: Vec<String> = [refused, unfinished.clone()]
             .into_iter()
             .flatten()
             .collect();
@@ -1505,29 +2290,75 @@ impl AnalyzeOpts {
         // schedule's first decision + 1 events.
         let (continued, continued_path) =
             self.prefix_continuation("final_baseline_schedule", &schedule, decision, continuation)?;
-        if continued
+        let thread = schedule.schedevents()[decision].dettid;
+        let same_thread = continued
             .get(decision)
-            .is_some_and(|event| event.dettid == schedule.schedevents()[decision].dettid)
+            .is_some_and(|event| event.dettid == thread);
+        // With the same thread there either way, the continuation with the
+        // event shows what it changes.
+        let target_continued = if same_thread {
+            Some(self.prefix_continuation(
+                "final_target_schedule",
+                &schedule,
+                decision + 1,
+                continuation,
+            )?)
+        } else {
+            None
+        };
+        if let Some((target_continued, target_continued_path)) = &target_continued
             && let Some(report) = self.report_timing_decision(
                 &schedule,
                 decision,
                 continuation,
                 (target_met, &chosen),
-                (&continued, &continued_path),
+                (
+                    (&continued, &continued_path),
+                    (target_continued, target_continued_path),
+                ),
                 &notes,
             )?
         {
             return Ok(report);
         }
+        let plan = stack2_plan(
+            thread,
+            decision,
+            &continued,
+            target_continued.as_ref().map(|(with, _)| with.as_slice()),
+        );
+        let (at, moved) = match &plan {
+            Stack2Plan::Instead { at, partner } => (*at, partner.clone()),
+            _ => (decision, None),
+        };
+        let mut partner = None;
         let (baseline_met, instead) = if continued.len() > decision {
             let baseline = continued_record(&schedule, decision, &continued);
-            self.prefix_stack(
+            let (met, stack) = self.prefix_stack(
                 "final_baseline_for_stacktraces",
                 &baseline,
-                decision + 1,
-                decision,
+                at + 1,
+                at,
                 continuation,
-            )?
+            )?;
+            match moved {
+                Some(moved)
+                    if at != decision
+                        && stack.as_ref().and_then(stack_thread) != Some(moved.thread) =>
+                {
+                    notes.push(format!(
+                        "the replay of the continuation without the event took no stack of thread \
+                         {} at event #{at}, so stack2 is empty",
+                        moved.thread
+                    ));
+                    (met, None)
+                }
+                Some(moved) if at != decision => {
+                    partner = Some(moved);
+                    (met, stack)
+                }
+                _ => (met, stack),
+            }
         } else if unfinished.is_some() && continued.is_empty() {
             eprintln!(
                 ":: {} the run without event #{decision} did not finish and recorded no \
@@ -1544,6 +2375,83 @@ impl AnalyzeOpts {
             );
             (false, None)
         };
+        // Without the event the scheduler runs the same thread there: stack2
+        // is then the first thread whose turn differs between the two
+        // continuations, or, when they do not differ before one ends, the
+        // thread that runs after its slice without the event, so the two
+        // stacks are two threads.
+        let mut next_thread = None;
+        let mut instead = instead;
+        if let Stack2Plan::Changed(changed) = plan {
+            let (runname, record) = match changed.side {
+                Side::With => (
+                    "final_target_next_for_stacktraces",
+                    continued_record(
+                        &schedule,
+                        decision + 1,
+                        &target_continued
+                            .as_ref()
+                            .expect("a continuation with the event")
+                            .0,
+                    ),
+                ),
+                Side::Without => (
+                    "final_baseline_next_for_stacktraces",
+                    continued_record(&schedule, decision, &continued),
+                ),
+            };
+            match self.prefix_stack(
+                runname,
+                &record,
+                changed.event + 1,
+                changed.event,
+                continuation,
+            ) {
+                Ok((_, Some(stack))) if stack_thread(&stack) == Some(changed.thread) => {
+                    next_thread = Some((changed.event, changed.thread));
+                    instead = Some(stack);
+                    partner = Some(changed);
+                }
+                Ok(_) => notes.push(format!(
+                    "the replay of the continuation {} the event took no stack of thread {} at \
+                     event #{}, so stack2 is thread {thread} there",
+                    changed.side.name(),
+                    changed.thread,
+                    changed.event,
+                )),
+                Err(error) => notes.push(format!(
+                    "the replay for thread {}'s stack at event #{} failed to run ({error:#}), so \
+                     stack2 is thread {thread} there",
+                    changed.thread, changed.event,
+                )),
+            }
+        } else if let Stack2Plan::NextSlice {
+            index,
+            thread: next,
+        } = plan
+        {
+            let baseline = continued_record(&schedule, decision, &continued);
+            match self.prefix_stack(
+                "final_baseline_next_for_stacktraces",
+                &baseline,
+                index + 1,
+                index,
+                continuation,
+            ) {
+                Ok((_, Some(stack))) if stack_thread(&stack) == Some(next) => {
+                    next_thread = Some((index, next));
+                    instead = Some(stack);
+                }
+                Ok(_) => notes.push(format!(
+                    "the replay of the continuation without the event took no stack of thread \
+                     {next} at event #{index}, so stack2 is thread {thread} there"
+                )),
+                Err(error) => notes.push(format!(
+                    "the replay for thread {next}'s stack at event #{index} failed to run \
+                     ({error:#}), so stack2 is thread {thread} there"
+                )),
+            }
+        }
         if !target_met || baseline_met {
             eprintln!(
                 ":: {} the stack-trace runs did not repeat the search's outcomes (target met: {}, \
@@ -1577,8 +2485,10 @@ impl AnalyzeOpts {
             );
         } else {
             header.push_str(&stack_pair_sentences(
-                schedule.schedevents()[decision].dettid,
+                thread,
                 continued.get(decision).map(|event| event.dettid),
+                next_thread,
+                partner.as_ref(),
             ));
         }
         for note in &notes {
@@ -1610,7 +2520,11 @@ impl AnalyzeOpts {
                 stack: chosen,
             },
             critical_event2: ReportCriticalEvent {
-                event_index: decision,
+                event_index: partner
+                    .as_ref()
+                    .map(|partner| partner.event)
+                    .or(next_thread.map(|(index, _)| index))
+                    .unwrap_or(decision),
                 stack: instead,
             },
             branch_counter_warning: self.branch_counter_warning.clone(),
@@ -1620,7 +2534,8 @@ impl AnalyzeOpts {
 
     /// The report of `--prefix-search` when the scheduler runs the same
     /// thread at the deciding event without it (`continued`, recorded at
-    /// `continued_path`, is the schedule without it) as the target schedule
+    /// `continued_path`, is the schedule without it; `target_continued`, at
+    /// `target_continued_path`, the one with it) as the target schedule
     /// does: the decision is how long that thread runs, so the report shows
     /// the thread that runs next in each continuation, and the deciding
     /// thread's own stack (`deciding`, from a trial that met the target or
@@ -1633,23 +2548,20 @@ impl AnalyzeOpts {
         decision: usize,
         continuation: MaybeTimeslice,
         (target_met, deciding): (bool, &Option<PrettyBacktrace>),
-        (continued, continued_path): (&[SchedEvent], &Path),
+        ((continued, continued_path), (target_continued, target_continued_path)): (
+            Continued<'_>,
+            Continued<'_>,
+        ),
         notes: &[String],
     ) -> anyhow::Result<Option<Report>> {
         let events = schedule.schedevents();
         let thread = events[decision].dettid;
-        let (target_continued, target_continued_path) = self.prefix_continuation(
-            "final_target_schedule",
-            schedule,
-            decision + 1,
-            continuation,
-        )?;
-        let with = slice_from(&target_continued, decision, thread);
+        let with = slice_from(target_continued, decision, thread);
         let without = slice_from(continued, decision, thread);
         if with.events == 0 || (with.events, with.branches) == (without.events, without.branches) {
             eprintln!(
                 ":: {} without event #{decision} the scheduler runs thread {thread} there too, \
-                 but the run with it {}; reporting the two threads at that event instead",
+                 but the run with it {}; reporting the first thread whose turn differs instead",
                 "WARNING:".yellow().bold(),
                 if with.events == 0 {
                     "does not run it there (its continuation was not recorded, or left the \
@@ -1662,7 +2574,7 @@ impl AnalyzeOpts {
         }
         // Each continuation replays under the checkpoints of the prefix it
         // continued.
-        let with_record = continued_record(schedule, decision + 1, &target_continued);
+        let with_record = continued_record(schedule, decision + 1, target_continued);
         let without_record = continued_record(schedule, decision, continued);
         let next_stack = |runname: &str, variant: &PreemptionRecord, slice: &Slice| match slice.next
         {
@@ -1687,7 +2599,7 @@ impl AnalyzeOpts {
             slice.next.map_or(variant.len(), |(index, _)| index)
         };
         let mut critical = [
-            (next_index(&target_continued, &with), stack1),
+            (next_index(target_continued, &with), stack1),
             (next_index(continued, &without), stack2),
         ];
         // When the threads that run next have the same stack in both
@@ -1699,30 +2611,34 @@ impl AnalyzeOpts {
             &without,
             [critical[0].1.as_ref(), critical[1].1.as_ref()],
         );
+        // stack1 becomes where the deciding thread stops with the event;
+        // stack2 stays the next thread, so the two stacks are two threads.
+        let mut slice_end_note = None;
         if let Some(ends) = slice_ends {
-            let stack_at = |runname: &str, variant: &PreemptionRecord, end: usize| {
-                if end == decision {
-                    // A slice of one event ends where it starts.
-                    Ok((true, deciding.clone()))
-                } else {
-                    self.prefix_stack(runname, variant, end + 1, end, continuation)
+            let with_end = if ends[0] == decision {
+                // A slice of one event ends where it starts.
+                deciding.clone()
+            } else {
+                match self.prefix_stack(
+                    "final_target_slice_end_for_stacktraces",
+                    &with_record,
+                    ends[0] + 1,
+                    ends[0],
+                    continuation,
+                ) {
+                    Ok((_, stack)) => stack,
+                    Err(error) => {
+                        slice_end_note = Some(format!(
+                            "the replay for thread {thread}'s stack where its slice ends failed \
+                             to run ({error:#}), so stack1 is the thread that runs next"
+                        ));
+                        None
+                    }
                 }
             };
-            let (_, with_end) = stack_at(
-                "final_target_slice_end_for_stacktraces",
-                &with_record,
-                ends[0],
-            )?;
-            let (_, without_end) = stack_at(
-                "final_baseline_slice_end_for_stacktraces",
-                &without_record,
-                ends[1],
-            )?;
-            match (with_end, without_end) {
-                (Some(with_end), Some(without_end)) => {
-                    critical = [(ends[0], Some(with_end)), (ends[1], Some(without_end))];
-                }
-                _ => slice_ends = None,
+            match with_end {
+                Some(with_end) => critical[0] = (ends[0], Some(with_end)),
+                None => slice_ends = None,
             }
         }
         let [(event1, stack1), (event2, stack2)] = critical;
@@ -1734,15 +2650,6 @@ impl AnalyzeOpts {
             continuation,
             slice_ends,
         );
-        if slice_ends.is_some()
-            && let (Some(first), Some(second)) = (&stack1, &stack2)
-            && same_frames(first, second)
-        {
-            header.push_str(&format!(
-                "Thread {thread} has the same stack at both events: what differs is how far it \
-                 gets before the other thread runs, not where it stops.\n"
-            ));
-        }
         let name = |path: &Path| {
             path.file_name()
                 .unwrap_or_default()
@@ -1752,16 +2659,16 @@ impl AnalyzeOpts {
         header.push_str(&format!(
             "Event numbers after #{decision} are positions in each continuation's recorded \
              schedule, in the workspace: {} with the event, {} without it.\n",
-            name(&target_continued_path),
+            name(target_continued_path),
             name(continued_path),
         ));
-        for note in notes {
+        for note in notes.iter().chain(&slice_end_note) {
             header.push_str(&format!("Note: {note}\n"));
         }
         let context = format!(
             "With event #{decision} replayed:\n{}\nWithout it:\n{}",
             Self::generate_context(
-                &target_continued,
+                target_continued,
                 with.next.map_or(decision.max(1), |(index, _)| index),
                 self.execution_context
             ),
@@ -2368,28 +3275,6 @@ impl AnalyzeOpts {
             sources,
         );
 
-        let mut header = String::new();
-        header.push_str("These two operations, on different threads, are RACING with eachother.\n");
-        header.push_str(&format!(
-            "The order of events (#{} and #{} in the schedule) determines the program outcome.\n",
-            critical_event_index - 1,
-            critical_event_index,
-        ));
-        header.push_str(
-            "You must add synchronization to prevent these operations from racing, or give them a different order.\n",
-        );
-
-        if self.is_vanilla_criteria() {
-            header.push_str(
-                "Attached are the stacktraces in the PASSING order, but flipping the order of the two events makes the program FAIL (nonzero exit).\n",
-            );
-        } else {
-            header.push_str(&format!(
-                "Attached are the stacktraces in the baseline order, while flipping the order makes the program exhibit the target criteria ({}).\n",
-                self.display_criteria()
-            ));
-        }
-
         // Both schedules are replayed: the passing schedule's events
         // #index - 1 and #index are the failing schedule's #index and
         // #index - 1, so each racing operation's stack can come from either
@@ -2415,6 +3300,111 @@ impl AnalyzeOpts {
                 target.met_target,
             );
         }
+        let threads = [
+            passing_schedule[critical_event_index - 1].dettid,
+            passing_schedule[critical_event_index].dettid,
+        ];
+        let merged = merge_stacks(&baseline, &target, critical_event_index, threads);
+        let exact = [0, 1].map(|slot| exact_stack(&baseline, &target, critical_event_index, slot));
+        // A replay that could not follow its schedule through the pair took
+        // its stacks elsewhere. Its realized schedule replays exactly, and
+        // the two realized schedules part where the two orders do.
+        let mut sources = String::new();
+        let realized = if exact == [true, true] {
+            None
+        } else {
+            match self.realized_pair(&baseline, &target) {
+                Ok(pair) => Some(pair),
+                Err(reason) => {
+                    eprintln!(":: {} {reason}", "Note:".yellow().bold());
+                    sources.push_str(&format!(
+                        "Note: no stacks from the schedules the replays realized: {reason}.\n"
+                    ));
+                    None
+                }
+            }
+        };
+        let (shown_threads, stack1, stack2) = match realized {
+            Some(RealizedPair {
+                event,
+                at,
+                stacks: [first, second],
+            }) => {
+                sources.push_str(&format!(
+                    "The replays could not follow the passing and failing schedules through these \
+                     events: {}. stack1 and stack2 come from replays of the schedules those two \
+                     replays realized instead (a realized schedule replays exactly), at their \
+                     event #{event}, where they first run different threads: thread {} in the \
+                     replay of the passing schedule (stack1, {}), thread {} in the replay of the \
+                     failing one (stack2, {}).\n",
+                    realized_pair_reason(&baseline, &target, critical_event_index),
+                    baseline.realized[event].dettid,
+                    file_name(&baseline.realized_path),
+                    target.realized[event].dettid,
+                    file_name(&target.realized_path),
+                ));
+                for (which, slot, telling) in
+                    [("passing", "stack1", &at[0]), ("failing", "stack2", &at[1])]
+                {
+                    sources.extend(telling_sentence(which, slot, event, telling));
+                }
+                ([at[0].thread, at[1].thread], Some(first), Some(second))
+            }
+            None => {
+                let [stack1, stack2] = merged;
+                for (which, stack, event) in [
+                    ("stack1", &stack1, critical_event_index - 1),
+                    ("stack2", &stack2, critical_event_index),
+                ] {
+                    match stack {
+                        Some((_, source)) => {
+                            sources.push_str(&format!("{which} is from {source}.\n"))
+                        }
+                        None => {
+                            let target_event = 2 * critical_event_index - 1 - event;
+                            let reason = missing_stack_reason(
+                                which,
+                                (event, target_event),
+                                &baseline,
+                                &target,
+                            );
+                            eprintln!(":: {} {reason}", "WARNING:".yellow().bold());
+                            sources.push_str(&format!("{reason}\n"));
+                        }
+                    }
+                }
+                (
+                    threads,
+                    stack1.map(|(stack, _)| stack),
+                    stack2.map(|(stack, _)| stack),
+                )
+            }
+        };
+
+        let (opening, racing) =
+            racing_pair_opening(shown_threads, [stack1.as_ref(), stack2.as_ref()]);
+        let mut header = opening;
+        header.push_str(&format!(
+            "The order of events (#{} and #{} in the schedule) determines the program outcome.\n",
+            critical_event_index - 1,
+            critical_event_index,
+        ));
+        if racing {
+            header.push_str(
+                "You must add synchronization to prevent these operations from racing, or give them a different order.\n",
+            );
+        }
+
+        if self.is_vanilla_criteria() {
+            header.push_str(
+                "Attached are the stacktraces in the PASSING order, but flipping the order of the two events makes the program FAIL (nonzero exit).\n",
+            );
+        } else {
+            header.push_str(&format!(
+                "Attached are the stacktraces in the baseline order, while flipping the order makes the program exhibit the target criteria ({}).\n",
+                self.display_criteria()
+            ));
+        }
         if target.met_target
             && let Some(change) = target_run.and_then(|run| {
                 changed_output(
@@ -2430,34 +3420,7 @@ impl AnalyzeOpts {
             eprintln!(":: {} {change}", "WARNING:".yellow().bold());
             header.push_str(&format!("Note: {change}\n"));
         }
-        let [stack1, stack2] = merge_stacks(
-            &baseline,
-            &target,
-            critical_event_index,
-            [
-                passing_schedule[critical_event_index - 1].dettid,
-                passing_schedule[critical_event_index].dettid,
-            ],
-        );
-        for (which, stack, event) in [
-            ("stack1", &stack1, critical_event_index - 1),
-            ("stack2", &stack2, critical_event_index),
-        ] {
-            match stack {
-                Some((_, source)) => header.push_str(&format!("{which} is from {source}.\n")),
-                None => {
-                    let target_event = 2 * critical_event_index - 1 - event;
-                    let reason =
-                        missing_stack_reason(which, (event, target_event), &baseline, &target);
-                    eprintln!(":: {} {reason}", "WARNING:".yellow().bold());
-                    header.push_str(&format!("{reason}\n"));
-                }
-            }
-        }
-        let (stack1, stack2) = (
-            stack1.map(|(stack, _)| stack),
-            stack2.map(|(stack, _)| stack),
-        );
+        header.push_str(&sources);
 
         // Also print to the screen, the branch-counter caveat first: the
         // report must not read as reproducible where its trials may not
@@ -3011,14 +3974,14 @@ mod tests {
             detcore::types::DetTid::from_raw(7),
             detcore::types::DetTid::from_raw(9),
         );
-        let pair = stack_pair_sentences(binder, Some(reader));
+        let pair = stack_pair_sentences(binder, Some(reader), None, None);
         assert!(
             pair.contains("stack2 is the thread that runs there instead"),
             "{pair}"
         );
         assert!(pair.contains("which of the two runs first"), "{pair}");
 
-        let one = stack_pair_sentences(reader, Some(reader));
+        let one = stack_pair_sentences(reader, Some(reader), None, None);
         assert!(one.contains("both belong to thread 7"), "{one}");
         assert!(one.contains("not two threads racing"), "{one}");
         for race in ["runs there instead", "which of the two runs first"] {
@@ -3027,7 +3990,498 @@ mod tests {
 
         // A run without the event that ended before it keeps the usual
         // sentences: its stack2 is empty, and a warning says why.
-        assert_eq!(stack_pair_sentences(reader, None), pair);
+        assert_eq!(stack_pair_sentences(reader, None, None, None), pair);
+
+        // When a thread runs after the deciding thread's slice without the
+        // event, stack2 is that thread: two threads, not one twice.
+        let next = stack_pair_sentences(reader, Some(reader), Some((65712, binder)), None);
+        assert!(
+            next.contains("stack1 is thread 7 there; stack2 is thread 9, which runs after thread 7's slice without the event, at event #65712 of that continuation."),
+            "{next}"
+        );
+        assert!(!next.contains("both belong to thread 7"), "{next}");
+    }
+
+    /// Realized-schedule events for the stack2 tests: a syscall stop and a
+    /// branch event of thread `thread`.
+    fn call(
+        thread: i32,
+        sysno: reverie::syscalls::Sysno,
+        phase: detcore_model::schedule::SyscallPhase,
+    ) -> SchedEvent {
+        SchedEvent::syscall(DetTid::from_raw(thread), sysno, phase)
+    }
+
+    fn branch(thread: i32) -> SchedEvent {
+        SchedEvent::branches(DetTid::from_raw(thread), 7)
+    }
+
+    /// A thread created at the deciding event's boundary. Thread 3's slice
+    /// (the event) runs first with it; without it, thread 1 returns from
+    /// creating a thread, thread 2 (created before, never run) takes its
+    /// first turn and sleeps, and thread 4 wakes, all before thread 3. stack2
+    /// was thread 1 in pthread_create; it is now thread 2, at the end of its
+    /// first turn (where it starts says nothing), and the report says that
+    /// thread 1 was passed over.
+    #[test]
+    fn a_thread_created_at_the_boundary_is_passed_over_for_the_thread_it_moves() {
+        use detcore_model::schedule::SyscallPhase::Posthook;
+        use detcore_model::schedule::SyscallPhase::Prehook;
+        use reverie::syscalls::Sysno;
+        // Threads 3 and 4 run before thread 1 calls clone, so it creates
+        // neither of them.
+        let prefix = [
+            branch(3),
+            call(3, Sysno::nanosleep, Prehook),
+            branch(4),
+            call(4, Sysno::nanosleep, Prehook),
+            call(1, Sysno::clone, Prehook),
+        ];
+        let decision = prefix.len();
+        let creator = [
+            call(1, Sysno::clone, Posthook),
+            call(1, Sysno::rt_sigprocmask, Prehook),
+            call(1, Sysno::rt_sigprocmask, Posthook),
+            call(1, Sysno::futex, Prehook),
+        ];
+        let consumer = [
+            branch(2),
+            call(2, Sysno::prctl, Prehook),
+            call(2, Sysno::prctl, Posthook),
+            call(2, Sysno::nanosleep, Prehook),
+        ];
+        let sleeper = [
+            call(4, Sysno::nanosleep, Posthook),
+            call(4, Sysno::nanosleep, Prehook),
+        ];
+        let deciding = [
+            call(3, Sysno::nanosleep, Posthook),
+            branch(3),
+            call(3, Sysno::write, Prehook),
+        ];
+        let without: Vec<SchedEvent> =
+            [&prefix[..], &creator, &consumer, &sleeper, &deciding].concat();
+        let with: Vec<SchedEvent> =
+            [&prefix[..], &deciding, &creator, &consumer, &sleeper].concat();
+        let consumer_ends = decision + creator.len() + consumer.len() - 1;
+        let thread3 = DetTid::from_raw(3);
+        let moved = moved_past(&without, Side::Without, decision, thread3).unwrap();
+        assert_eq!(
+            (moved.side, moved.thread, moved.event),
+            (Side::Without, DetTid::from_raw(2), consumer_ends)
+        );
+        assert!(
+            moved.why.starts_with(
+                "thread 2 runs before thread 3's turn without the event and after it with it; \
+                 thread 1, which runs before it, only returns from creating a thread. Thread 2 \
+                 starts in that turn, so its stack is where the turn ends, at its nanosleep \
+                 call, where it blocks or waits"
+            ),
+            "{}",
+            moved.why
+        );
+        // The two continuations say the same.
+        assert_eq!(
+            partner_turn(&with, &without, decision, thread3),
+            Some(moved.clone())
+        );
+        let header = stack_pair_sentences(thread3, Some(DetTid::from_raw(1)), None, Some(&moved));
+        assert!(
+            header.contains(&format!(
+                "without the event the scheduler runs thread 1 there instead. stack2 is thread 2, \
+                 at event #{consumer_ends} of the continuation without the event: thread 2 runs"
+            )),
+            "{header}"
+        );
+        assert!(
+            header.contains("which of threads 3 and 2 runs first"),
+            "{header}"
+        );
+
+        // When only the creator moved, it is stack2 after all.
+        let alone: Vec<SchedEvent> = [&prefix[..], &creator, &deciding].concat();
+        let moved = moved_past(&alone, Side::Without, decision, thread3).unwrap();
+        assert_eq!((moved.thread, moved.event), (DetTid::from_raw(1), decision));
+        assert!(
+            moved.why.ends_with("as every thread that moved does"),
+            "{}",
+            moved.why
+        );
+    }
+
+    /// A consumer whose order against the deciding thread flips: without the
+    /// event, the consumer wakes from its wait and drains before thread 3's
+    /// next turn; with it, after. stack2 is the consumer where it resumes,
+    /// in either continuation's terms.
+    #[test]
+    fn the_consumer_the_deciding_turn_moves_past_is_stack2() {
+        use detcore_model::schedule::SyscallPhase::Posthook;
+        use detcore_model::schedule::SyscallPhase::Prehook;
+        use reverie::syscalls::Sysno;
+        let prefix = [
+            branch(2),
+            call(2, Sysno::futex, Prehook),
+            branch(3),
+            call(3, Sysno::nanosleep, Prehook),
+        ];
+        let decision = prefix.len();
+        let consumer = [
+            call(2, Sysno::futex, Posthook),
+            branch(2),
+            call(2, Sysno::read, Prehook),
+            call(2, Sysno::read, Posthook),
+            call(2, Sysno::futex, Prehook),
+        ];
+        let producer = [
+            call(3, Sysno::nanosleep, Posthook),
+            branch(3),
+            call(3, Sysno::write, Prehook),
+            call(3, Sysno::write, Posthook),
+            call(3, Sysno::nanosleep, Prehook),
+        ];
+        let without: Vec<SchedEvent> = [&prefix[..], &consumer, &producer].concat();
+        let with: Vec<SchedEvent> = [&prefix[..], &producer, &consumer].concat();
+        let thread3 = DetTid::from_raw(3);
+        let partner = partner_turn(&with, &without, decision, thread3).unwrap();
+        assert_eq!(
+            (partner.side, partner.thread, partner.event),
+            (Side::Without, DetTid::from_raw(2), decision)
+        );
+        assert_eq!(
+            partner.why,
+            "thread 2 runs before thread 3's turn without the event and after it with it"
+        );
+        // The other way round, the consumer moved in the continuation with
+        // the event, and its stack comes from there.
+        let partner = partner_turn(&without, &with, decision, thread3).unwrap();
+        assert_eq!(
+            (partner.side, partner.thread, partner.event),
+            (Side::With, DetTid::from_raw(2), decision)
+        );
+    }
+
+    /// The deciding thread runs the same slice either way, and the
+    /// continuations run the same turns until thread 19's, which runs longer
+    /// with the event. stack2 was the thread after the deciding thread's
+    /// slice, created there (its stack at its start); it is now thread 19,
+    /// at the last event both continuations give its turn.
+    #[test]
+    fn a_turn_that_runs_longer_names_its_thread_where_the_continuations_part() {
+        use detcore_model::schedule::SyscallPhase::Posthook;
+        use detcore_model::schedule::SyscallPhase::Prehook;
+        use reverie::syscalls::Sysno;
+        let prefix = [
+            call(19, Sysno::futex, Prehook),
+            call(3, Sysno::futex, Prehook),
+        ];
+        let decision = prefix.len();
+        let shared = [
+            call(3, Sysno::futex, Posthook),
+            call(3, Sysno::clone3, Prehook),
+            branch(21),
+            call(21, Sysno::futex, Prehook),
+            call(3, Sysno::clone3, Posthook),
+            call(3, Sysno::futex, Prehook),
+        ];
+        let reads = |count: usize| {
+            let mut turn = vec![call(19, Sysno::futex, Posthook)];
+            for _ in 0..count {
+                turn.push(call(19, Sysno::clock_gettime, Prehook));
+                turn.push(call(19, Sysno::clock_gettime, Posthook));
+            }
+            turn.push(call(19, Sysno::futex, Prehook));
+            turn
+        };
+        let after = [
+            call(21, Sysno::futex, Posthook),
+            call(21, Sysno::exit, Prehook),
+        ];
+        let with: Vec<SchedEvent> = [&prefix[..], &shared, &reads(5), &after].concat();
+        let without: Vec<SchedEvent> = [&prefix[..], &shared, &reads(1), &after].concat();
+        let partner = partner_turn(&with, &without, decision, DetTid::from_raw(3)).unwrap();
+        let turn_starts = decision + shared.len();
+        assert_eq!(
+            (partner.side, partner.thread, partner.event),
+            (Side::Without, DetTid::from_raw(19), turn_starts + 3)
+        );
+        assert_eq!(
+            partner.why,
+            format!(
+                "the continuations run the same turns until thread 19's from event \
+                 #{turn_starts}, which runs 12 events with the event and 4 without it; its \
+                 stack is where the two part"
+            )
+        );
+        // Continuations that do not differ before one ends name no thread.
+        assert_eq!(
+            partner_turn(&with, &with, decision, DetTid::from_raw(3)),
+            None
+        );
+    }
+
+    /// Where two realized schedules first run different threads, a turn
+    /// that only returns from creating a thread gives way to the next one,
+    /// a thread's first turn is shown where it ends, and a turn that runs on
+    /// from before stays where the schedules part.
+    #[test]
+    fn a_realized_pair_passes_over_a_creator_and_a_thread_start() {
+        use detcore_model::schedule::SyscallPhase::Posthook;
+        use detcore_model::schedule::SyscallPhase::Prehook;
+        use reverie::syscalls::Sysno;
+        let schedule = [
+            call(3, Sysno::read, Prehook),
+            call(1, Sysno::clone, Prehook),
+            call(3, Sysno::read, Posthook),
+            call(1, Sysno::clone, Posthook),
+            call(1, Sysno::futex, Prehook),
+            branch(2),
+            call(2, Sysno::nanosleep, Prehook),
+            call(3, Sysno::write, Prehook),
+            call(3, Sysno::write, Posthook),
+        ];
+        let tid = DetTid::from_raw;
+        // Against thread 3, which ran before the clone, thread 1 only
+        // finishes creating thread 2, which starts next.
+        let creating_two = telling_event_at(&schedule, 3, tid(3)).unwrap();
+        assert_eq!(
+            creating_two,
+            Telling {
+                event: 6,
+                thread: tid(2),
+                creator: Some(tid(1)),
+                starts: true,
+                ends_at: Some(Sysno::nanosleep),
+            }
+        );
+        // Against thread 2 itself, the creator stays: what it does next is
+        // what its new thread races with.
+        assert_eq!(
+            telling_event_at(&schedule, 3, tid(2)),
+            Some(Telling {
+                event: 3,
+                thread: tid(1),
+                creator: None,
+                starts: false,
+                ends_at: Some(Sysno::futex),
+            })
+        );
+        // A turn that runs on from before stays where the schedules part;
+        // one that starts there is shown where it resumes.
+        assert_eq!(
+            telling_event_at(&schedule, 8, tid(1)),
+            Some(Telling {
+                event: 8,
+                thread: tid(3),
+                creator: None,
+                starts: false,
+                ends_at: None,
+            })
+        );
+        assert_eq!(
+            telling_event_at(&schedule, 7, tid(1)).map(|at| at.event),
+            Some(7)
+        );
+        assert_eq!(
+            telling_sentence("failing", "stack2", 3, &creating_two).as_deref(),
+            Some(
+                "In the replay of the failing schedule, thread 1 at event #3 only returns from \
+                 creating a thread, so stack2 is thread 2, which runs next, which starts in that \
+                 turn: it is shown where the turn ends, at event #6, at its nanosleep call, \
+                 where it blocks or waits.\n"
+            )
+        );
+        assert_eq!(
+            telling_sentence(
+                "passing",
+                "stack1",
+                8,
+                &telling_event_at(&schedule, 8, tid(1)).unwrap()
+            ),
+            None
+        );
+    }
+
+    /// A creator is passed over only when its turn only finishes the
+    /// creation, and never for the thread it created: in a thread-start
+    /// race the creator's next steps are what the new thread races with. A
+    /// creator that goes on to make another call, or runs long after the
+    /// return, is a thread like any other, and a forked child, whose first
+    /// turn begins with the fork's return too, is not a creator. A first
+    /// turn the scheduler preempted is shown where it was preempted.
+    #[test]
+    fn a_creator_is_passed_over_only_when_it_only_finishes_creating_another_thread() {
+        use detcore_model::schedule::SyscallPhase::Posthook;
+        use detcore_model::schedule::SyscallPhase::Prehook;
+        use reverie::syscalls::Sysno;
+        let tid = DetTid::from_raw;
+        let epilogue = [
+            call(1, Sysno::clone, Posthook),
+            call(1, Sysno::rt_sigprocmask, Prehook),
+            call(1, Sysno::rt_sigprocmask, Posthook),
+            call(1, Sysno::futex, Prehook),
+        ];
+        let consumer = [
+            call(2, Sysno::futex, Posthook),
+            call(2, Sysno::read, Prehook),
+        ];
+        let deciding = [call(3, Sysno::nanosleep, Posthook), branch(3)];
+        let moved = |prefix: &[SchedEvent], creator: &[SchedEvent]| {
+            let without: Vec<SchedEvent> = [prefix, creator, &consumer, &deciding].concat();
+            moved_past(&without, Side::Without, prefix.len(), tid(3)).unwrap()
+        };
+        // Threads 2 and 3 ran before thread 1's clone: it only finishes
+        // creating another thread, and is passed over.
+        let before = [
+            call(2, Sysno::futex, Prehook),
+            call(3, Sysno::nanosleep, Prehook),
+            call(1, Sysno::clone, Prehook),
+        ];
+        assert_eq!(moved(&before, &epilogue).thread, tid(2));
+        // Thread 3 starts after the clone: thread 1 created it, and its
+        // turn after the return is what thread 3 races with.
+        let creates_three = [
+            call(2, Sysno::futex, Prehook),
+            call(1, Sysno::clone, Prehook),
+            branch(3),
+            call(3, Sysno::nanosleep, Prehook),
+        ];
+        let partner = moved(&creates_three, &epilogue);
+        assert_eq!(
+            (partner.thread, partner.event),
+            (tid(1), creates_three.len())
+        );
+        assert!(
+            partner
+                .why
+                .ends_with("; it returns from creating thread 3, which its next steps race with"),
+            "{}",
+            partner.why
+        );
+        // A creator that goes on to write, or to run long, is not passed over.
+        let mut writes = epilogue.to_vec();
+        writes.insert(3, call(1, Sysno::write, Prehook));
+        writes.insert(4, call(1, Sysno::write, Posthook));
+        assert_eq!(moved(&before, &writes).thread, tid(1));
+        let mut runs_long = epilogue.to_vec();
+        runs_long.insert(3, SchedEvent::branches(tid(1), 257));
+        assert_eq!(moved(&before, &runs_long).thread, tid(1));
+        let mut runs_briefly = epilogue.to_vec();
+        runs_briefly.insert(3, SchedEvent::branches(tid(1), 256));
+        assert_eq!(moved(&before, &runs_briefly).thread, tid(2));
+        // A forked child's first turn begins with the fork's return.
+        let child = [
+            call(4, Sysno::clone, Posthook),
+            call(4, Sysno::futex, Prehook),
+        ];
+        let without: Vec<SchedEvent> = [&before[..], &child, &consumer, &deciding].concat();
+        let partner = moved_past(&without, Side::Without, before.len(), tid(3)).unwrap();
+        assert_eq!((partner.thread, partner.event), (tid(4), before.len() + 1));
+        assert!(
+            partner
+                .why
+                .ends_with("at its futex call, where it blocks or waits"),
+            "{}",
+            partner.why
+        );
+        // A first turn that ends without entering a call was preempted.
+        let preempted = [branch(5), SchedEvent::branches(tid(5), 9)];
+        let without: Vec<SchedEvent> = [&before[..], &preempted, &deciding].concat();
+        let partner = moved_past(&without, Side::Without, before.len(), tid(3)).unwrap();
+        assert!(
+            partner
+                .why
+                .ends_with("where it was preempted, at an arbitrary instruction"),
+            "{}",
+            partner.why
+        );
+    }
+
+    /// Phase 6 takes stack2 where [`stack2_plan`] says: past a creator to
+    /// the thread the deciding turn moved, at the end of its first turn,
+    /// when another thread runs at the decision without the event; the first
+    /// thread whose turn differs when the deciding thread runs there either
+    /// way; the thread after its slice only when the continuations do not
+    /// differ.
+    #[test]
+    fn phase6_takes_stack2_where_the_plan_says() {
+        use detcore_model::schedule::SyscallPhase::Posthook;
+        use detcore_model::schedule::SyscallPhase::Prehook;
+        use reverie::syscalls::Sysno;
+        let tid = DetTid::from_raw;
+        // Another thread runs at the decision without the event.
+        let prefix = [
+            call(2, Sysno::futex, Prehook),
+            call(3, Sysno::nanosleep, Prehook),
+            call(1, Sysno::clone, Prehook),
+        ];
+        let creator = [
+            call(1, Sysno::clone, Posthook),
+            call(1, Sysno::futex, Prehook),
+        ];
+        let starter = [branch(5), call(5, Sysno::nanosleep, Prehook)];
+        let deciding = [call(3, Sysno::nanosleep, Posthook), branch(3)];
+        let without: Vec<SchedEvent> = [&prefix[..], &creator, &starter, &deciding].concat();
+        let plan = stack2_plan(tid(3), prefix.len(), &without, None);
+        let Stack2Plan::Instead {
+            at,
+            partner: Some(partner),
+        } = plan
+        else {
+            panic!("{plan:?}");
+        };
+        assert_eq!((at, partner.thread), (prefix.len() + 3, tid(5)));
+        // Without a creator or a new thread there, the decision itself.
+        let resumes = [
+            call(2, Sysno::futex, Posthook),
+            call(2, Sysno::read, Prehook),
+        ];
+        let without: Vec<SchedEvent> = [&prefix[..], &resumes, &deciding].concat();
+        assert_eq!(
+            stack2_plan(tid(3), prefix.len(), &without, None),
+            Stack2Plan::Instead {
+                at: prefix.len(),
+                partner: None
+            }
+        );
+        // The deciding thread runs there either way; thread 19's turn after
+        // it runs longer with the event.
+        let shared = [
+            call(3, Sysno::nanosleep, Posthook),
+            call(3, Sysno::futex, Prehook),
+            call(21, Sysno::futex, Posthook),
+            call(21, Sysno::futex, Prehook),
+        ];
+        let turn = |reads: usize| {
+            let mut turn = vec![call(19, Sysno::futex, Posthook)];
+            turn.extend(std::iter::repeat_n(
+                call(19, Sysno::clock_gettime, Prehook),
+                reads,
+            ));
+            turn.push(call(19, Sysno::futex, Prehook));
+            turn
+        };
+        let with: Vec<SchedEvent> = [&prefix[..], &shared, &turn(4)].concat();
+        let without: Vec<SchedEvent> = [&prefix[..], &shared, &turn(1)].concat();
+        let plan = stack2_plan(tid(3), prefix.len(), &without, Some(&with));
+        let Stack2Plan::Changed(changed) = plan else {
+            panic!("{plan:?}");
+        };
+        assert_eq!(
+            (changed.thread, changed.event),
+            (tid(19), prefix.len() + shared.len() + 2)
+        );
+        // Continuations that do not differ: the thread after its slice.
+        assert_eq!(
+            stack2_plan(tid(3), prefix.len(), &without, Some(&without)),
+            Stack2Plan::NextSlice {
+                index: prefix.len() + 2,
+                thread: tid(21)
+            }
+        );
+        assert_eq!(
+            stack2_plan(tid(3), without.len(), &without, None),
+            Stack2Plan::Nothing
+        );
     }
 
     /// A bisection trial replays its schedule with the callback checkpoints,
@@ -3686,13 +5140,13 @@ mod tests {
     #[test]
     fn a_replay_leaves_its_schedule_at_the_first_other_event() {
         let requested = events(&[3, 5, 3, 5, 7]);
-        assert_eq!(departure(&requested, &events(&[3, 5, 3, 5, 7]), 5), None);
+        assert_eq!(follow(&requested, &events(&[3, 5, 3, 5, 7]), 5).1, None);
         let mut other_count = events(&[3, 5, 3, 5, 7]);
         other_count[2].count = 99;
-        assert_eq!(departure(&requested, &other_count, 5), None);
+        assert_eq!(follow(&requested, &other_count, 5).1, None);
         let realized = events(&[3, 5, 9, 5, 7]);
         assert_eq!(
-            departure(&requested, &realized, 5),
+            follow(&requested, &realized, 5).1,
             Some(Departure::OtherEvent {
                 index: 2,
                 expected: requested[2].clone(),
@@ -3706,13 +5160,262 @@ mod tests {
             detcore_model::schedule::SyscallPhase::Posthook,
         );
         assert!(matches!(
-            departure(&requested, &other_op, 5),
+            follow(&requested, &other_op, 5).1,
             Some(Departure::OtherEvent { index: 1, .. })
         ));
-        assert_eq!(departure(&requested, &events(&[3, 5, 3, 5, 9]), 4), None);
+        assert_eq!(follow(&requested, &events(&[3, 5, 3, 5, 9]), 4).1, None);
         assert_eq!(
-            departure(&requested, &events(&[3, 5]), 5),
+            follow(&requested, &events(&[3, 5]), 5).1,
             Some(Departure::Ended { events: 2 })
+        );
+    }
+
+    /// A replay may record branch events its schedule leaves out (the
+    /// search's interleavings keep only the events both runs share) before
+    /// the thread's next event: it still follows the schedule, but the
+    /// events after such a branch sit at other positions, so a stack it took
+    /// by position there is not that event's. A branch event of another
+    /// thread is a departure. Before, the first such branch was reported as
+    /// the replay leaving its schedule, at event #74 of a 595-event pair.
+    #[test]
+    fn a_branch_event_the_schedule_leaves_out_is_no_departure() {
+        let tid = DetTid::from_raw;
+        let other = |thread: i32, rip: usize| SchedEvent {
+            dettid: tid(thread),
+            op: detcore_model::schedule::Op::OtherInstructions,
+            count: 1,
+            start_rip: None,
+            end_rip: detcore::types::InstructionPointer::new(rip),
+            end_time: None,
+        };
+        let requested = vec![
+            other(3, 0x10),
+            other(3, 0x20),
+            SchedEvent::branches(tid(5), 4),
+        ];
+        let realized = vec![
+            other(3, 0x10),
+            SchedEvent::branches(tid(3), 1598),
+            other(3, 0x20),
+            SchedEvent::branches(tid(5), 9),
+        ];
+        assert_eq!(follow(&requested, &realized, 3), (vec![0, 2, 3], None));
+        // A replay that records where a timer cut a slice the schedule
+        // records without it ran the same event.
+        let mut cut = realized.clone();
+        cut[3].end_rip = detcore::types::InstructionPointer::new(0x30);
+        assert_eq!(follow(&requested, &cut, 3), (vec![0, 2, 3], None));
+        assert!(
+            follow(&cut[..], &realized, 4).1.is_some(),
+            "the schedule's pointer must match"
+        );
+        assert_eq!(follow(&requested, &realized, 3).1, None);
+        let shifted = StackReplay {
+            finished: true,
+            met_target: false,
+            stacks: [None, None],
+            left_schedule: None,
+            shifted_at: Some(1),
+            ran: [None, None],
+            realized: realized.clone(),
+            realized_path: PathBuf::new(),
+        };
+        assert!(shifted.followed_through(0));
+        assert!(
+            !shifted.followed_through(1),
+            "positions after the branch moved"
+        );
+
+        let mut elsewhere = realized.clone();
+        elsewhere[1] = SchedEvent::branches(tid(9), 1598);
+        assert_eq!(
+            follow(&requested, &elsewhere, 3).1,
+            Some(Departure::OtherEvent {
+                index: 1,
+                expected: requested[1].clone(),
+                ran: elsewhere[1].clone(),
+            })
+        );
+    }
+
+    /// A replay that re-inserted a branch took its stacks one position
+    /// early, on other threads than the pair's: those stacks are not kept,
+    /// even under the caveat, and the opening does not call the pair a race.
+    /// Before, the thread it ran was looked up by requested event, which
+    /// always matched, and the report said "on threads 7 and 9, are RACING"
+    /// over stacks of threads 5 and 7.
+    #[test]
+    fn stacks_a_shifted_replay_took_on_other_threads_are_left_out() {
+        use detcore_model::schedule::SyscallPhase;
+        use reverie::syscalls::Sysno;
+        let tid = DetTid::from_raw;
+        let call =
+            |thread: i32, sysno| SchedEvent::syscall(tid(thread), sysno, SyscallPhase::Prehook);
+        let requested = vec![
+            call(5, Sysno::read),
+            call(7, Sysno::write),
+            call(9, Sysno::close),
+        ];
+        let realized = vec![
+            SchedEvent::branches(tid(5), 12),
+            call(5, Sysno::read),
+            call(7, Sysno::write),
+            call(9, Sysno::close),
+        ];
+        let (left_schedule, shifted_at, ran) = replay_positions(&requested, &realized, 2);
+        assert_eq!((left_schedule.clone(), shifted_at), (None, Some(0)));
+        assert_eq!(
+            ran,
+            [Some(tid(5)), Some(tid(7))],
+            "the positions the stacks were taken at"
+        );
+        let on = |thread: i32| -> PrettyBacktrace {
+            serde_json::from_value(serde_json::json!({
+                "thread_id": thread, "thread_name": null, "frames": []
+            }))
+            .unwrap()
+        };
+        let replay = |stacks: [Option<PrettyBacktrace>; 2]| StackReplay {
+            finished: true,
+            met_target: false,
+            stacks,
+            left_schedule: left_schedule.clone(),
+            shifted_at,
+            ran,
+            realized: realized.clone(),
+            realized_path: PathBuf::new(),
+        };
+        let shifted = replay([Some(on(5)), Some(on(7))]);
+        let none = replay([None, None]);
+        let threads = [tid(7), tid(9)];
+        assert_eq!(merge_stacks(&shifted, &none, 2, threads), [None, None]);
+        // A stack's own thread outranks the thread the replay is said to
+        // have run there.
+        let mut said = replay([Some(on(5)), Some(on(7))]);
+        said.ran = [Some(tid(7)), Some(tid(9))];
+        assert_eq!(merge_stacks(&said, &none, 2, threads), [None, None]);
+        let stacks = [Some(on(5)), Some(on(7))];
+        let (text, racing) = racing_pair_opening(threads, [stacks[0].as_ref(), stacks[1].as_ref()]);
+        assert!(!racing, "{text}");
+        assert!(
+            text.contains("stack1 was taken on thread 5, not thread 7"),
+            "{text}"
+        );
+
+        // A stack on its operation's thread from a shifted replay is kept
+        // with a caveat that names the re-inserted branches.
+        let kept = replay([Some(on(7)), Some(on(9))]);
+        let [first, _] = merge_stacks(&kept, &none, 2, threads);
+        let (stack, source) = first.unwrap();
+        assert_eq!(stack, on(7));
+        assert!(
+            source.contains("recorded branch events its schedule leaves out before this operation"),
+            "{source}"
+        );
+    }
+
+    /// Two replays that share a schedule prefix part at the first event at
+    /// which their realized schedules run different threads; a count that
+    /// differs on one thread is not that.
+    #[test]
+    fn realized_schedules_part_at_their_first_thread_difference() {
+        let passing = events(&[3, 3, 5, 3, 7]);
+        let mut failing = events(&[3, 3, 5, 7, 3, 3]);
+        failing[2].count = 99;
+        assert_eq!(first_thread_difference(&passing, &failing), Some(3));
+        assert_eq!(first_thread_difference(&passing, &passing[..4]), None);
+    }
+
+    /// The opening of an order-of-events report claims a race only when its
+    /// two stacks show two threads. Before, every such report opened "These
+    /// two operations, on different threads, are RACING", also with a stack
+    /// missing and with both stacks on one thread.
+    #[test]
+    fn the_order_of_events_opening_says_what_the_stacks_show() {
+        let tid = DetTid::from_raw;
+        let on = |thread: i32| -> PrettyBacktrace {
+            serde_json::from_value(serde_json::json!({
+                "thread_id": thread, "thread_name": null, "frames": []
+            }))
+            .unwrap()
+        };
+        let (three, five) = (on(3), on(5));
+        let (text, racing) = racing_pair_opening([tid(3), tid(5)], [Some(&three), Some(&five)]);
+        assert!(racing);
+        assert_eq!(
+            text,
+            "These two operations, on threads 3 and 5, are RACING with each other.\n"
+        );
+        let (text, racing) = racing_pair_opening([tid(3), tid(5)], [Some(&three), None]);
+        assert!(!racing);
+        assert!(text.contains("only one has a stack"), "{text}");
+        let (text, _) = racing_pair_opening([tid(3), tid(5)], [None, None]);
+        assert!(text.contains("neither has a stack"), "{text}");
+        let (text, racing) = racing_pair_opening([tid(3), tid(5)], [Some(&three), Some(&three)]);
+        assert!(!racing);
+        assert!(
+            text.contains("both stacks were taken on thread 3"),
+            "{text}"
+        );
+        let (text, racing) = racing_pair_opening([tid(3), tid(3)], [Some(&three), Some(&three)]);
+        assert!(!racing);
+        assert!(
+            text.contains("Both operations belong to thread 3"),
+            "{text}"
+        );
+        for text in [
+            racing_pair_opening([tid(3), tid(5)], [Some(&three), None]).0,
+            racing_pair_opening([tid(3), tid(3)], [Some(&three), Some(&three)]).0,
+        ] {
+            assert!(!text.contains("RACING"), "{text}");
+        }
+    }
+
+    /// When the replays could not follow their schedules, the report says
+    /// why: a schedule that cannot be realized there (the replay ran another
+    /// call), or branch events the schedules leave out.
+    #[test]
+    fn a_realized_pair_says_why_the_schedules_were_not_followed() {
+        let tid = DetTid::from_raw;
+        let replay = |left_schedule, shifted_at| StackReplay {
+            finished: true,
+            met_target: false,
+            stacks: [None, None],
+            left_schedule,
+            shifted_at,
+            ran: [None, None],
+            realized: Vec::new(),
+            realized_path: PathBuf::new(),
+        };
+        let mprotect = SchedEvent::syscall(
+            tid(11),
+            reverie::syscalls::Sysno::mprotect,
+            detcore_model::schedule::SyscallPhase::Prehook,
+        );
+        let munmap = SchedEvent::syscall(
+            tid(11),
+            reverie::syscalls::Sysno::munmap,
+            detcore_model::schedule::SyscallPhase::Prehook,
+        );
+        let diverged = replay(
+            Some(Departure::OtherEvent {
+                index: 750,
+                expected: mprotect,
+                ran: munmap,
+            }),
+            None,
+        );
+        let reason = realized_pair_reason(&diverged, &replay(None, None), 1730);
+        assert!(
+            reason.starts_with("the replay of the passing schedule ran")
+                && reason.contains("at event #750")
+                && reason.contains("cannot be realized there"),
+            "{reason}"
+        );
+        let reason = realized_pair_reason(&replay(None, Some(74)), &replay(None, Some(74)), 595);
+        assert!(
+            reason.contains("branch events the schedules leave out"),
+            "{reason}"
         );
     }
 
@@ -3739,7 +5442,10 @@ mod tests {
             met_target: false,
             stacks,
             left_schedule,
+            shifted_at: None,
             ran,
+            realized: Vec::new(),
+            realized_path: PathBuf::new(),
         };
         // The passing schedule runs thread 5's read at #1093, then thread 7's
         // close at #1094; the failing one the other way round.
@@ -4091,8 +5797,8 @@ mod tests {
         );
         for expected in [
             "from event #1 on, then thread 7 runs at event #4, and the run meets",
-            "then thread 5 runs at event #3, and the run does not",
-            "so stack1 and stack2 show where thread 3 is when its slice ends instead: at event #3 with the event, at event #2 without it.",
+            "then thread 5 runs at event #3 (stack2), and the run does not",
+            "so stack1 shows where thread 3 is when its slice ends with the event, at event #3, and stack2 is that next thread, without the event (where thread 3's slice ends at event #2).",
         ] {
             assert!(header.contains(expected), "no {expected:?} in\n{header}");
         }
