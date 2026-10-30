@@ -735,6 +735,29 @@ pub struct Config {
     #[clap(long)]
     pub die_on_desync: bool,
 
+    /// Once the schedule replayed from `--replay-schedule-from` runs out,
+    /// order the threads queued in turn at each priority by the virtual time
+    /// each has run since then, least first, and equal run times by least
+    /// recent selection, instead of in queue order. A thread's run time is
+    /// what its own clock has advanced since that point; a thread seen for
+    /// the first time, or runnable again after it was not, starts at no less
+    /// than the least run time of the runnable threads. That is all it
+    /// changes: a selected thread still runs until its slice ends, there is no
+    /// preemption on wakeup, and threads pushed to the front of the queue (a
+    /// timed wake) and pollers keep their places. Without it threads of equal
+    /// priority take turns, so a thread that only computes or reads the clock
+    /// keeps the CPU for a whole timeslice at each committing call of another.
+    /// It reads nothing from the recording and draws nothing at random, so
+    /// the rest of the run is as neutral as without it: what happens there
+    /// depends only on the replayed prefix.
+    #[clap(
+        long,
+        requires = "replay_schedule_from",
+        conflicts_with_all = ["chaos", "replay_exhausted_panic"]
+    )]
+    #[serde(default)]
+    pub replay_continue_fairly: bool,
+
     /// Given schedule events traced on recording or replaying, print the stack trace at the moment
     /// after the Nth event in the trace. Optionally, provide an output file into which the stack
     /// trace will be printed, otherwise it goes to stderr.
@@ -1913,6 +1936,9 @@ impl fmt::Display for Config {
         }
         if self.die_on_desync {
             write!(f, " --die-on-desync")?;
+        }
+        if self.replay_continue_fairly {
+            write!(f, " --replay-continue-fairly")?;
         }
         for (index, path) in &self.stacktrace_event {
             write!(f, " --stacktrace-event={}", index)?;
@@ -3171,7 +3197,9 @@ mod legacy_backend_json {
     /// `AF_UNIX` bind under host networking.
     /// `replay_adopted_seeds` came after it too: only the run's summary reads
     /// it, so it is never written and reads as unset.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 34] = [
+    /// `replay_continue_fairly` came after it too; only the scheduler reads
+    /// it, so it is never written and reads as false.
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 35] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -3206,6 +3234,7 @@ mod legacy_backend_json {
         "virtual_cpus",
         "notice_host_network_abstract_binds",
         "replay_adopted_seeds",
+        "replay_continue_fairly",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -3349,7 +3378,8 @@ mod legacy_backend_json {
                     | "replaying"
                     | "signal_delivery_check_fatal"
                     | "container_procfs"
-                    | "notice_host_network_abstract_binds",
+                    | "notice_host_network_abstract_binds"
+                    | "replay_continue_fairly",
                 ) => seed.deserialize(BoolDeserializer::new(false)).map(Some),
                 // Empty, as its serde default is.
                 Some("in_guest_reserved_signals") => {
@@ -3669,7 +3699,8 @@ mod legacy_backend_json {
                 | "annotated_priority_replay"
                 | "virtual_cpus"
                 | "notice_host_network_abstract_binds"
-                | "replay_adopted_seeds" => Ok(()),
+                | "replay_adopted_seeds"
+                | "replay_continue_fairly" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
         }
@@ -4406,7 +4437,8 @@ mod tests {
                 | "annotated_priority_replay"
                 | "virtual_cpus"
                 | "notice_host_network_abstract_binds"
-                | "replay_adopted_seeds" => {}
+                | "replay_adopted_seeds"
+                | "replay_continue_fairly" => {}
                 other => expected.push(other.to_owned()),
             }
         }
@@ -4430,10 +4462,11 @@ mod tests {
         // `work_span_report`, `signal_at`, `in_guest_signal_delivery`,
         // `annotated_priority_replay`, `virtual_cpus`,
         // `notice_host_network_abstract_binds`, `replay_adopted_seeds` and
-        // `strict_schedule_boundaries` none: fourteen more keys and thirty-two
-        // fewer, so eighteen keys fewer than fields.
+        // `replay_continue_fairly` and `strict_schedule_boundaries` none:
+        // fourteen more keys and thirty-three fewer, so nineteen keys fewer
+        // than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 19);
+        assert_eq!(fields.len(), keys.len() + 20);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
