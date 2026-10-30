@@ -17231,6 +17231,7 @@ impl Scheduler {
                 // GlobalState keeps the host-input records.
                 host_inputs: None,
                 host_inputs_changed: Vec::new(),
+                stdio_changed: Vec::new(),
             },
             info_reprio_descrip,
         ))

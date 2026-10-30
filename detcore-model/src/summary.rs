@@ -19,6 +19,7 @@ use serde::Serialize;
 
 use crate::host_input::HostInputChange;
 use crate::host_input::HostInputSet;
+use crate::host_input::StdioChange;
 use crate::pid::DetTid;
 use crate::syscall_histogram::SyscallHistogramSummary;
 use crate::time::LogicalTime;
@@ -222,6 +223,15 @@ pub struct RunSummary {
     /// the run replayed nothing. Not part of the human-readable summary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub host_inputs_changed: Vec<HostInputChange>,
+
+    /// The guest's standard descriptors whose kind (file, pipe, terminal, ...)
+    /// a schedule replay found different from the recording it replays, in
+    /// descriptor order (see [`crate::host_input::StdioChange`]); this run's
+    /// own kinds are in `host_inputs`. Empty when they match, when either run
+    /// did not look, or the run replayed nothing. Not part of the
+    /// human-readable summary.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stdio_changed: Vec<StdioChange>,
 }
 
 /// The seeds a schedule replay adopted from its recording: each is `Some`
@@ -321,6 +331,7 @@ impl RunSummary {
             adopted_seeds,
             host_inputs: _,
             host_inputs_changed: _,
+            stdio_changed: _,
         } = self;
         writeln!(f, "Final thread-tree was: {}", threads_descrip)?;
         writeln!(
