@@ -1205,6 +1205,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // config::tests::one_rcb_minimum_multiplies_like_detcores_pmu_epsilon (the
     // one-RCB --max-timeslice minimum multiplies like Detcore's PMU epsilon):
     // 1881 (1880 on main plus one).
+    // terminal_outcome_tests::terminal_outcomes_carry_their_status_and_class_line
+    // and config::tests::virtual_timeout_round_trips_but_never_enters_the_legacy_form
+    // (--virtual-timeout): 1882.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2006,6 +2009,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // ptrace_completion::tests::a_guest_deadlock_completes_with_its_status_and_the_captured_output
     // and error::tests::a_guest_deadlock_is_the_guests_outcome_only_once_the_run_finished:
     // 1125, listed.
+    // 1095, listed. (--virtual-timeout renamed the last three to
+    // tests::terminal_outcomes_use_their_own_exit_and_marker,
+    // ptrace_completion::tests::a_terminal_outcome_completes_with_its_status_and_the_captured_output
+    // and error::tests::a_terminal_outcome_is_the_guests_only_once_the_run_finished.)
+    // And --virtual-timeout's
+    // container::tests::a_deadline_exit_is_a_virtual_timeout_only_with_its_note,
+    // terminal_outcome_note::tests::a_virtual_timeout_noted_by_an_exiting_child_reaches_its_parent_once
+    // and run::virtual_timeout_parses_round_trips_and_is_refused_without_the_scheduler:
+    // 1128.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3291,6 +3303,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test::
     // a_deadlock_unwind_retires_the_remaining_threads_in_tid_order:
     // 2684, listed.
+    // And scheduler::test::a_virtual_timeout_stops_the_run_at_the_first_commit_past_its_bound
+    // and scheduler::test::a_virtual_timeout_is_not_recorded_once_no_thread_can_be_granted_a_turn
+    // (--virtual-timeout): 2686.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4635,6 +4650,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // outcome, tests/c/condvar_join_deadlock.c): 625, listed.
     // And a_guest_deadlock_that_kills_several_threads_verifies_at_parity: 626,
     // listed.
+    // And a_virtual_timeout_stops_a_guest_that_never_ends,
+    // a_virtual_timeout_the_guest_never_reaches_changes_nothing and
+    // a_virtual_timeout_verifies_as_the_same_stop_in_both_runs
+    // (--virtual-timeout, tests/c/virtual_timeout_loop.c; the node skips
+    // run_kvm_virtual_timeout_is_reported_from_the_childs_note): 629.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5189,6 +5209,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // test.cli_on_host selects both: 543.
     // And the same three guest-deadlock outcome tests: 544, listed.
     // And the same several-thread guest-deadlock parity test: 545, listed.
+    // And the same three --virtual-timeout tests (this node skips the KVM
+    // one too): 548.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5689,6 +5711,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same six scheduler PI units: 2719.
     // And the same guest-deadlock terminal-verdict unit: 2683, listed.
     // And the same unwind retirement unit: 2684, listed.
+    // And the same two --virtual-timeout scheduler units: 2686.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6102,6 +6125,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // plus two).
     // And the same --image environment unit test: 1116.
     // And the same four guest-deadlock outcome units: 1119, listed.
+    // And the same three --virtual-timeout units: 1122.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6316,6 +6340,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four host-input set tests: 1870, listed.
     // And the same detcore-model stdio unit: 1871.
     // And the same one-RCB minimum unit: 1867 (1866 on main plus one).
+    // And the same two --virtual-timeout detcore-model tests: 1868.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
