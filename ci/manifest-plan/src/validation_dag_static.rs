@@ -2065,6 +2065,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And metadata::tests::record_and_replay_register_sleeps_when_chosen: 1164.
     // And run::chaos_timed_wait_spread_parses_round_trips_and_is_refused_where_inert and
     // run::a_replay_under_another_timed_wait_spread_is_refused: 1166.
+    // Six analyze --max-memory unit tests (size parsing, the cgroup limits,
+    // the refusal, /proc fields, and the watchdog ending a process): 1127,
+    // listed.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6446,6 +6449,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three --sleep-registration units: 1157. And the same
     // record/replay registration unit: 1158.
     // And the same two --chaos-timed-wait-spread run tests: 1160.
+    // The same six analyze --max-memory unit tests: 1121, listed.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
