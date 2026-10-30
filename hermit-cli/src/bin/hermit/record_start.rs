@@ -54,10 +54,11 @@ use super::global_opts::GlobalOpts;
 use super::record_envelope::RecordEnvelope;
 use super::run::BaseEnv;
 use super::run::NetworkingMode;
-use super::run::apply_base_environment;
+use super::run::apply_base_and_explicit_environment;
 use super::run::is_elf_file;
 use super::run::parse_assignment;
 use super::run::path_resolution_visits_prefix;
+use super::run::warn_of_forced_sanitizer_options;
 use super::verify::ComparedRun;
 use super::verify::ComparisonOptions;
 use super::verify::LogCompareStrictness;
@@ -388,14 +389,35 @@ impl StartOpts {
             .map(|seconds| Duration::from_secs(seconds.get()))
     }
 
+    /// The recorded guest's command: [`Self::guest_command_as_given`] with the
+    /// sanitizers' leak check turned off, as `hermit run` gives it.
     fn guest_command(&self) -> Result<Command, Error> {
+        let mut command = self.guest_command_as_given()?;
+        command.turn_off_leak_check();
+        Ok(command)
+    }
+
+    /// The recorded guest's command, with the environment the user's options
+    /// give it.
+    fn guest_command_as_given(&self) -> Result<Command, Error> {
         let mut command = Command::new(self.program());
         command.args(&self.args);
         if let Some(workdir) = &self.workdir {
             command.current_dir(workdir);
         }
-        apply_base_environment(&mut command, &self.base_env, &self.env)?;
+        apply_base_and_explicit_environment(&mut command, &self.base_env, &self.env)?;
         Ok(command)
+    }
+
+    /// Prints the warning `hermit run` prints when turning off the
+    /// sanitizers' leak check turns a check off, once per command.
+    fn warn_of_forced_sanitizer_options(&self) {
+        if self.program.is_none() {
+            return;
+        }
+        if let Ok(command) = self.guest_command_as_given() {
+            warn_of_forced_sanitizer_options(&command, &self.env, || command.find_program().ok());
+        }
     }
 
     // AUTONOMOUS-BOT-IMPLEMENTED
@@ -628,6 +650,9 @@ impl StartOpts {
                     .context(format!("--cpu-profile x86-64-v3 refused: {refusal}"))
             })?;
         }
+        // Before the guest starts. A refusal further down, of an option
+        // combination, can still follow it.
+        self.warn_of_forced_sanitizer_options();
         if self.verify {
             validate_log_level(global)?;
             self.record_verify(global)

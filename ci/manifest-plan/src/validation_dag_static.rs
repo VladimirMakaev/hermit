@@ -2106,6 +2106,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_host_without_tmp_refuses_what_would_go_into_it and
     // a_mount_target_an_earlier_mount_provides_is_not_refused (a host without
     // /tmp or /etc/group, as Android): 1124, listed.
+    // And run::tests::the_sanitizer_warning_is_for_a_leak_check_turned_off and
+    // run::tests::only_a_leak_sanitizer_build_is_taken_for_one: 1098.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5017,6 +5019,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_of_a_deadlocked_chaos_run_deadlocks_at_the_recorded_round
     // and a_preemption_replay_of_a_deadlocked_chaos_run_deadlocks_at_the_recorded_round
     // (tests/c/lost_wakeup_deadlock.c): 606, listed.
+    // And sanitizer_options_keep_every_setting_but_the_leak_check,
+    // the_sanitizer_warning_is_said_once_per_command,
+    // a_run_without_sanitizers_gets_no_sanitizer_warning,
+    // an_asan_guest_under_hermit_keeps_the_users_options_as_natively and
+    // a_leak_reported_natively_is_named_by_the_warning_under_hermit: 606.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5656,6 +5663,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And prctl_set_ptracer_answers_as_the_host_kernel_does: 542.
     // And the same three guest-deadlock outcome tests: 523, listed.
     // And the same two deadlocked chaos-run replay tests: 525, listed.
+    // And the same five sanitizer-option tests: 525.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6668,6 +6676,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same twenty-six racing-access finder tests: 1177.
     // And the same four racing-accesses report tests: 1181.
     // And the same three host-layout units: 1118, listed.
+    // And the same two sanitizer-warning units: 1098.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
