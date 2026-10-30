@@ -360,6 +360,109 @@ pub(crate) struct TaskStat {
     /// zero for another process's file, whose accounting Detcore keeps in
     /// that process's own threads.
     pub(crate) cpu: TaskCpuTimes,
+    /// The task's memory layout ([`MemoryLayout`]): the kernel beneath's
+    /// where the kernel exec'd the guest's image itself, all zero for a
+    /// zombie, which has no mm, and on the backends where the kernel's mm is
+    /// not the image's (`Detcore::kernel_layout_is_the_images`).
+    pub(crate) layout: MemoryLayout,
+}
+
+/// A process's memory layout as its `stat` shows it to a permitted reader
+/// (`do_task_stat`, fs/proc/array.c:616-618 and 649-656 at v6.16): the code
+/// range (fields 26, 27), the start of the stack, where `argc` sits on the
+/// initial stack (28), the data range (45, 46), the start of the program
+/// break (47), and the spans of the argument and environment strings
+/// (48-51). Linux sets them at exec (`load_elf_binary`, `create_elf_tables`
+/// and `setup_arg_pages`), copies them at fork (`dup_mm`), and changes them
+/// otherwise only through `prctl(PR_SET_MM)`: each a guest system call, so
+/// the layout follows the guest's own history. A task without an mm (a
+/// zombie) shows zero in every field.
+///
+/// Fields 29 and 30 (`kstkesp`, `kstkeip`) are not part of it: Linux prints
+/// them only for a task that is exiting or dumping core and still has its mm
+/// (fs/proc/array.c:503-508), and no guest observes a task in that state
+/// under Detcore, whose turn selection waits for a dying thread's
+/// deregistration, which comes after its exit status and so after
+/// `exit_mm`. They are 0, as Linux shows them for every other task.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct MemoryLayout {
+    pub(crate) start_code: u64,
+    pub(crate) end_code: u64,
+    pub(crate) start_stack: u64,
+    pub(crate) start_data: u64,
+    pub(crate) end_data: u64,
+    pub(crate) start_brk: u64,
+    pub(crate) arg_start: u64,
+    pub(crate) arg_end: u64,
+    pub(crate) env_start: u64,
+    pub(crate) env_end: u64,
+}
+
+impl MemoryLayout {
+    /// The `stat` fields that show the layout, by Linux's numbering, in the
+    /// order of [`Self::values`].
+    pub(crate) const FIELDS: [usize; 10] = [26, 27, 28, 45, 46, 47, 48, 49, 50, 51];
+
+    /// The layout's values, in the order of [`Self::FIELDS`].
+    #[cfg(test)]
+    pub(crate) fn values(&self) -> [u64; 10] {
+        [
+            self.start_code,
+            self.end_code,
+            self.start_stack,
+            self.start_data,
+            self.end_data,
+            self.start_brk,
+            self.arg_start,
+            self.arg_end,
+            self.env_start,
+            self.env_end,
+        ]
+    }
+
+    /// The layout the kernel's `stat` line `line` shows, its fields counted
+    /// from the last `) ` as the kernel's name may hold either byte. `Err`
+    /// names why there is none: a line that is not a `stat` line, or the line
+    /// the kernel gives a reader not permitted to read the task's memory
+    /// (`ptrace_may_access`): `1 1 0` for fields 26-28 and zeros for 45-51
+    /// (fs/proc/array.c:616-618 and 649-658). A task with an mm always has a
+    /// nonzero start of the stack, so `0` there with that code range is the
+    /// refusal, never a layout. A reader in the task's own process is
+    /// always permitted (`__ptrace_may_access` admits its thread group), so
+    /// the refusal is not what it would see.
+    pub(crate) fn from_kernel_stat(line: &[u8]) -> Result<Self, &'static str> {
+        let malformed = "the kernel's stat line of the task does not parse";
+        let line = std::str::from_utf8(line).map_err(|_| malformed)?;
+        let comm_end = line.rfind(") ").ok_or(malformed)?;
+        // `fields[0]` is field 3, the state.
+        let fields = line[comm_end + 2..].split_whitespace().collect::<Vec<_>>();
+        let field = |number: usize| -> Result<u64, &'static str> {
+            fields
+                .get(number - 3)
+                .and_then(|text| text.parse::<u64>().ok())
+                .ok_or(malformed)
+        };
+        let layout = Self {
+            start_code: field(26)?,
+            end_code: field(27)?,
+            start_stack: field(28)?,
+            start_data: field(45)?,
+            end_data: field(46)?,
+            start_brk: field(47)?,
+            arg_start: field(48)?,
+            arg_end: field(49)?,
+            env_start: field(50)?,
+            env_end: field(51)?,
+        };
+        if (layout.start_code, layout.end_code, layout.start_stack) == (1, 1, 0) {
+            return Err(
+                "the kernel shows the tool only the placeholder layout of a task it may not read \
+                 (ptrace_may_access: a task that is not dumpable, read by a tool without \
+                 CAP_SYS_PTRACE in the task's user namespace)",
+            );
+        }
+        Ok(layout)
+    }
 }
 
 /// `stat`'s state letter for a task: `R` for the reader itself, which runs
@@ -411,21 +514,24 @@ fn flags(stat: &TaskStat) -> u64 {
 /// | 18, 19 | priority, nice | 20, 0: nice is inert under Detcore |
 /// | 20 | num_threads | the process's tasks |
 /// | 25 | rsslim | the process's `RLIMIT_RSS` soft limit |
+/// | 26-28 | startcode, endcode, startstack | the task's [`MemoryLayout`] |
 /// | 38 | exit_signal | the leader's, -1 for another thread |
 /// | 39 | processor | the task's virtual CPU, [`TaskStat::processor`] |
 /// | 40, 41 | rt_priority, policy | 0, 0 (`SCHED_OTHER`) |
+/// | 45-51 | startdata .. envend | the task's [`MemoryLayout`] |
 /// | 52 | exit_code | 0 |
 ///
 /// Every other field is 0: the fault counts (10-13), the guest time (43, 44),
 /// `itrealvalue` (21, always 0 in Linux), the start time (22), the memory
-/// sizes and addresses (23, 24, 26-30, 45-51), the four obsolete signal
+/// sizes (23, 24), `kstkesp` and `kstkeip` (29, 30, 0 in Linux but for a
+/// task exiting or dumping core, [`MemoryLayout`]), the four obsolete signal
 /// words (31-34, which the sanitizer zeroed on every backend before this),
 /// `wchan` (35), `nswap` and `cnswap` (36, 37) and the block-I/O delay
-/// (42). These are the fields `sanitize_stat` zeroed in the kernel's file
-/// before Detcore rendered it, with the last CPU (39), which is 0 on the
-/// single virtual CPU.
+/// (42). These are the fields `sanitize_stat` zeroes in the kernel's file,
+/// with the last CPU (39), which is 0 on the single virtual CPU.
 pub(crate) fn render_stat(stat: &TaskStat) -> Vec<u8> {
     let facts = &stat.facts;
+    let layout = &stat.layout;
     let mut line = format!("{} (", stat.pid).into_bytes();
     line.extend_from_slice(stat.comm.as_bytes());
     let exit_signal = if facts.leads {
@@ -465,10 +571,11 @@ pub(crate) fn render_stat(stat: &TaskStat) -> Vec<u8> {
         "0".to_owned(),
         // 25 rsslim
         stat.rsslim.to_string(),
-        // 26 startcode .. 37 cnswap
-        "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
+        // 26 startcode, 27 endcode, 28 startstack
+        layout.start_code.to_string(),
+        layout.end_code.to_string(),
+        layout.start_stack.to_string(),
+        // 29 kstkesp .. 37 cnswap
         "0".to_owned(),
         "0".to_owned(),
         "0".to_owned(),
@@ -483,17 +590,19 @@ pub(crate) fn render_stat(stat: &TaskStat) -> Vec<u8> {
         stat.processor.to_string(),
         "0".to_owned(),
         "0".to_owned(),
-        // 42 delayacct_blkio_ticks .. 51 env_end
+        // 42 delayacct_blkio_ticks, 43 guest_time, 44 cguest_time
         "0".to_owned(),
         "0".to_owned(),
         "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
-        "0".to_owned(),
+        // 45 start_data, 46 end_data, 47 start_brk, 48 arg_start,
+        // 49 arg_end, 50 env_start, 51 env_end
+        layout.start_data.to_string(),
+        layout.end_data.to_string(),
+        layout.start_brk.to_string(),
+        layout.arg_start.to_string(),
+        layout.arg_end.to_string(),
+        layout.env_start.to_string(),
+        layout.env_end.to_string(),
         // 52 exit_code
         "0".to_owned(),
     ];
@@ -554,6 +663,7 @@ mod tests {
             rsslim: RLIM_INFINITY,
             processor: 3,
             cpu: TaskCpuTimes::default(),
+            layout: MemoryLayout::default(),
         };
         let line = render_stat(&stat);
         let (comm, fields) = fields(&line);
@@ -613,6 +723,7 @@ mod tests {
                 children_user: ms(20),
                 children_system: ms(10) + LogicalTime::from_nanos(9_999_999),
             },
+            layout: MemoryLayout::default(),
         };
         let (_, fields) = fields(&render_stat(&stat));
         assert_eq!(fields[13..17], ["123", "0", "2", "1"], "{fields:?}");
@@ -636,6 +747,7 @@ mod tests {
             rsslim: 4096,
             processor: 0,
             cpu: TaskCpuTimes::default(),
+            layout: MemoryLayout::default(),
         };
         let (_, sibling_fields) = fields(&render_stat(&sibling));
         assert_eq!(sibling_fields.len(), 52);
@@ -677,6 +789,7 @@ mod tests {
             rsslim: RLIM_INFINITY,
             processor: 0,
             cpu: TaskCpuTimes::default(),
+            layout: MemoryLayout::default(),
         };
         let line = render_stat(&stat);
         assert!(line.starts_with(b"1 (a)b\n\\\xff c) R 0 "), "{line:?}");
@@ -806,5 +919,116 @@ mod tests {
             "the record's backends read no kernel name"
         );
         assert!(stat_comm(CommSource::Record, Err("none"), None).is_err());
+    }
+
+    fn layout() -> MemoryLayout {
+        MemoryLayout {
+            start_code: 0x555555554000,
+            end_code: 0x555555556000,
+            start_stack: 0x7fffffffe2d0,
+            start_data: 0x555555557df0,
+            end_data: 0x555555558010,
+            start_brk: 0x555555559000,
+            arg_start: 0x7fffffffe6a1,
+            arg_end: 0x7fffffffe6b0,
+            env_start: 0x7fffffffe6b0,
+            env_end: 0x7fffffffefe5,
+        }
+    }
+
+    /// The layout is shown where Linux shows the mm's values (fields 26-28
+    /// and 45-51), and `kstkesp` and `kstkeip` (29, 30) stay 0.
+    #[test]
+    fn stat_shows_the_memory_layout_in_its_fields() {
+        let stat = TaskStat {
+            pid: 7,
+            comm: TaskComm::new(b"probe"),
+            facts: facts(),
+            reader_is_task: true,
+            ppid: 3,
+            rsslim: RLIM_INFINITY,
+            processor: 0,
+            cpu: TaskCpuTimes::default(),
+            layout: layout(),
+        };
+        let (_, fields) = fields(&render_stat(&stat));
+        assert_eq!(fields.len(), 52, "{fields:?}");
+        for (field, value) in MemoryLayout::FIELDS.iter().zip(layout().values()) {
+            assert_eq!(fields[field - 1], value.to_string(), "field {field}");
+        }
+        assert_eq!(fields[28], "0", "kstkesp");
+        assert_eq!(fields[29], "0", "kstkeip");
+        // The fields around the layout keep their places.
+        assert_eq!(fields[24], RLIM_INFINITY.to_string(), "rsslim");
+        assert_eq!(fields[37], "17", "exit_signal");
+        assert_eq!(fields[51], "0", "exit_code");
+    }
+
+    /// The kernel's line gives the layout by its field numbers, counted from
+    /// the last `) `, whatever the name holds. A zombie's line, which has no
+    /// mm, gives all zeros; the placeholder a reader that may not read the
+    /// task gets (`1 1 0` and zeros) is refused, as is a line that does not
+    /// parse.
+    #[test]
+    fn the_layout_is_read_from_the_kernels_stat_line() {
+        let line = |name: &str, layout: [u64; 10]| {
+            let text = |values: &[u64]| {
+                values
+                    .iter()
+                    .map(u64::to_string)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            };
+            let (code_and_stack, data_to_env) = (text(&layout[..3]), text(&layout[3..]));
+            format!(
+                "12 ({name}) R 1 12 12 0 -1 4194304 90 0 0 0 0 0 0 0 20 0 1 0 2 2269184 \
+                 233 18446744073709551615 {code_and_stack} 0 0 0 0 0 0 0 0 0 17 3 \
+                 0 0 0 0 0 {data_to_env} 0\n"
+            )
+            .into_bytes()
+        };
+        assert_eq!(
+            MemoryLayout::from_kernel_stat(&line("a) b (c", layout().values())),
+            Ok(layout())
+        );
+        assert_eq!(
+            MemoryLayout::from_kernel_stat(&line("zombie", [0; 10])),
+            Ok(MemoryLayout::default())
+        );
+        assert!(
+            MemoryLayout::from_kernel_stat(&line("hidden", [1, 1, 0, 0, 0, 0, 0, 0, 0, 0]))
+                .is_err()
+        );
+        assert!(MemoryLayout::from_kernel_stat(b"12 (short) S 1 2 3\n").is_err());
+        assert!(MemoryLayout::from_kernel_stat(b"no name at all").is_err());
+        assert!(MemoryLayout::from_kernel_stat(b"12 (x) S \xff\n").is_err());
+    }
+
+    /// For a real process, this test's own, the kernel's layout is the one
+    /// the process sees: the start of the stack lies in the `[stack]`
+    /// mapping of `/proc/self/maps`, and this function in the code range.
+    #[test]
+    fn the_kernels_layout_of_a_process_is_its_own() {
+        let layout =
+            MemoryLayout::from_kernel_stat(&std::fs::read("/proc/self/stat").unwrap()).unwrap();
+        let maps = std::fs::read_to_string("/proc/self/maps").unwrap();
+        let stack = maps
+            .lines()
+            .find(|line| line.ends_with("[stack]"))
+            .expect("a [stack] mapping");
+        let (low, high) = stack.split_once(' ').unwrap().0.split_once('-').unwrap();
+        let low = u64::from_str_radix(low, 16).unwrap();
+        let high = u64::from_str_radix(high, 16).unwrap();
+        assert!(
+            (low..high).contains(&layout.start_stack),
+            "{layout:x?} {stack}"
+        );
+        let function = the_kernels_layout_of_a_process_is_its_own as fn() as usize as u64;
+        assert!(
+            (layout.start_code..layout.end_code).contains(&function),
+            "{layout:x?} {function:#x}"
+        );
+        assert!(layout.arg_start < layout.arg_end, "{layout:x?}");
+        assert_eq!(layout.arg_end, layout.env_start, "{layout:x?}");
     }
 }
