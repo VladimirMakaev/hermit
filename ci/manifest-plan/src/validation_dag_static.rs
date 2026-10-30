@@ -1259,6 +1259,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 1882, listed.
     // rewrite_exclusives_in_memory_never_enters_the_legacy_form: 1883.
+    // And detcore-model's watch::tests::a_watch_takes_an_address_a_length_and_an_access
+    // and config::tests::config_fingerprint_includes_the_watch_element_layout
+    // (--watch): 1889.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2166,6 +2169,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Re-derived with the node's own selection at the head of the aarch64
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 1105, listed.
+    // And run::watch_is_refused_where_it_could_not_arm_or_report (--watch):
+    // 1115.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3659,6 +3664,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Re-derived with the node's own selection at the head of the aarch64
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 2739, listed.
+    // And --watch's watch::tests::watches_become_reverie_specs_and_a_new_thread_starts_unarmed
+    // and a_hit_that_may_have_changed_the_guest_stops_the_run,
+    // access_trace::tests::watch_hits_are_capped_and_every_thread_is_summarized,
+    // watch_arming_tests' a_thread_arms_when_due_and_retries_while_it_blocks_sigtrap
+    // and a_watch_that_could_move_the_schedule_or_cannot_be_written_is_refused,
+    // and scheduler's
+    // a_peer_alive_when_watches_become_due_is_summarized_if_killed_parked:
+    // 2700, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5142,6 +5155,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 641, listed.
     // And this branch's CLI tests: 623.
+    // And access_trace's watch_hits_name_both_writers_and_leave_the_run_unchanged,
+    // a_thread_that_blocks_sigtrap_never_arms_and_the_trace_says_so,
+    // a_hit_that_resets_an_ignored_sigtrap_stops_the_run and
+    // a_watch_survives_exec_into_an_image_that_stores_first (--watch): 631.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5795,6 +5812,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 560, listed.
     // And the same tests: 542.
+    // And the same four --watch tests, not excluded: 550.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6383,6 +6401,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Re-derived with the node's own selection at the head of the aarch64
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 2739, listed.
+    // And the same six --watch units: 2720, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6841,6 +6860,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 1172, listed.
     // And the same unit tests as test.hermit_unit: 1115.
+    // And the same --watch refusal test: 1118.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -7086,6 +7106,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 1868, listed.
     // And the same legacy-form unit: 1869.
+    // And the same two --watch detcore-model tests: 1875.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
