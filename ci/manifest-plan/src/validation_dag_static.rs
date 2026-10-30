@@ -1196,6 +1196,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's six access_trace::tests (record round trip, on-disk
     // spelling, out_bytes hex, returned_digest, reader refusals, conflict
     // rules), the access trace's record types: 1886.
+    // And detcore-model's
+    // collections::replay_cursor::tests::drop_discards_the_head_and_keeps_the_rest
+    // (a replay resync drops the events it skips): 1881, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3219,6 +3222,18 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // peer): 2698, listed.
     // And syscalls::scm_rights' an_unattributed_connect_leaves_every_name_unknown
     // and a_listener_whose_name_was_bound_again_pairs_nothing: 2700, listed.
+    // And replayer::tests::an_observed_rip_the_trace_lacks_is_not_a_hard_desync,
+    // replayer::tests::a_blocked_syscall_retry_is_recognized_only_for_its_thread
+    // and scheduler::test::a_replayed_retry_is_not_backed_off_as_a_poller (a
+    // schedule replay follows its recording through a multithreaded program):
+    // 2698, listed.
+    // And replayer::tests::stacktrace_positions_follow_the_schedule_and_continue_past_its_end,
+    // strict_boundary_admission_tests::a_stacktrace_index_past_a_legacy_schedule_is_kept_for_the_run_after_it,
+    // scheduler::test::a_replayed_stacktrace_event_prints_at_its_schedule_position
+    // and scheduler::test::a_replay_leaves_its_record_at_its_first_hard_desync
+    // (replay stack positions and the unguided-child warning): 2702, listed.
+    // And scheduler::test::a_replay_resuming_a_sleeper_moves_time_to_its_deadline
+    // (a replay wakes a sleeper where its recording did): 2703, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5541,6 +5556,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same queued-rights unit: 2696, listed.
     // And the same two AF_UNIX connection units: 2698, listed.
     // And the same two unattributed-connection units: 2700, listed.
+    // And the same three schedule-replay units: 2698, listed.
+    // And the same four replay-diagnostics units: 2702, listed.
+    // And the same recorded-wake unit: 2703, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6158,6 +6176,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // hosted exclusions unchanged: 1869, listed.
     // Six regular-crate tests the pin missed, as cargo nextest list counts
     // the cell at this head: 1872.
+    // And the same replay-cursor drop test: 1867, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
