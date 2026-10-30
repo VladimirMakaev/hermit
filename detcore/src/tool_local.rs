@@ -4553,6 +4553,31 @@ pub struct ThreadState<T> {
     #[serde(skip)]
     pub(crate) receive_geometry: Option<Option<crate::syscalls::scm_rights::ReceiveGeometry>>,
 
+    /// The memory the vectored call this thread just ran copied when it
+    /// began (`EntryImport`), when another thread has rewritten it since: the
+    /// observers that read the call's arguments after it returns
+    /// (`--detlog-io-buffers`) read them as the kernel's copy held them. Set
+    /// as the call's internal polling ends and taken as the call returns.
+    #[serde(skip)]
+    pub(crate) entry_import: Option<Box<crate::syscalls::entry_import::EntryImport>>,
+
+    /// The memory the vectored call this thread is polling copied when it
+    /// began (`EntryImport`), while `retry_nonblocking_syscall` or
+    /// `execute_blocking_pipe_writev` polls it: each attempt runs with it put
+    /// back. Held here rather than in the polling future, which every
+    /// syscall's future contains (`hot_path_futures_stay_small`). Moved to
+    /// `entry_import` as the polling ends or, after an early error return
+    /// from `execute_blocking_pipe_writev`, left in place until the next
+    /// syscall clears it; nothing reads it before then.
+    #[serde(skip)]
+    pub(crate) polled_entry_import: Option<Box<crate::syscalls::entry_import::EntryImport>>,
+
+    /// What another thread wrote over the polled call's memory
+    /// (`polled_entry_import`), from the attempt's reinstatement until it is
+    /// put back after the attempt; here for the same reason.
+    #[serde(skip)]
+    pub(crate) polled_entry_displaced: crate::syscalls::entry_import::InFlightDisplaced,
+
     /// The `sendmsg` or `sendmmsg` this thread is running, while its
     /// `SCM_RIGHTS` descriptors matter to the `/proc` directories Detcore
     /// serves on placeholders: `Some` from the handler's inspection
@@ -5784,6 +5809,9 @@ impl<T> ThreadState<T> {
             signal_task_identity: None,
             open_file_creator: None,
             receive_geometry: None,
+            entry_import: None,
+            polled_entry_import: None,
+            polled_entry_displaced: Default::default(),
             send_inspection: None,
             traced_call: Default::default(),
             watch: Default::default(),
