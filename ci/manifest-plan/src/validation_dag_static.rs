@@ -3212,6 +3212,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And sigkill_deregistration_tests::a_death_already_accounted_waits_for_nothing
     // (a death a SIGKILL or an earlier exit accounts for is not waited for):
     // 2686, listed.
+    // And fd's queued_rights_are_taken_in_order (the descriptors a socket's
+    // SCM_RIGHTS messages carried, taken in order at the receipt): 2696, listed.
+    // And syscalls::scm_rights' unix_socket_names_are_abstract_names_and_absolute_paths
+    // and unix_connections_are_accepted_in_order (an accepted connection's
+    // peer): 2698, listed.
+    // And syscalls::scm_rights' an_unattributed_connect_leaves_every_name_unknown
+    // and a_listener_whose_name_was_bound_again_pairs_nothing: 2700, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3314,7 +3321,23 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // negative_count_on_unrecorded_received_descriptors): 163.
     // And tight_stack_received_inotify's test that an inotify descriptor
     // received and read on a tight stack is recorded and renumbered: 164.
-    ("test.detcore_misc", 164),
+    // And scm_rights' seven tests of descriptors received over SCM_RIGHTS
+    // (an alias's blocking state through recvmsg and recvmmsg, an eventfd
+    // alias's counter, an alias's own MSG_CMSG_CLOEXEC, a random device and a
+    // rendered procfs file from a child): 171.
+    // And scm_rights' two tests of the send-time queue (a pipe end from a
+    // process that keeps it; a peek, a truncated receive and a discarded
+    // message): 173.
+    // And scm_rights_over_a_connection_to_an_own_listener: 174.
+    // And scm_rights' eventfd_after_a_released_one, recvmmsg_peek and
+    // long_stream_message (a queue out of lockstep joins no anonymous inode;
+    // peeked entries; a message split across buffers): 177.
+    // And scm_rights_over_a_connection_from_a_child: 178.
+    // And scm_rights' connection_through_a_relative_path, addressed_datagram
+    // and reconnected_datagram_socket (no anonymous inode joins over a
+    // pairing Detcore could not follow): 181.
+    // And scm_rights_connection_from_a_chroot: 182.
+    ("test.detcore_misc", 182),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -5105,7 +5128,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two A+ tests: 159.
     // And the same four F0a readdir_order variants: 163.
     // And the same tight-stack received-inotify test: 164.
-    ("test.detcore_misc_on_host", 164),
+    // And the same seven SCM_RIGHTS descriptor tests: 171.
+    // And the same two send-time queue tests: 173.
+    // And the same connection test: 174.
+    // And the same three queue-order tests: 177.
+    // And the same child-connection test: 178.
+    // And the same three unfollowed-pairing tests: 181.
+    // And the same chroot connection test: 182.
+    ("test.detcore_misc_on_host", 182),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).
@@ -5503,6 +5533,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same recorded scheduler-seed unit: 2696, listed.
     // And the same three signal-death units: 2685, listed.
     // And the same already-accounted death unit: 2686, listed.
+    // And the same queued-rights unit: 2696, listed.
+    // And the same two AF_UNIX connection units: 2698, listed.
+    // And the same two unattributed-connection units: 2700, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
