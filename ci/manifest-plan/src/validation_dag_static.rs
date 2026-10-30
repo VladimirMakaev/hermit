@@ -3607,6 +3607,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the scheduler units
     // a_prehook_switch_hands_a_backgrounded_call_its_turn_before_deferred_threads
     // and only_a_prehook_switch_leaves_its_thread_a_call_to_carry_out: 2684,
+    // And the scheduler unit
+    // a_replayed_sigchld_waits_behind_genuine_work_but_not_a_replay_held_poller: 2683,
+    // a_replayed_sigchld_waits_behind_genuine_work_but_not_a_replay_held_poller
+    // and a_pending_poll_backoff_keeps_a_replayed_sigchld_parked: 2684, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6307,6 +6311,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two units: 2697.
     // And preemptions::tests::a_drawn_chaos_timeslice_is_seeded_log_uniform_and_recorded: 2698.
     // And the same two prehook-handoff scheduler units: 2684, listed.
+    // And the same replayed-SIGCHLD scheduler unit: 2683, listed.
+    // And the same two replayed-SIGCHLD scheduler units: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
