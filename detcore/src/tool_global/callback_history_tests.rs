@@ -387,7 +387,10 @@ async fn legacy_callback_close_trial(
     assert_eq!(guest.thread.callback_history.progress().count, 13);
     let mut scheduler = state.sched.lock().unwrap();
     assert!(scheduler.callback_history_active);
-    assert_eq!(scheduler.callback_progress[&tid], guest.thread.callback_history.progress());
+    assert_eq!(
+        scheduler.callback_progress[&tid],
+        guest.thread.callback_history.progress()
+    );
     assert!(
         scheduler
             .callback_checkpoints
@@ -485,18 +488,22 @@ async fn legacy_callback_history_restores_actual_progress_after_same_leader_relo
             writer.insert_schedevent(SchedEvent::branches(leader, 10));
             writer.insert_schedevent(SchedEvent::branches(leader, 7));
             if annotated {
-                use crate::preemptions::callback_history::{Origin, Site};
+                use crate::preemptions::callback_history::Origin;
+                use crate::preemptions::callback_history::Site;
                 use crate::slice_boundary::callbacks::Callback;
                 let at = LogicalTime::from_nanos(100);
                 writer.insert_reprioritization(leader, at, 0, DEFAULT_PRIORITY, DEFAULT_PRIORITY);
-                writer.insert_callback_checkpoint(leader, Origin {
-                    callback: Callback::PmuTimer,
-                    site: Site::Prehook,
-                    progress: 17,
-                    last_op: Some(Op::Branch),
-                    time: at,
-                    rcbs: 0,
-                });
+                writer.insert_callback_checkpoint(
+                    leader,
+                    Origin {
+                        callback: Callback::PmuTimer,
+                        site: Site::Prehook,
+                        progress: 17,
+                        last_op: Some(Op::Branch),
+                        time: at,
+                        rcbs: 0,
+                    },
+                );
             }
             std::fs::write(&path, writer.into_string()).unwrap();
         }
@@ -513,8 +520,14 @@ async fn legacy_callback_history_restores_actual_progress_after_same_leader_relo
         config.validate();
         let state = GlobalState::initialize(&config, false);
         assert_eq!(state.sched.lock().unwrap().callback_history_active, active);
-        let loaded_points = state.sched.lock().unwrap().callback_checkpoints
-            .get(&leader).map(|points| points.iter().cloned().collect::<Vec<_>>()).unwrap_or_default();
+        let loaded_points = state
+            .sched
+            .lock()
+            .unwrap()
+            .callback_checkpoints
+            .get(&leader)
+            .map(|points| points.iter().cloned().collect::<Vec<_>>())
+            .unwrap_or_default();
         assert_eq!(loaded_points.len(), usize::from(annotated));
         let tool: Detcore = Detcore::new(Tid::from_raw(leader.as_raw()), &config);
         let new_guest = || LegacyDeadlineGuest {
@@ -547,16 +560,28 @@ async fn legacy_callback_history_restores_actual_progress_after_same_leader_relo
         )
         .await;
         assert_eq!(old.thread.callback_history.is_active(), active);
-        let inactive = bincode::serde::encode_to_vec(&old.thread.callback_history, bincode::config::legacy()).unwrap();
+        let inactive =
+            bincode::serde::encode_to_vec(&old.thread.callback_history, bincode::config::legacy())
+                .unwrap();
         let mut event = SchedEvent::branches(leader, 10);
         event.end_time = Some(old.thread.thread_logical_time.as_nanos());
         super::trace_schedevent(&mut old, event, false).await;
         let observed = old.thread.callback_history.progress();
         if active {
             assert_eq!(observed.count, 10);
-            assert_eq!(state.sched.lock().unwrap().callback_progress[&leader], observed);
+            assert_eq!(
+                state.sched.lock().unwrap().callback_progress[&leader],
+                observed
+            );
         } else {
-            assert_eq!(bincode::serde::encode_to_vec(&old.thread.callback_history, bincode::config::legacy()).unwrap(), inactive);
+            assert_eq!(
+                bincode::serde::encode_to_vec(
+                    &old.thread.callback_history,
+                    bincode::config::legacy()
+                )
+                .unwrap(),
+                inactive
+            );
             assert!(state.sched.lock().unwrap().callback_progress.is_empty());
         }
         let preserved_history = old.thread.callback_history.clone();
@@ -590,30 +615,46 @@ async fn legacy_callback_history_restores_actual_progress_after_same_leader_relo
         {
             let responses = successor.responses.lock().unwrap();
             let carries_history = responses.iter().any(|response| {
-                    let GlobalResponse::Granted(response) = response else {
-                        return false;
-                    };
-                    let GlobalResponse::WithDeadline(_, response) = response.as_ref() else {
-                        return false;
-                    };
-                    let GlobalResponse::WithCallbackHistory(startup, response) = response.as_ref()
-                    else {
-                        return false;
-                    };
-                    startup.progress == observed
-                        && startup.checkpoints == loaded_points
-                        && matches!(response.as_ref(), GlobalResponse::StartNewThread(None, None))
-                });
-            assert_eq!(carries_history, active, "actual startup carries and consumes active history with its deadline: {responses:?}");
+                let GlobalResponse::Granted(response) = response else {
+                    return false;
+                };
+                let GlobalResponse::WithDeadline(_, response) = response.as_ref() else {
+                    return false;
+                };
+                let GlobalResponse::WithCallbackHistory(startup, response) = response.as_ref()
+                else {
+                    return false;
+                };
+                startup.progress == observed
+                    && startup.checkpoints == loaded_points
+                    && matches!(
+                        response.as_ref(),
+                        GlobalResponse::StartNewThread(None, None)
+                    )
+            });
+            assert_eq!(
+                carries_history, active,
+                "actual startup carries and consumes active history with its deadline: {responses:?}"
+            );
         }
         let mut event = SchedEvent::branches(leader, 7);
         event.end_time = Some(successor.thread.thread_logical_time.as_nanos());
         super::trace_schedevent(&mut successor, event, false).await;
         if active {
             assert_eq!(successor.thread.callback_history.progress().count, 17);
-            assert_eq!(state.sched.lock().unwrap().callback_progress[&leader].count, 17);
+            assert_eq!(
+                state.sched.lock().unwrap().callback_progress[&leader].count,
+                17
+            );
         } else {
-            assert_eq!(bincode::serde::encode_to_vec(&successor.thread.callback_history, bincode::config::legacy()).unwrap(), inactive);
+            assert_eq!(
+                bincode::serde::encode_to_vec(
+                    &successor.thread.callback_history,
+                    bincode::config::legacy()
+                )
+                .unwrap(),
+                inactive
+            );
             assert!(state.sched.lock().unwrap().callback_progress.is_empty());
         }
         if recording {
@@ -687,7 +728,10 @@ async fn legacy_callback_history_old_chaos_replay_record_flags_make_no_authority
 // software checkpoint at this callback performs its administrative turn.
 async fn legacy_callback_branch_deadline_trial(annotated: bool, owner_switch: bool) {
     use reverie::Tool;
-    use crate::preemptions::callback_history::{Origin, Site, Startup};
+
+    use crate::preemptions::callback_history::Origin;
+    use crate::preemptions::callback_history::Site;
+    use crate::preemptions::callback_history::Startup;
     use crate::slice_boundary::callbacks::Callback;
 
     let dir = tempfile::tempdir().unwrap();
@@ -724,64 +768,103 @@ async fn legacy_callback_branch_deadline_trial(annotated: bool, owner_switch: bo
     writer.insert_schedevent(SchedEvent::branches(tid, 1));
     writer.insert_reprioritization(tid, at, 10, DEFAULT_PRIORITY, DEFAULT_PRIORITY);
     if annotated {
-        writer.insert_callback_checkpoint(tid, Origin {
-            callback: Callback::PmuTimer,
-            site: Site::Prehook,
-            progress: 10,
-            last_op: Some(Op::Branch),
-            time: at,
-            rcbs: 10,
-        });
+        writer.insert_callback_checkpoint(
+            tid,
+            Origin {
+                callback: Callback::PmuTimer,
+                site: Site::Prehook,
+                progress: 10,
+                last_op: Some(Op::Branch),
+                time: at,
+                rcbs: 10,
+            },
+        );
     }
     std::fs::write(&path, writer.into_string()).unwrap();
     let (config, state, tid, process) = cancellation_test_state_with_config(config);
     install_test_registration(&state, tid, Ivar::new());
-    state.past_first_execve.store(true, std::sync::atomic::Ordering::SeqCst);
+    state
+        .past_first_execve
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let mut thread = crate::ThreadState::new(tid, &config, ());
     thread.detpid = Some(process);
     thread.past_global_first_execve = true;
     thread.next_timeslice(&config);
     if annotated {
-    thread.callback_history.install(Startup {
-        checkpoints: state.sched.lock().unwrap().callback_checkpoints
-            .get(&tid).map(|points| points.iter().cloned().collect()).unwrap_or_default(),
-        ..Startup::default()
-    });
+        thread.callback_history.install(Startup {
+            checkpoints: state
+                .sched
+                .lock()
+                .unwrap()
+                .callback_checkpoints
+                .get(&tid)
+                .map(|points| points.iter().cloned().collect())
+                .unwrap_or_default(),
+            ..Startup::default()
+        });
     }
     let mut guest = LegacyDeadlineGuest {
         inner: ExternalRegistrationGuest {
-            global: &state, config: &config, thread,
-            requests: Mutex::new(Vec::new()), post_exec: false,
-            ppid: None, private_memory: None,
+            global: &state,
+            config: &config,
+            thread,
+            requests: Mutex::new(Vec::new()),
+            post_exec: false,
+            ppid: None,
+            private_memory: None,
         },
-        clock_reads: 0, reported_rcbs: 10, timers: Vec::new(),
+        clock_reads: 0,
+        reported_rcbs: 10,
+        timers: Vec::new(),
         responses: Mutex::new(Vec::new()),
     };
     let tool: Detcore = Detcore::new(Tid::from_raw(tid.as_raw()), &config);
     let token = {
         let mut pre = Box::pin(tool.pre_handler_hook_observed(
-            &mut guest, true, crate::CheckIn::Event, Some(Callback::PmuTimer),
+            &mut guest,
+            true,
+            crate::CheckIn::Event,
+            Some(Callback::PmuTimer),
         ));
         let mut previous = Err(crate::scheduler::SkipTurn);
         if owner_switch {
             assert!(futures::poll!(&mut pre).is_pending());
             let request = state.sched.lock().unwrap().next_turns[&tid]
-                .req.try_read().unwrap().unwrap();
+                .req
+                .try_read()
+                .unwrap()
+                .unwrap();
             assert!(request.resources.contains_key(&ResourceID::TraceReplay));
-            state.sched.lock().unwrap().thread_tree.add_child(tid, peer, false);
+            state
+                .sched
+                .lock()
+                .unwrap()
+                .thread_tree
+                .add_child(tid, peer, false);
             install_test_registration(&state, peer, Ivar::new());
             let mut peer_thread = crate::ThreadState::new(peer, &config, ());
             peer_thread.detpid = Some(process);
             let mut peer_guest = ExternalRegistrationGuest {
-                global: &state, config: &config, thread: peer_thread,
-                requests: Mutex::new(Vec::new()), post_exec: false,
-                ppid: None, private_memory: None,
+                global: &state,
+                config: &config,
+                thread: peer_thread,
+                requests: Mutex::new(Vec::new()),
+                post_exec: false,
+                ppid: None,
+                private_memory: None,
             };
-            let mut peer_request = Box::pin(super::resource_request(&mut peer_guest, Resources::new(peer)));
+            let mut peer_request = Box::pin(super::resource_request(
+                &mut peer_guest,
+                Resources::new(peer),
+            ));
             assert!(futures::poll!(&mut peer_request).is_pending());
             let granted = crate::scheduler::do_a_turn_blocking(
-                state.sched.clone(), state.global_time.clone(), &previous,
-            ).await.unwrap();
+                state.sched.clone(),
+                state.global_time.clone(),
+                &previous,
+            )
+            .await
+            .unwrap();
             assert_eq!(granted.tid, peer);
             peer_request.await;
             // The real peer event transfers the cursor back to A, whose real
@@ -789,12 +872,20 @@ async fn legacy_callback_branch_deadline_trial(annotated: bool, owner_switch: bo
             peer_guest.thread.thread_logical_time.add_syscall();
             let mut observed_peer = peer_event;
             observed_peer.end_time = Some(peer_guest.thread.thread_logical_time.as_nanos());
-            let mut peer_trace = Box::pin(super::trace_schedevent(&mut peer_guest, observed_peer, false));
+            let mut peer_trace = Box::pin(super::trace_schedevent(
+                &mut peer_guest,
+                observed_peer,
+                false,
+            ));
             assert!(futures::poll!(&mut peer_trace).is_pending());
             previous = Ok(granted);
             let resumed = crate::scheduler::do_a_turn_blocking(
-                state.sched.clone(), state.global_time.clone(), &previous,
-            ).await.unwrap();
+                state.sched.clone(),
+                state.global_time.clone(),
+                &previous,
+            )
+            .await
+            .unwrap();
             assert_eq!(resumed.tid, tid);
             assert!(resumed.resources.contains_key(&ResourceID::TraceReplay));
             previous = Ok(resumed);
@@ -805,54 +896,95 @@ async fn legacy_callback_branch_deadline_trial(annotated: bool, owner_switch: bo
         if annotated {
             assert!(futures::poll!(&mut pre).is_pending());
             let request = state.sched.lock().unwrap().next_turns[&tid]
-                .req.try_read().unwrap().unwrap();
+                .req
+                .try_read()
+                .unwrap()
+                .unwrap();
             assert!(request.callback_checkpoint.is_some());
             let skipped = crate::scheduler::do_a_turn_blocking(
-                state.sched.clone(), state.global_time.clone(), &previous,
-            ).await;
+                state.sched.clone(),
+                state.global_time.clone(),
+                &previous,
+            )
+            .await;
             assert!(skipped.is_err());
             let empty = crate::scheduler::do_a_turn_blocking(
-                state.sched.clone(), state.global_time.clone(), &skipped,
-            ).await.unwrap();
+                state.sched.clone(),
+                state.global_time.clone(),
+                &skipped,
+            )
+            .await
+            .unwrap();
             assert_eq!(empty.tid, tid);
             assert!(empty.resources.is_empty());
         }
         pre.await
     };
     assert_eq!(guest.thread.thread_logical_time.as_nanos(), at);
-    assert_eq!(guest.thread.end_of_timeslice, Some(deadline), "cursor-owned logical deadline; annotated={annotated}, owner_switch={owner_switch}");
+    assert_eq!(
+        guest.thread.end_of_timeslice,
+        Some(deadline),
+        "cursor-owned logical deadline; annotated={annotated}, owner_switch={owner_switch}"
+    );
     assert_eq!(guest.thread.max_timeslice_end, Some(deadline));
-    assert_eq!(guest.thread.replay_rcb_end, None, "legacy branch guidance does not install strict RCB authority");
-    tool.post_handler_hook_observed(&mut guest, crate::CheckIn::Event, token).await;
+    assert_eq!(
+        guest.thread.replay_rcb_end, None,
+        "legacy branch guidance does not install strict RCB authority"
+    );
+    tool.post_handler_hook_observed(&mut guest, crate::CheckIn::Event, token)
+        .await;
     assert_eq!(guest.timers.len(), 1);
     assert!(matches!(guest.timers[0], reverie::TimerSchedule::Rcbs(90)));
     assert_eq!(guest.thread.last_rcb_timer, Some(90));
     // Feed the PMU result through the real update/event path, without entering
     // another expiry hook: this proves the next observed branch matches.
     guest.reported_rcbs = 100;
-    let events = tool.update_logical_time_rcbs(&mut guest, true).await.unwrap();
+    let events = tool
+        .update_logical_time_rcbs(&mut guest, true)
+        .await
+        .unwrap();
     assert_eq!(events.len(), 1);
     assert_eq!((events[0].op, events[0].count), (Op::Branch, 90));
-    for event in events { super::trace_schedevent(&mut guest, event, false).await; }
+    for event in events {
+        super::trace_schedevent(&mut guest, event, false).await;
+    }
     let scheduler = state.sched.lock().unwrap();
     let replayer = scheduler.replayer.as_ref().unwrap();
-    assert!(replayer.desync_counts.values().all(|stats| stats.soft == 0 && stats.hard == 0));
+    assert!(
+        replayer
+            .desync_counts
+            .values()
+            .all(|stats| stats.soft == 0 && stats.hard == 0)
+    );
     assert_eq!(replayer.cursor.peek().unwrap().count, 1);
-    assert!(scheduler.callback_checkpoints.values().all(|points| points.is_empty()));
+    assert!(
+        scheduler
+            .callback_checkpoints
+            .values()
+            .all(|points| points.is_empty())
+    );
 }
 
 #[tokio::test]
 async fn legacy_callback_checkpoint_preserves_continue_branch_deadline() {
     tokio::time::timeout(Duration::from_secs(3), async {
-        for annotated in [false, true] { legacy_callback_branch_deadline_trial(annotated, false).await; }
-    }).await.expect("bounded real hook/RPC continuation");
+        for annotated in [false, true] {
+            legacy_callback_branch_deadline_trial(annotated, false).await;
+        }
+    })
+    .await
+    .expect("bounded real hook/RPC continuation");
 }
 
 #[tokio::test]
 async fn legacy_callback_checkpoint_preserves_tracereplay_branch_deadline() {
     tokio::time::timeout(Duration::from_secs(3), async {
-        for annotated in [false, true] { legacy_callback_branch_deadline_trial(annotated, true).await; }
-    }).await.expect("bounded real hook/RPC owner switch");
+        for annotated in [false, true] {
+            legacy_callback_branch_deadline_trial(annotated, true).await;
+        }
+    })
+    .await
+    .expect("bounded real hook/RPC owner switch");
 }
 
 // Advance only actual filed requests while a hook is pending. A successful
@@ -869,19 +1001,33 @@ async fn drive_callback_hook<F: std::future::Future>(
         if let std::task::Poll::Ready(output) = futures::poll!(future.as_mut()) {
             return (output, commits, skips);
         }
-        if state.sched.lock().unwrap().next_turns[&tid].req.try_read().is_none() {
+        if state.sched.lock().unwrap().next_turns[&tid]
+            .req
+            .try_read()
+            .is_none()
+        {
             tokio::task::yield_now().await;
             continue;
         }
         *previous = crate::scheduler::do_a_turn_blocking(
-            state.sched.clone(), state.global_time.clone(), previous,
-        ).await;
-        if previous.is_ok() { commits += 1; } else { skips += 1; }
+            state.sched.clone(),
+            state.global_time.clone(),
+            previous,
+        )
+        .await;
+        if previous.is_ok() {
+            commits += 1;
+        } else {
+            skips += 1;
+        }
     }
     panic!("bounded actual callback request sequence did not finish");
 }
 
-async fn legacy_callback_expired_deadline_trial(annotated: bool, owner_switch: bool) -> (LogicalTime, LogicalTime) {
+async fn legacy_callback_expired_deadline_trial(
+    annotated: bool,
+    owner_switch: bool,
+) -> (LogicalTime, LogicalTime) {
     legacy_callback_expired_deadline_trial_at(
         crate::preemptions::callback_history::Site::Prehook,
         annotated,
@@ -900,7 +1046,9 @@ async fn legacy_callback_expired_deadline_trial_at(
     chaos: bool,
 ) -> (LogicalTime, LogicalTime) {
     use reverie::Tool;
-    use crate::preemptions::callback_history::{Origin, Startup};
+
+    use crate::preemptions::callback_history::Origin;
+    use crate::preemptions::callback_history::Startup;
     use crate::slice_boundary::callbacks::Callback;
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("expired-deadline.json");
@@ -913,9 +1061,12 @@ async fn legacy_callback_expired_deadline_trial_at(
         max_timeslice: std::num::NonZeroU64::new(5_000_000),
         target_timeslice: std::num::NonZeroU64::new(1_000_000),
         ..Config::default()
-    }.with_backend(|backend| backend.delivers_preemption_timer_events = true);
+    }
+    .with_backend(|backend| backend.delivers_preemption_timer_events = true);
     config.validate();
-    let start = crate::ThreadState::new(tid, &config, ()).thread_logical_time.as_nanos();
+    let start = crate::ThreadState::new(tid, &config, ())
+        .thread_logical_time
+        .as_nanos();
     let at = start + Duration::from_nanos(110);
     let mut writer = crate::preemptions::PreemptionWriter::new(None);
     writer.register_thread(tid, DEFAULT_PRIORITY);
@@ -923,72 +1074,232 @@ async fn legacy_callback_expired_deadline_trial_at(
     // deadline, the following Branch/Other/Syscall window supplies no new one.
     writer.insert_schedevent(SchedEvent::branches(tid, 1));
     writer.insert_schedevent(SchedEvent::branches(tid, 10));
-    let peer_event = SchedEvent::syscall(peer, Sysno::getpid, detcore_model::schedule::SyscallPhase::Posthook);
-    if owner_switch { writer.register_thread(peer, DEFAULT_PRIORITY); writer.insert_schedevent(peer_event.clone()); }
+    let peer_event = SchedEvent::syscall(
+        peer,
+        Sysno::getpid,
+        detcore_model::schedule::SyscallPhase::Posthook,
+    );
+    if owner_switch {
+        writer.register_thread(peer, DEFAULT_PRIORITY);
+        writer.insert_schedevent(peer_event.clone());
+    }
     writer.insert_schedevent(SchedEvent::branches(tid, 90));
-    writer.insert_schedevent(SchedEvent { dettid: tid, op: Op::OtherInstructions, count: 1, start_rip: None, end_rip: None, end_time: None, stopless: false });
-    writer.insert_schedevent(SchedEvent::syscall(tid, Sysno::close, detcore_model::schedule::SyscallPhase::Prehook));
+    writer.insert_schedevent(SchedEvent {
+        dettid: tid,
+        op: Op::OtherInstructions,
+        count: 1,
+        start_rip: None,
+        end_rip: None,
+        end_time: None,
+        stopless: false,
+        strex_fails: Default::default(),
+    });
+    writer.insert_schedevent(SchedEvent::syscall(
+        tid,
+        Sysno::close,
+        detcore_model::schedule::SyscallPhase::Prehook,
+    ));
     writer.insert_reprioritization(tid, at, 11, DEFAULT_PRIORITY, DEFAULT_PRIORITY);
-    if annotated { writer.insert_callback_checkpoint(tid, Origin { callback: Callback::PmuTimer, site, progress: 11, last_op: Some(Op::Branch), time: at, rcbs: 11 }); }
+    if annotated {
+        writer.insert_callback_checkpoint(
+            tid,
+            Origin {
+                callback: Callback::PmuTimer,
+                site,
+                progress: 11,
+                last_op: Some(Op::Branch),
+                time: at,
+                rcbs: 11,
+            },
+        );
+    }
     std::fs::write(&path, writer.into_string()).unwrap();
     let (config, state, tid, process) = cancellation_test_state_with_config(config);
     install_test_registration(&state, tid, Ivar::new());
-    state.past_first_execve.store(true, std::sync::atomic::Ordering::SeqCst);
+    state
+        .past_first_execve
+        .store(true, std::sync::atomic::Ordering::SeqCst);
     let mut thread = crate::ThreadState::new(tid, &config, ());
-    thread.detpid = Some(process); thread.past_global_first_execve = true;
+    thread.detpid = Some(process);
+    thread.past_global_first_execve = true;
     thread.next_timeslice(&config);
     if annotated {
-    thread.callback_history.install(Startup { checkpoints: state.sched.lock().unwrap().callback_checkpoints.get(&tid).map(|points| points.iter().cloned().collect()).unwrap_or_default(), ..Startup::default() });
+        thread.callback_history.install(Startup {
+            checkpoints: state
+                .sched
+                .lock()
+                .unwrap()
+                .callback_checkpoints
+                .get(&tid)
+                .map(|points| points.iter().cloned().collect())
+                .unwrap_or_default(),
+            ..Startup::default()
+        });
     }
-    let mut guest = LegacyDeadlineGuest { inner: ExternalRegistrationGuest { global: &state, config: &config, thread, requests: Mutex::new(Vec::new()), post_exec: false, ppid: None, private_memory: None }, clock_reads: 0, reported_rcbs: 1, timers: Vec::new(), responses: Mutex::new(Vec::new()) };
+    let mut guest = LegacyDeadlineGuest {
+        inner: ExternalRegistrationGuest {
+            global: &state,
+            config: &config,
+            thread,
+            requests: Mutex::new(Vec::new()),
+            post_exec: false,
+            ppid: None,
+            private_memory: None,
+        },
+        clock_reads: 0,
+        reported_rcbs: 1,
+        timers: Vec::new(),
+        responses: Mutex::new(Vec::new()),
+    };
     let tool: Detcore = Detcore::new(Tid::from_raw(tid.as_raw()), &config);
-    let first = tool.pre_handler_hook_observed(&mut guest, true, crate::CheckIn::Event, Some(Callback::PmuTimer)).await;
+    let first = tool
+        .pre_handler_hook_observed(
+            &mut guest,
+            true,
+            crate::CheckIn::Event,
+            Some(Callback::PmuTimer),
+        )
+        .await;
     assert_eq!(guest.thread.end_of_timeslice, Some(at));
     assert_eq!(guest.thread.max_timeslice_end, Some(at));
-    tool.post_handler_hook_observed(&mut guest, crate::CheckIn::Event, first).await;
-    assert!(matches!(guest.timers.last(), Some(reverie::TimerSchedule::Rcbs(10))));
+    tool.post_handler_hook_observed(&mut guest, crate::CheckIn::Event, first)
+        .await;
+    assert!(matches!(
+        guest.timers.last(),
+        Some(reverie::TimerSchedule::Rcbs(10))
+    ));
     guest.reported_rcbs = 11;
     let mut previous = Err(crate::scheduler::SkipTurn);
     let (token, pre_commits, pre_skips) = {
-        let mut pre = Box::pin(tool.pre_handler_hook_observed(&mut guest, true, crate::CheckIn::Event, Some(Callback::PmuTimer)));
+        let mut pre = Box::pin(tool.pre_handler_hook_observed(
+            &mut guest,
+            true,
+            crate::CheckIn::Event,
+            Some(Callback::PmuTimer),
+        ));
         if owner_switch {
-            state.sched.lock().unwrap().thread_tree.add_child(tid, peer, false);
+            state
+                .sched
+                .lock()
+                .unwrap()
+                .thread_tree
+                .add_child(tid, peer, false);
             install_test_registration(&state, peer, Ivar::new());
             assert!(futures::poll!(&mut pre).is_pending());
-            assert!(state.sched.lock().unwrap().next_turns[&tid].req.try_read().unwrap().unwrap().resources.contains_key(&ResourceID::TraceReplay));
-            let mut peer_thread = crate::ThreadState::new(peer, &config, ()); peer_thread.detpid = Some(process);
-            let mut peer_guest = ExternalRegistrationGuest { global: &state, config: &config, thread: peer_thread, requests: Mutex::new(Vec::new()), post_exec: false, ppid: None, private_memory: None };
-            let mut peer_request = Box::pin(super::resource_request(&mut peer_guest, Resources::new(peer)));
+            assert!(
+                state.sched.lock().unwrap().next_turns[&tid]
+                    .req
+                    .try_read()
+                    .unwrap()
+                    .unwrap()
+                    .resources
+                    .contains_key(&ResourceID::TraceReplay)
+            );
+            let mut peer_thread = crate::ThreadState::new(peer, &config, ());
+            peer_thread.detpid = Some(process);
+            let mut peer_guest = ExternalRegistrationGuest {
+                global: &state,
+                config: &config,
+                thread: peer_thread,
+                requests: Mutex::new(Vec::new()),
+                post_exec: false,
+                ppid: None,
+                private_memory: None,
+            };
+            let mut peer_request = Box::pin(super::resource_request(
+                &mut peer_guest,
+                Resources::new(peer),
+            ));
             assert!(futures::poll!(&mut peer_request).is_pending());
-            let granted = crate::scheduler::do_a_turn_blocking(state.sched.clone(), state.global_time.clone(), &previous).await.unwrap();
-            assert_eq!(granted.tid, peer); peer_request.await;
+            let granted = crate::scheduler::do_a_turn_blocking(
+                state.sched.clone(),
+                state.global_time.clone(),
+                &previous,
+            )
+            .await
+            .unwrap();
+            assert_eq!(granted.tid, peer);
+            peer_request.await;
             peer_guest.thread.thread_logical_time.add_syscall();
-            let mut observed_peer = peer_event; observed_peer.end_time = Some(peer_guest.thread.thread_logical_time.as_nanos());
-            let mut peer_trace = Box::pin(super::trace_schedevent(&mut peer_guest, observed_peer, false));
+            let mut observed_peer = peer_event;
+            observed_peer.end_time = Some(peer_guest.thread.thread_logical_time.as_nanos());
+            let mut peer_trace = Box::pin(super::trace_schedevent(
+                &mut peer_guest,
+                observed_peer,
+                false,
+            ));
             assert!(futures::poll!(&mut peer_trace).is_pending());
             previous = Ok(granted);
-            let resumed = crate::scheduler::do_a_turn_blocking(state.sched.clone(), state.global_time.clone(), &previous).await.unwrap();
-            assert_eq!(resumed.tid, tid); assert!(resumed.resources.contains_key(&ResourceID::TraceReplay));
+            let resumed = crate::scheduler::do_a_turn_blocking(
+                state.sched.clone(),
+                state.global_time.clone(),
+                &previous,
+            )
+            .await
+            .unwrap();
+            assert_eq!(resumed.tid, tid);
+            assert!(resumed.resources.contains_key(&ResourceID::TraceReplay));
             previous = Ok(resumed);
             drop(peer_trace);
         }
         drive_callback_hook(&state, tid, pre, &mut previous).await
     };
-    let (_, post_commits, post_skips) = drive_callback_hook(&state, tid, tool.post_handler_hook_observed(&mut guest, crate::CheckIn::Event, token), &mut previous).await;
+    let (_, post_commits, post_skips) = drive_callback_hook(
+        &state,
+        tid,
+        tool.post_handler_hook_observed(&mut guest, crate::CheckIn::Event, token),
+        &mut previous,
+    )
+    .await;
     assert_eq!(guest.thread.thread_logical_time.as_nanos(), at);
-    assert_eq!(pre_commits + post_commits, 1, "one original expiry commit; annotated={annotated}, owner_switch={owner_switch}, pre={pre_commits}, post={post_commits}");
+    assert_eq!(
+        pre_commits + post_commits,
+        1,
+        "one original expiry commit; annotated={annotated}, owner_switch={owner_switch}, pre={pre_commits}, post={post_commits}"
+    );
     assert_eq!(pre_skips + post_skips, usize::from(annotated));
-    assert_eq!(guest.thread.end_of_timeslice, Some(at + Duration::from_nanos(5_000_000)));
-    assert_eq!(guest.thread.max_timeslice_end, guest.thread.end_of_timeslice);
-    assert!(matches!(guest.timers.last(), Some(reverie::TimerSchedule::Rcbs(500_000))));
-    let (_, tail_commits, tail_skips) = drive_callback_hook(&state, tid, super::resource_request(&mut guest, Resources::new(tid)), &mut previous).await;
+    assert_eq!(
+        guest.thread.end_of_timeslice,
+        Some(at + Duration::from_nanos(5_000_000))
+    );
+    assert_eq!(
+        guest.thread.max_timeslice_end,
+        guest.thread.end_of_timeslice
+    );
+    assert!(matches!(
+        guest.timers.last(),
+        Some(reverie::TimerSchedule::Rcbs(500_000))
+    ));
+    let (_, tail_commits, tail_skips) = drive_callback_hook(
+        &state,
+        tid,
+        super::resource_request(&mut guest, Resources::new(tid)),
+        &mut previous,
+    )
+    .await;
     assert_eq!((tail_commits, tail_skips), (1, 0));
     let global = state.global_time.lock().unwrap().as_nanos();
     let scheduler = state.sched.lock().unwrap();
     let replayer = scheduler.replayer.as_ref().unwrap();
-    assert!(replayer.desync_counts.values().all(|stats| stats.soft == 0 && stats.hard == 0));
-    assert_eq!((replayer.cursor.peek().unwrap().op, replayer.cursor.peek().unwrap().count), (Op::Branch, 90));
-    assert!(scheduler.callback_checkpoints.values().all(|points| points.is_empty()));
+    assert!(
+        replayer
+            .desync_counts
+            .values()
+            .all(|stats| stats.soft == 0 && stats.hard == 0)
+    );
+    assert_eq!(
+        (
+            replayer.cursor.peek().unwrap().op,
+            replayer.cursor.peek().unwrap().count
+        ),
+        (Op::Branch, 90)
+    );
+    assert!(
+        scheduler
+            .callback_checkpoints
+            .values()
+            .all(|points| points.is_empty())
+    );
     (global, guest.thread.end_of_timeslice.unwrap())
 }
 
@@ -996,16 +1307,26 @@ async fn legacy_callback_expired_deadline_trial_at(
 async fn legacy_callback_checkpoint_subsumes_expired_continue_deadline_once() {
     tokio::time::timeout(Duration::from_secs(3), async {
         let baseline = legacy_callback_expired_deadline_trial(false, false).await;
-        assert_eq!(legacy_callback_expired_deadline_trial(true, false).await, baseline);
-    }).await.expect("bounded expired Continue(None) callback");
+        assert_eq!(
+            legacy_callback_expired_deadline_trial(true, false).await,
+            baseline
+        );
+    })
+    .await
+    .expect("bounded expired Continue(None) callback");
 }
 
 #[tokio::test]
 async fn legacy_callback_checkpoint_subsumes_expired_tracereplay_deadline_once() {
     tokio::time::timeout(Duration::from_secs(3), async {
         let baseline = legacy_callback_expired_deadline_trial(false, true).await;
-        assert_eq!(legacy_callback_expired_deadline_trial(true, true).await, baseline);
-    }).await.expect("bounded expired TraceReplay Go(None) callback");
+        assert_eq!(
+            legacy_callback_expired_deadline_trial(true, true).await,
+            baseline
+        );
+    })
+    .await
+    .expect("bounded expired TraceReplay Go(None) callback");
 }
 
 // The record ended the timer's slice at its post-hook, within one RCB of the
@@ -1103,7 +1424,10 @@ fn schedule_replay_thread(
     thread.detpid = Some(process);
     thread.past_global_first_execve = true;
     thread.next_timeslice(&config);
-    assert!(thread.replay_backstop.is_some(), "a schedule replay's backstop");
+    assert!(
+        thread.replay_backstop.is_some(),
+        "a schedule replay's backstop"
+    );
     (config, state, thread)
 }
 
@@ -1116,6 +1440,7 @@ fn other_instructions(tid: DetTid) -> SchedEvent {
         end_rip: None,
         end_time: None,
         stopless: false,
+        strex_fails: Default::default(),
     }
 }
 
@@ -1234,7 +1559,13 @@ async fn a_replayed_slice_end_past_the_maximum_is_the_schedules_and_no_backstop(
         let mut guest = schedule_replay_guest(&state, &config, thread, 0);
         let tool: Detcore = Detcore::new(Tid::from_raw(tid.as_raw()), &config);
         let mut previous = Err(crate::scheduler::SkipTurn);
-        drive_callback_hook(&state, tid, tool.handle_timer_event(&mut guest), &mut previous).await;
+        drive_callback_hook(
+            &state,
+            tid,
+            tool.handle_timer_event(&mut guest),
+            &mut previous,
+        )
+        .await;
         // The schedule's slice end was the maximum itself, so the fallback,
         // one --max-timeslice past it, is installed.
         let fallback = maximum + Duration::from_nanos(1_000);
@@ -1256,7 +1587,10 @@ async fn a_replayed_slice_end_past_the_maximum_is_the_schedules_and_no_backstop(
 async fn a_replayed_checkpoint_that_keeps_the_slice_restarts_its_backstop() {
     tokio::time::timeout(Duration::from_secs(3), async {
         use reverie::Tool;
-        use crate::preemptions::callback_history::{Origin, Site, Startup};
+
+        use crate::preemptions::callback_history::Origin;
+        use crate::preemptions::callback_history::Site;
+        use crate::preemptions::callback_history::Startup;
         use crate::slice_boundary::callbacks::Callback;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("kept-slice.json");
@@ -1271,7 +1605,9 @@ async fn a_replayed_checkpoint_that_keeps_the_slice_restarts_its_backstop() {
         }
         .with_backend(|backend| backend.delivers_preemption_timer_events = true);
         config.validate();
-        let start = crate::ThreadState::new(tid, &config, ()).thread_logical_time.as_nanos();
+        let start = crate::ThreadState::new(tid, &config, ())
+            .thread_logical_time
+            .as_nanos();
         let at = start + Duration::from_nanos(110);
         let call = SchedEvent::syscall(
             tid,
@@ -1354,7 +1690,12 @@ async fn a_replayed_checkpoint_that_keeps_the_slice_restarts_its_backstop() {
         assert_eq!(guest.thread.max_timeslice_end, Some(restarted));
         assert_eq!(guest.thread.replay_backstop, Some(restarted));
         let scheduler = state.sched.lock().unwrap();
-        assert!(scheduler.callback_checkpoints.values().all(|points| points.is_empty()));
+        assert!(
+            scheduler
+                .callback_checkpoints
+                .values()
+                .all(|points| points.is_empty())
+        );
         assert!(
             scheduler
                 .replayer

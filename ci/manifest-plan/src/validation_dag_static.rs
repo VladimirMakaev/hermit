@@ -1262,6 +1262,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's watch::tests::a_watch_takes_an_address_a_length_and_an_access
     // and config::tests::config_fingerprint_includes_the_watch_element_layout
     // (--watch): 1889.
+    // And this change's detcore-model tests: 1883.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3672,6 +3673,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and scheduler's
     // a_peer_alive_when_watches_become_due_is_summarized_if_killed_parked:
     // 2700, listed.
+    // And this change's Detcore unit tests: 2710.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6402,6 +6404,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
     // moved from hermit-cli into Detcore and grew there: 2739, listed.
     // And the same six --watch units: 2720, listed.
+    // And the same tests: 2710.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -7107,6 +7110,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 1868, listed.
     // And the same legacy-form unit: 1869.
     // And the same two --watch detcore-model tests: 1875.
+    // And the same tests: 1869.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.

@@ -109,6 +109,7 @@ mod tests {
             op: Op::Branch,
             start_rip: None,
             end_rip: None,
+            strex_fails: Default::default(),
         };
 
         let counts: Vec<_> = split_one(event)

@@ -2620,6 +2620,8 @@ impl GlobalState {
                         .unwrap()
                         .failures_for_recording(),
                 );
+                // And whether each of its segments carries its own.
+                writer.record_segment_store_exclusives(crate::store_exclusive::segments_counted());
             }
             // Only a schedule written to a file carries the set; an in-memory
             // record's text goes into the INFO description.
@@ -20600,6 +20602,7 @@ mod tests {
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(1)),
             stopless: false,
+            strex_fails: Default::default(),
         };
         let next_event = SchedEvent {
             dettid: next_tid,

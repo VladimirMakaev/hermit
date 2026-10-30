@@ -296,6 +296,7 @@ fn rcb_accounting_progresses_without_an_implicit_preemption_timer() {
                             end_rip: None,
                             end_time: Some(nanos),
                             stopless: false,
+                            strex_fails: Default::default(),
                         });
                     }
                     // Imprecise cuts record OtherInstructions even when the
@@ -308,6 +309,7 @@ fn rcb_accounting_progresses_without_an_implicit_preemption_timer() {
                         end_rip: std::num::NonZeroUsize::new(RIP as usize),
                         end_time: Some(nanos),
                         stopless: false,
+                        strex_fails: Default::default(),
                     });
                 }
                 assert_eq!(
@@ -421,6 +423,7 @@ fn interleaved_clock_observations_preserve_deadlines_and_timer_capability() {
                             end_rip: None,
                             end_time: Some(nanos),
                             stopless: false,
+                            strex_fails: Default::default(),
                         });
                     }
                     expected_records.push(SchedEvent {
@@ -431,6 +434,7 @@ fn interleaved_clock_observations_preserve_deadlines_and_timer_capability() {
                         end_rip: std::num::NonZeroUsize::new(RIP as usize),
                         end_time: Some(nanos),
                         stopless: false,
+                        strex_fails: Default::default(),
                     });
                 }
                 assert_eq!(*guest.records.lock().unwrap(), expected_records);
@@ -596,6 +600,7 @@ async fn replay_continue_installs_a_logical_deadline_without_requiring_a_timer()
             end_rip: std::num::NonZeroUsize::new(RIP as usize),
             end_time: Some(sample_time),
             stopless: false,
+            strex_fails: Default::default(),
         };
         let branch = SchedEvent {
             op: Op::Branch,

@@ -774,6 +774,7 @@ mod builder {
                 end_time: Some(self.time.as_nanos()),
                 stopless: false,
                 op: Op::Syscall(sys_no, SyscallPhase::Prehook),
+                strex_fails: Default::default(),
             }
         }
 
@@ -787,6 +788,7 @@ mod builder {
                 end_time: Some(self.time.as_nanos()),
                 stopless: false,
                 op: Op::Syscall(sys_no, SyscallPhase::Posthook),
+                strex_fails: Default::default(),
             }
         }
 
@@ -799,6 +801,7 @@ mod builder {
                 stopless: false,
                 op: Op::OtherInstructions,
                 end_rip: InstructionPointer::new(end_rip),
+                strex_fails: Default::default(),
             }
         }
 
@@ -812,6 +815,7 @@ mod builder {
                 stopless: false,
                 op: Op::Branch,
                 start_rip: None,
+                strex_fails: Default::default(),
             }
         }
 
