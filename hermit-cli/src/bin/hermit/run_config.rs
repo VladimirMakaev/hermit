@@ -1023,6 +1023,14 @@ mod tests {
             "work-span-report",
             &["--work-span-report=/tmp/work-span.json"],
         ),
+        ("rewrite-exclusives", &["--rewrite-exclusives"]),
+        (
+            "rewrite-exclusives-also",
+            &[
+                "--rewrite-exclusives",
+                "--rewrite-exclusives-also=/tmp/liblse.so",
+            ],
+        ),
         ("scheduler-turn-cost", &["--scheduler-turn-cost=10000"]),
         ("virtual-timeout", &["--virtual-timeout=1000"]),
         ("cap-preemption-charge", &["--cap-preemption-charge"]),
