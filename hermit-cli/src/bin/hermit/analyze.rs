@@ -33,4 +33,5 @@ pub use types::TrialTimeout;
 pub use verdict::AnalyzeFailure;
 pub use verdict::AnalyzePrecondition;
 pub use verdict::AnalyzeVerdict;
+pub use verdict::failure_class_line;
 pub use verdict::precondition_class;
