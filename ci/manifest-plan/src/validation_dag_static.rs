@@ -3210,7 +3210,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // strict_refuses_binder_except_in_a_replay_with_readmissions and
     // external_binder_calls_are_counted_and_each_process_is_warned_once
     // (`--strict`'s binder policy, the per-process warning and count): 3281.
-    ("test.detcore_unit", 3281),
+    // And syscalls::binder's
+    // a_current_record_without_backgrounded_calls_may_replay_binder_under_strict
+    // (the record files that policy reads): 3282.
+    ("test.detcore_unit", 3282),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5656,7 +5659,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two background-starts format units: 3278.
     // And the same unread-format cap unit: 3279.
     // And the same two binder policy units: 3281.
-    ("test.detcore_unit_on_host", 3281),
+    // And the same binder record-file unit: 3282.
+    ("test.detcore_unit_on_host", 3282),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
