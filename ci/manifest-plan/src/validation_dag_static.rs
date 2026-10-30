@@ -1246,6 +1246,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (skid overshoots outside --strict): 1881, listed.
     // And detcore-model config::tests::a_chaos_timeslice_range_is_min_to_max_nanoseconds_drawn_log_uniformly: 1881.
     // And detcore-model config::tests::a_draw_without_a_range_names_the_recommended_range: 1882.
+    // And detcore-model's three schedule_replay_options::tests (the
+    // expected rows, their consistency, the user guide's copy): 1888.
+    // And detcore-model's four schedule_replay_options::tests (the
+    // expected rows, their consistency, the rows code reads, the user
+    // guide's copy): 1889.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3628,6 +3633,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and a_pending_poll_backoff_keeps_a_replayed_sigchld_parked: 2684, listed.
     // And the scheduler units a_replayed_sigchld_reads_the_boundary_cursor and
     // a_replay_keeps_step2e_batch_admission_of_parked_sigchlds: 2686, listed.
+    // And scheduler::test::consuming_the_last_legacy_event_stops_the_spread
+    // and scheduler::boundary_controller::tests::
+    // consuming_the_last_boundary_record_stops_the_spread: 2711.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6331,6 +6339,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same replayed-SIGCHLD scheduler unit: 2683, listed.
     // And the same two replayed-SIGCHLD scheduler units: 2684, listed.
     // And the same two replayed-SIGCHLD readmission units: 2686, listed.
+    // And the same two spread transition tests: 2711.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -7020,6 +7029,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same skid-overshoot summary test: 1867, listed.
     // And the same timeslice-range unit: 1867.
     // And the same discovery-mode unit: 1868.
+    // And the same three schedule replay options tests: 1874.
+    // And the same four schedule replay options tests: 1875.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
