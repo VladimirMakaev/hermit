@@ -1984,6 +1984,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a search started from an observed interval): 1236.
     // And phases::tests::a_budget_hit_after_the_decision_reports_it: 1237.
     // And phases::tests::a_trial_budget_that_ends_at_the_stack_trace_runs_reports_the_decision: 1238.
+    // And run::replay_takes_the_recorded_seeds_and_refuses_a_contradicting_seed
+    // (the scheduler seed too, and an explicit --seed checked): 1161, listed.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3198,6 +3200,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // checkpoints): 2683, listed.
     // checkpoints): 2696, listed.
     // And preemptions::tests::a_record_too_varied_to_renumber_keeps_its_priorities: 2697.
+    // And scheduler::test::a_recorded_schedule_stores_the_scheduler_seed: 2696,
+    // listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5482,6 +5486,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same schedule-prefix unit: 2683, listed.
     // And the same schedule-prefix unit: 2696, listed.
     // And the same normalize test: 2697.
+    // And the same recorded scheduler-seed unit: 2696, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5887,6 +5892,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same twenty-seven budget-and-resume tests: 1230.
     // And the same decided-budget test: 1231.
     // And the same cut-path decided-budget test: 1232.
+    // And the same recorded-seeds replay test: 1155, listed.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

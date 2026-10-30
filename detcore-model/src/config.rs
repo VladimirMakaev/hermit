@@ -814,6 +814,14 @@ pub struct Config {
     #[clap(skip)]
     pub notice_host_network_abstract_binds: bool,
 
+    /// **Internal:** The seeds `hermit run` took from the recording a schedule
+    /// replay replays (`--replay-preemptions-from`, `--replay-schedule-from`),
+    /// because the run omitted them; the run's summary says so. The seeds
+    /// themselves are already in `rng_seed` and `sched_seed`.
+    #[serde(default)]
+    #[clap(skip)]
+    pub replay_adopted_seeds: Option<crate::summary::AdoptedSeeds>,
+
     /// **Internal:** Path to the replay data folder.
     #[clap(skip)]
     pub replay_data: Option<PathBuf>,
@@ -3066,7 +3074,9 @@ mod legacy_backend_json {
     /// `notice_host_network_abstract_binds` came after it too. It is never written and
     /// reads as false, so the DBT runtime prints no notice for an abstract
     /// `AF_UNIX` bind under host networking.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 32] = [
+    /// `replay_adopted_seeds` came after it too: only the run's summary reads
+    /// it, so it is never written and reads as unset.
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 33] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -3099,6 +3109,7 @@ mod legacy_backend_json {
         "annotated_priority_replay",
         "virtual_cpus",
         "notice_host_network_abstract_binds",
+        "replay_adopted_seeds",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -3264,7 +3275,8 @@ mod legacy_backend_json {
                     | "directory_placeholder"
                     | "work_span_report"
                     | "signal_at"
-                    | "virtual_cpus",
+                    | "virtual_cpus"
+                    | "replay_adopted_seeds",
                 ) => seed
                     .deserialize(serde_json::Value::Null)
                     .map(Some)
@@ -3558,7 +3570,8 @@ mod legacy_backend_json {
                 | "in_guest_signal_delivery"
                 | "annotated_priority_replay"
                 | "virtual_cpus"
-                | "notice_host_network_abstract_binds" => Ok(()),
+                | "notice_host_network_abstract_binds"
+                | "replay_adopted_seeds" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
         }
@@ -4293,7 +4306,8 @@ mod tests {
                 | "in_guest_signal_delivery"
                 | "annotated_priority_replay"
                 | "virtual_cpus"
-                | "notice_host_network_abstract_binds" => {}
+                | "notice_host_network_abstract_binds"
+                | "replay_adopted_seeds" => {}
                 other => expected.push(other.to_owned()),
             }
         }
@@ -4316,11 +4330,11 @@ mod tests {
         // `container_procfs`, `signal_delivery_check_fatal`,
         // `work_span_report`, `signal_at`, `in_guest_signal_delivery`,
         // `annotated_priority_replay`, `virtual_cpus`,
-        // `notice_host_network_abstract_binds` and `strict_schedule_boundaries`
-        // none: fourteen more keys and thirty-one fewer, so seventeen keys fewer
-        // than fields.
+        // `notice_host_network_abstract_binds`, `replay_adopted_seeds` and
+        // `strict_schedule_boundaries` none: fourteen more keys and thirty-one
+        // fewer, so seventeen keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 17);
+        assert_eq!(fields.len(), keys.len() + 18);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
