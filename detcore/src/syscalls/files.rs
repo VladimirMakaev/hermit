@@ -10432,8 +10432,9 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// A lock or unlock through a descriptor whose description the ledger
     /// may know under another identity (one Detcore keeps no model of, such
     /// as a descriptor received over `SCM_RIGHTS` and not recorded
-    /// (`Detcore::record_received_descriptors`), or one registered on
-    /// reception, which is a second model of the sender's description) can leave that other
+    /// (`Detcore::record_received_descriptors`), or one recorded on
+    /// reception as a second model of the sender's description, not one that
+    /// joined an open file its table models) can leave that other
     /// identity's entry stale, so no lock on that file's inode number counts
     /// from then on (`procfs::locks::LockLedger::alias_inode`): hidden, never
     /// a host's row admitted. If that descriptor's fdinfo cannot be read for
@@ -12240,6 +12241,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             )
             .await?;
             self.mark_sock_diag_fd(guest, fd, &call);
+            self.note_unix_socket(guest, fd, call.family(), call.r#type());
             // Linux's SOCK_TYPE_MASK: the type without SOCK_NONBLOCK and SOCK_CLOEXEC.
             const SOCK_TYPE_MASK: i32 = 0xf;
             if self.accept_in_turn_enabled() && call.r#type() & SOCK_TYPE_MASK == libc::SOCK_STREAM
@@ -12268,6 +12270,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             .await?;
             self.maybe_set_nonblocking_fd(guest, fd);
             self.mark_sock_diag_fd(guest, fd, &call);
+            self.note_unix_socket(guest, fd, call.family(), call.r#type());
 
             Ok(fd as i64)
         }
@@ -12365,6 +12368,7 @@ impl<T: RecordOrReplay> Detcore<T> {
                         .with_detfd(fd, |detfd| detfd.set_socketpair_endpoint());
                 }
             }
+            self.note_socketpair(guest, fds, call.family(), call.r#type());
 
             self.maybe_set_nonblocking_fd(guest, fds[0]);
             self.maybe_set_nonblocking_fd(guest, fds[1]);
@@ -12753,9 +12757,23 @@ impl<T: RecordOrReplay> Detcore<T> {
                 }
             }
         }
+        // The name a guest names this socket by, read before the call: Linux
+        // reads the address once, and another thread could rewrite it.
+        let unix_name = (sockaddr_family == libc::AF_UNIX as u16)
+            .then(|| {
+                crate::syscalls::scm_rights::unix_socket_name(
+                    &guest.memory(),
+                    addr.as_raw(),
+                    usize::try_from(call.addrlen()).unwrap_or(0),
+                )
+            })
+            .flatten();
         let res = self.record_or_replay(guest, call).await;
         if let Some(name) = &notice_abstract_name {
             notice_host_network_abstract_bind(name, &res);
+        }
+        if let (Some(name), Ok(_)) = (unix_name, &res) {
+            self.note_unix_bind(guest, sock_fd, &name);
         }
 
         Ok(res?)
@@ -13668,6 +13686,7 @@ impl<T: RecordOrReplay> Detcore<T> {
                 .thread_state()
                 .with_detfd(call.sockfd(), |detfd| detfd.is_accept_in_turn_listener())
                 .unwrap_or(false);
+        let completes_in_turn = in_turn || self.completes_in_turn(guest, call2);
         let fd = if in_turn {
             // Record and replay run the accept in the caller's turn, so the new descriptor's
             // number is allocated deterministically (https://github.com/rrnewton/hermit/issues/3880).
@@ -13688,6 +13707,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         guest
             .thread_state()
             .with_detfd(fd, |detfd| detfd.set_accepted_connection())?;
+        self.note_unix_accept(guest, call.sockfd(), fd, completes_in_turn);
 
         if physically_nonblocking {
             self.maybe_set_nonblocking_fd(guest, fd);

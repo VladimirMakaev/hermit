@@ -4523,6 +4523,14 @@ pub struct ThreadState<T> {
     #[serde(default)]
     pub(crate) guest_clock: Arc<Mutex<GuestClock>>,
 
+    /// The `AF_UNIX` connections waiting for an `accept`, shared by every
+    /// task in this process tree, as the guest clock is
+    /// (`crate::syscalls::scm_rights::UnixConnections`). It names
+    /// descriptions by handles that reach them only in the tool process that
+    /// serves every guest (ptrace, KVM), so it is never serialized.
+    #[serde(skip)]
+    pub(crate) unix_connections: Arc<Mutex<crate::syscalls::scm_rights::UnixConnections>>,
+
     /// Parent process accounting notified when this process leader exits.
     pub(crate) parent_process_cpu_time: Option<Arc<Mutex<ProcessCpuTime>>>,
 
@@ -5548,6 +5556,7 @@ impl<T> ThreadState<T> {
             resource_limits: Arc::new(Mutex::new(ResourceLimits::default())),
             process_cpu_time: Arc::new(Mutex::new(ProcessCpuTime::default())),
             guest_clock: Arc::new(Mutex::new(GuestClock::default())),
+            unix_connections: Default::default(),
             parent_process_cpu_time: None,
             parent_cpu_publication: None,
             restart_block: None,
