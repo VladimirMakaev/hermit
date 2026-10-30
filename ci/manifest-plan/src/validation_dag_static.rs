@@ -1903,6 +1903,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And phases::tests::a_boundary_trial_still_stopped_is_reported_as_a_hang,
     // the_longest_finished_prefix_below_the_boundary_is_named and
     // a_confirmation_raises_the_bound_and_keeps_it_once_finished: 1201.
+    // And the bisection trials' checkpoints:
+    // phases::tests::a_bisection_trial_keeps_the_checkpoints_of_the_part_it_shares_with_an_endpoint: 1202.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5793,6 +5795,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same exit-code test: 1188.
     // And the same five boundary-confirmation tests: 1133.
     // And the same three prefix-hang tests: 1195.
+    // And the same bisection-trial checkpoint test: 1196.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
