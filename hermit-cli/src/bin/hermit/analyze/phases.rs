@@ -414,7 +414,8 @@ fn choose_continuation(
         .any(|(_, outcome)| *outcome == Continuation::ReplayUnfinished)
     {
         "A replay that did not finish was ended by a bound (raise --trial-timeout) or refused \
-         by Hermit (its reason is in its log)."
+         by Hermit (its reason is in its log file, or in analyze's output above when it writes \
+         none)."
     } else {
         "Schedule replay does not reproduce this run where replaying the whole target schedule \
          misses the target; check that the target run replays (--selfcheck)."
@@ -907,7 +908,8 @@ fn missing_stack_reason(
         describe(target, target_event),
         if unfinished {
             "A replay that did not finish was stopped by a bound (raise --trial-timeout) or \
-             refused by Hermit (its reason is in its log)."
+             refused by Hermit (its reason is in its log file, or in analyze's output above \
+             when it writes none)."
         } else {
             "Schedule replay did not reproduce these runs; check that they replay (--selfcheck) \
              on a host with an exact branch counter (hermit host-capabilities)."
@@ -998,6 +1000,21 @@ impl AnalyzeOpts {
         }
     }
 
+    /// The chaos run of `--search` round `round`, with schedule seed
+    /// `sched_seed`. The one that matches becomes the target, whose log
+    /// `--selfcheck` compares.
+    pub(super) fn search_run(&self, round: u64, sched_seed: u64) -> anyhow::Result<RunData> {
+        let runname = format!("search_round_{:0wide$}", round, wide = 3);
+        let mut rundat = RunData::new_baseline(self, runname)?
+            .with_preemption_recording()
+            .compared_by_selfcheck();
+        rundat.runopts.det_opts.det_config.sched_seed = Some(sched_seed);
+        if self.imprecise_search {
+            rundat.runopts.det_opts.det_config.imprecise_timers = true; // TODO: enable this by default when bugs are fixed.
+        }
+        Ok(rundat)
+    }
+
     /// Launch a chaos run searching for a target (e.g. failing) schudule.
     /// Returns Some if a target schedule is found.
     fn launch_search(&self, round: u64, sched_seed: u64) -> Result<Option<RunData>, Error> {
@@ -1005,12 +1022,7 @@ impl AnalyzeOpts {
             "Searching (round {}) for a target execution, chaos --sched-seed={} ",
             round, sched_seed
         ));
-        let runname = format!("search_round_{:0wide$}", round, wide = 3);
-        let mut rundat = RunData::new_baseline(self, runname)?.with_preemption_recording();
-        rundat.runopts.det_opts.det_config.sched_seed = Some(sched_seed);
-        if self.imprecise_search {
-            rundat.runopts.det_opts.det_config.imprecise_timers = true; // TODO: enable this by default when bugs are fixed.
-        }
+        let mut rundat = self.search_run(round, sched_seed)?;
         if rundat.launch_trial()?.reached_target() {
             eprintln!(
                 ":: {}:\n    {}",
@@ -1025,20 +1037,31 @@ impl AnalyzeOpts {
         }
     }
 
+    /// The run that replays the preemptions in `preempts_path`, as a
+    /// `--minimize` round does.
+    pub(super) fn preempts_replay_run(
+        &self,
+        runname: &str,
+        preempts_path: &Path,
+    ) -> anyhow::Result<RunData> {
+        Ok(RunData::new_baseline(self, runname.to_string())?
+            .with_preempts_path_in(preempts_path.to_path_buf())
+            .compared_by_selfcheck())
+    }
+
     // TODO: REMOVE. Only used by minimize atm.
     //
-    /// Launch a run with preempts provided (to replay). No logging. Return true if it matches the
+    /// Launch a run with preempts provided (to replay). Return true if it matches the
     /// criteria. If provided, additionally record full schedule events from the run to
-    /// `record_sched_path`.
+    /// `record_sched_path`. The last of these runs to match is the minimized target, whose log
+    /// --selfcheck compares.
     pub(super) fn launch_from_preempts_to_sched(
         &self,
         runname: &str,
         preempts_path: &Path,
         record_sched_path: Option<&Path>,
     ) -> anyhow::Result<(bool, RunOpts)> {
-        let mut run = RunData::new_baseline(self, runname.to_string())?
-            .with_preempts_path_in(preempts_path.to_path_buf());
-
+        let mut run = self.preempts_replay_run(runname, preempts_path)?;
         if let Some(path) = record_sched_path {
             run = run.with_schedule_recording_to(path.to_path_buf());
         }
@@ -1860,9 +1883,10 @@ impl AnalyzeOpts {
         Ok(workspace)
     }
 
-    /// What becomes of analyze's workspace: kept with `--keep-tmp`, and with
-    /// `--verbose`, whose per-run logs are in it for the user to read;
-    /// removed otherwise.
+    /// What becomes of analyze's workspace: kept with `--keep-tmp`, with
+    /// `--verbose`, whose reproducers name its files, and with `--trial-log`
+    /// (or `--guest-log`) above warn, whose per-run logs are in it for the
+    /// user to read; removed otherwise.
     fn workspace_retention(&self) -> Retention {
         if self.keep_tmp {
             Retention::Keep {
@@ -1871,6 +1895,10 @@ impl AnalyzeOpts {
         } else if self.verbose {
             Retention::Keep {
                 because: Some("--verbose"),
+            }
+        } else if let Some(option) = self.trial_log_files_option() {
+            Retention::Keep {
+                because: Some(option),
             }
         } else {
             Retention::Remove
@@ -3116,18 +3144,41 @@ mod tests {
         }
     }
 
+    /// A workspace kept for the level `--guest-log` gave names the option, and
+    /// HERMIT_LOG too when the level came from that variable.
+    #[test]
+    fn a_workspace_kept_for_the_guest_log_level_names_its_source() {
+        let mut options =
+            AnalyzeOpts::try_parse_from(["analyze", "-g", "debug", "--", "/bin/true"]).unwrap();
+        assert_eq!(
+            options.workspace_retention(),
+            Retention::Keep {
+                because: Some("--guest-log")
+            }
+        );
+        options.guest_log_from_env = true;
+        assert_eq!(
+            options.workspace_retention(),
+            Retention::Keep {
+                because: Some("--guest-log (HERMIT_LOG)")
+            }
+        );
+    }
+
     /// `--tmp-dir` names the directory the workspace is created in, and is
     /// created if it is missing. The workspace goes when analyze is done
-    /// with it, unless `--keep-tmp` or `--verbose` keeps it (not
-    /// `--selfcheck`, though it writes run logs there too); the `--tmp-dir`
-    /// stays.
+    /// with it, unless `--keep-tmp`, `--verbose`, or `--trial-log` above warn
+    /// keeps it (not `--selfcheck`, though it writes run logs there too);
+    /// the `--tmp-dir` stays.
     #[test]
     fn the_workspace_is_created_in_the_tmp_dir() {
         for (option, kept) in [
-            (None, false),
-            (Some("--keep-tmp"), true),
-            (Some("--verbose"), true),
-            (Some("--selfcheck"), false),
+            (None, None),
+            (Some("--keep-tmp"), Some("--keep-tmp")),
+            (Some("--verbose"), Some("--verbose")),
+            (Some("--selfcheck"), None),
+            (Some("--trial-log=debug"), Some("--trial-log")),
+            (Some("--trial-log=warn"), None),
         ] {
             let parent = tempfile::tempdir().unwrap();
             let requested = parent.path().join("not-yet-created");
@@ -3138,10 +3189,11 @@ mod tests {
             let retention = options.workspace_retention();
             assert_eq!(
                 retention,
-                if kept {
-                    Retention::Keep { because: option }
-                } else {
-                    Retention::Remove
+                match kept {
+                    Some(because) => Retention::Keep {
+                        because: Some(because),
+                    },
+                    None => Retention::Remove,
                 },
                 "{option:?}"
             );
@@ -3155,7 +3207,7 @@ mod tests {
             drop(guard);
             assert_eq!(
                 workspace.exists(),
-                kept,
+                kept.is_some(),
                 "{option:?}: {}",
                 workspace.display()
             );

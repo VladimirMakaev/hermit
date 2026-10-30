@@ -1956,6 +1956,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_weak_nap_ranks_after_the_evidenced_pairs}: 1244.
     // And analyze::races::tests::
     // a_nearer_wait_of_similar_length_ranks_before_a_long_nap: 1245.
+    // And analyze's trial log level: rundata::tests::{a_verbose_trial_keeps_the_default_log_level,
+    // trial_log_debug_writes_each_trials_debug_log, trial_log_sets_the_level_and_the_file,
+    // selfcheck_logs_the_runs_it_compares_at_debug, every_trial_log_level_keeps_errors},
+    // phases::tests::a_workspace_kept_for_the_guest_log_level_names_its_source and
+    // tests::analyze_notes_a_guest_log_level_from_the_environment: 1216.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5853,6 +5858,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seven ranked-candidate finder tests: 1236.
     // And the same two change-of-course timing tests: 1238.
     // And the same wait-ranking test: 1239.
+    // And the same seven trial-log-level tests: 1210.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
