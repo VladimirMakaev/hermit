@@ -3202,6 +3202,16 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And preemptions::tests::a_record_too_varied_to_renumber_keeps_its_priorities: 2697.
     // And scheduler::test::a_recorded_schedule_stores_the_scheduler_seed: 2696,
     // listed.
+    // And the three signal-death units (a thread killed by a group-ending
+    // signal makes an empty run queue wait for the rest of its group):
+    // group_signal_tests::a_fatal_signal_ends_the_group_except_seccomps_sigsys,
+    // scheduler::test::a_fatal_signal_death_waits_for_its_group_so_a_blocked_leader_is_no_deadlock
+    // and
+    // tool_global::tests::sigkill_deregistration_tests::a_sigkill_deregistration_waits_for_the_rest_of_its_group:
+    // 2685, listed.
+    // And sigkill_deregistration_tests::a_death_already_accounted_waits_for_nothing
+    // (a death a SIGKILL or an earlier exit accounts for is not waited for):
+    // 2686, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3542,7 +3552,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests: 285, listed.
     // And dispatch_stats::ptrace_syscall_histograms_of_two_runs_are_identical
     // (the per-run syscall histogram (dh-te7ep)): 286, listed.
-    ("test.hermit_integration_2", 286),
+    // And fatal_core_capture's
+    // a_fault_ends_the_run_while_the_leader_waits_on_a_condition_variable (a
+    // thread's fault ends the run by its signal while main waits on a
+    // condition variable): 287, listed.
+    ("test.hermit_integration_2", 287),
     // And standalone's 13 internal standalone targets, one ignored for the
     // per-test CPU budget, in the third shard: 60 + 263 + 244 = 567.
     // Less no_networking_network_bind_full, ignored for the per-test CPU
@@ -5487,6 +5501,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same schedule-prefix unit: 2696, listed.
     // And the same normalize test: 2697.
     // And the same recorded scheduler-seed unit: 2696, listed.
+    // And the same three signal-death units: 2685, listed.
+    // And the same already-accounted death unit: 2686, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5602,6 +5618,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Name the optional e9patch consumer leg separately; all ten legs remain (+1): 692.
     // And the same two-run syscall-histogram test: 693, listed.
     // And the same random_determinism schedule-replay test: 694, listed.
+    // And the same fatal_core_capture leader-waits test: 694, listed.
     ("test.hermit_integration_on_host", 694),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode

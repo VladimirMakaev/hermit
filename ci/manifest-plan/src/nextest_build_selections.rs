@@ -944,6 +944,9 @@ mod tests {
             // random_determinism's
             // a_schedule_replay_hands_the_guest_the_recorded_random_values (+1):
             // 694.
+            // fatal_core_capture's
+            // a_fault_ends_the_run_while_the_leader_waits_on_a_condition_variable
+            // (+1): 694.
             assert_eq!(population, 694);
             // The explicit utimensat mtime regression
             // (https://github.com/rrnewton/hermit/issues/3565).

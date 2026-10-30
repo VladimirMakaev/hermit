@@ -6615,6 +6615,7 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
             syscall_count: thread_state.stats.syscall_count,
             syscall_histogram: (&thread_state.stats.syscall_histogram).into(),
             chaos_epochs: pending_chaos_epochs,
+            killed_by_group_signal: signal_ends_thread_group(&exit_status),
         };
         if transferred_exec {
             tool_global::retire_exec(
@@ -6651,6 +6652,54 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
             .await?;
 
         Ok(())
+    }
+}
+
+/// Whether a thread that ended with `status` took its whole thread group with
+/// it. A thread reported killed by a signal died in a group exit: Linux ends
+/// every thread of the group when a signal's default action is fatal
+/// (`get_signal` calls `do_group_exit`, which queues SIGKILL to the others and
+/// gives each the same status). The one exception is SIGSYS, which seccomp's
+/// `SECCOMP_RET_KILL_THREAD` uses to end a single thread (`__seccomp_filter`
+/// calls `do_exit(SIGSYS)`), so a SIGSYS death never makes the scheduler wait
+/// for the rest of the group (`Scheduler::note_signal_killed_group`). A
+/// death by a signal nix cannot name (`SignaledRaw`, a real-time signal) is a
+/// group exit too: the test is on the signal's number, whichever form the
+/// status takes.
+fn signal_ends_thread_group(status: &ExitStatus) -> bool {
+    status
+        .signal()
+        .is_some_and(|signal| signal != Signal::SIGSYS as i32)
+}
+
+#[cfg(test)]
+mod group_signal_tests {
+    use super::*;
+
+    #[test]
+    fn a_fatal_signal_ends_the_group_except_seccomps_sigsys() {
+        for signal in [
+            Signal::SIGKILL,
+            Signal::SIGSEGV,
+            Signal::SIGABRT,
+            Signal::SIGTERM,
+        ] {
+            assert!(
+                signal_ends_thread_group(&ExitStatus::Signaled(signal, true)),
+                "{signal:?}"
+            );
+        }
+        assert!(!signal_ends_thread_group(&ExitStatus::Signaled(
+            Signal::SIGSYS,
+            true
+        )));
+        // A real-time signal's default action (terminate) ends the group too.
+        assert!(signal_ends_thread_group(&ExitStatus::SignaledRaw(
+            libc::SIGRTMIN() + 1,
+            false
+        )));
+        assert!(!signal_ends_thread_group(&ExitStatus::Exited(0)));
+        assert!(!signal_ends_thread_group(&ExitStatus::Exited(1)));
     }
 }
 
