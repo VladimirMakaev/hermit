@@ -7359,6 +7359,7 @@ mod tests {
             end_rip: detcore::types::InstructionPointer::new(rip),
             end_time: None,
             stopless: false,
+            strex_fails: Default::default(),
         };
         let requested = vec![
             other(3, 0x10),
