@@ -3468,6 +3468,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and reconnected_datagram_socket (no anonymous inode joins over a
     // pairing Detcore could not follow): 181.
     // And scm_rights_connection_from_a_chroot: 182.
+    // And the eight untraced_clone tests (CLONE_UNTRACED children traced as
+    // every guest task is: the sanitizer helper, a process, a thread, clone3,
+    // a longer clone_args, a vfork on the caller's stack, a pidfd, and the
+    // sizes and faults Linux refuses): 172.
     ("test.detcore_misc", 182),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
@@ -4734,6 +4738,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // are skipped by exact name here and run in privileged-test.pmu_cli_cases
     // with a_thread_that_has_run_does_not_wait_behind_a_zero_length_sleep_loop:
     // 641 - 4 = 637, listed.
+    // And the four an_untraced_*_runs_as_natively tests: 641.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5321,6 +5326,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // not among them either: 560.
     // The same four PMU chaos cases, skipped by exact name here as in
     // test.cli: 560 - 4 = 556, listed.
+    // And the same four an_untraced_*_runs_as_natively tests: 560.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5402,6 +5408,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same child-connection test: 178.
     // And the same three unfollowed-pairing tests: 181.
     // And the same chroot connection test: 182.
+    // And the same eight untraced_clone tests: 172.
     ("test.detcore_misc_on_host", 182),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
