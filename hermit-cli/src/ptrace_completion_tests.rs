@@ -395,6 +395,78 @@ fn a_child_with_its_parents_pid_in_a_new_pid_namespace_has_its_own_tracer() {
     );
 }
 
+/// This host's kernel has PID namespaces: the `pid` entry is read and held.
+#[test]
+fn the_pid_namespace_is_read_from_its_entry() {
+    let (namespace, file) = open_pid_namespace().unwrap();
+    let file = file.expect("the namespace file is held");
+    let meta = file.metadata().unwrap();
+    assert_eq!(namespace, PidNamespace::Inode(meta.dev(), meta.ino()));
+}
+
+/// On a kernel with PID namespaces, a `pid` entry hidden from the caller's
+/// `ns` directory is never read as a kernel without them: not under a tmpfs
+/// mounted over that directory (not procfs), nor under another procfs
+/// directory mounted there (which has no `mnt` entry either) (Codex review).
+#[test]
+fn a_masked_ns_directory_is_not_read_as_a_kernel_without_pid_namespaces() {
+    isolated_with_child_setup(
+        "a_masked_ns_directory_is_not_read_as_a_kernel_without_pid_namespaces",
+        &[],
+        enter_user_and_mount_namespaces,
+        || {
+            let pid = std::process::id();
+            let ns = std::ffi::CString::new(format!("/proc/{pid}/ns")).unwrap();
+            let fdinfo = std::ffi::CString::new(format!("/proc/{pid}/fdinfo")).unwrap();
+            let mount = |source: &std::ffi::CStr, kind: Option<&std::ffi::CStr>, flags| {
+                let result = unsafe {
+                    libc::mount(
+                        source.as_ptr(),
+                        ns.as_ptr(),
+                        kind.map_or(std::ptr::null(), |kind| kind.as_ptr()),
+                        flags,
+                        std::ptr::null(),
+                    )
+                };
+                if result == 0 {
+                    return true;
+                }
+                let error = std::io::Error::last_os_error();
+                // A host whose user namespaces may not mount over procfs
+                // cannot mask the entry this way either.
+                assert_eq!(
+                    error.raw_os_error(),
+                    Some(libc::EPERM),
+                    "mount over {ns:?}: {error}"
+                );
+                false
+            };
+            let unmount = || {
+                assert_eq!(unsafe { libc::umount2(ns.as_ptr(), libc::MNT_DETACH) }, 0);
+            };
+            if !mount(c"tmpfs", Some(c"tmpfs"), 0) {
+                eprintln!("SKIPPED: this host refuses mounts over procfs in a user namespace");
+                return;
+            }
+            assert!(
+                open_pid_namespace().is_err(),
+                "a tmpfs over the ns directory"
+            );
+            unmount();
+            assert!(mount(&fdinfo, None, libc::MS_BIND));
+            assert!(
+                open_pid_namespace().is_err(),
+                "a procfs directory with no mnt entry over the ns directory"
+            );
+            unmount();
+            assert!(matches!(
+                open_pid_namespace(),
+                Ok((PidNamespace::Inode(..), Some(_)))
+            ));
+        },
+    );
+}
+
 /// Without a readable PID namespace (here a tmpfs over `/proc`), a process
 /// cannot tell its own tracer handle from an inherited one, so launches run on
 /// the calling thread, as before the tracer thread, and refuse there

@@ -2246,6 +2246,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And canonical_verdict::tests::store_exclusive_retries_are_optional_and_
     // strictly_typed plus verify::tests' three store-exclusive cause units (a
     // verify divergence names its store-exclusive retries): 1167.
+    // And the_pid_namespace_is_read_from_its_entry and
+    // a_masked_ns_directory_is_not_read_as_a_kernel_without_pid_namespaces (a
+    // kernel without PID namespaces): 1169 + 2 = 1171, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -7073,6 +7076,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // rewrite tests on top add none here: 1157, listed.
     // And the same replayed-record refusal unit: 1130, listed.
     // And the same four store-exclusive cause units: 1161.
+    // And the same two PID-namespace units: 1165, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
