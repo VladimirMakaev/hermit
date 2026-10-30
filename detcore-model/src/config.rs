@@ -297,6 +297,14 @@ pub struct Config {
     #[serde(default)]
     pub cpu_profile: crate::cpu_profile::CpuProfile,
 
+    /// aarch64: rewrite the canonical load/store-exclusive retry loops of
+    /// every executable file mapping in the guest's memory, as each is
+    /// mapped. Set by the CLI for `--rewrite-exclusives` in a run that has no
+    /// mount namespace to carry rewritten files; never read from a recording.
+    #[clap(skip)]
+    #[serde(default)]
+    pub rewrite_exclusives_in_memory: bool,
+
     /// The host facts a v3 guest's leaf 0xD and xstate answers come from, set
     /// by the CLI after the host qualifies; `None` under v2. Neither profile
     /// field enters the legacy form the DBT runtime reads (DBT refuses v3).
@@ -3814,7 +3822,11 @@ mod legacy_backend_json {
     /// `property_snapshot` came after it too, and only hermit-cli sets it, on
     /// Android, where DBT does not run; it is never written and reads as
     /// unset.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 49] = [
+    /// `rewrite_exclusives_in_memory` came after it as well: the in-memory
+    /// rewrite of aarch64 exclusive loops is done by the ptrace backend's
+    /// global state, and no backend that reads the legacy form does it, so it
+    /// is never written and reads as false.
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 50] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -3864,6 +3876,7 @@ mod legacy_backend_json {
         "chaos_timeslice_draw",
         "chaos_timeslice",
         "property_snapshot",
+        "rewrite_exclusives_in_memory",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -4012,7 +4025,8 @@ mod legacy_backend_json {
                     | "eager_lone_preemptions"
                     | "replay_edited_preemptions"
                     | "strict_binder"
-                    | "untrap_passthrough_syscalls",
+                    | "untrap_passthrough_syscalls"
+                    | "rewrite_exclusives_in_memory",
                 ) => seed.deserialize(BoolDeserializer::new(false)).map(Some),
                 // Empty, as its serde default is; and 0, the default.
                 Some("in_guest_reserved_signals" | "access_trace_from") => {
@@ -4363,7 +4377,8 @@ mod legacy_backend_json {
                 | "chaos_timeslice_range"
                 | "chaos_timeslice_draw"
                 | "chaos_timeslice"
-                | "property_snapshot" => Ok(()),
+                | "property_snapshot"
+                | "rewrite_exclusives_in_memory" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
         }
@@ -5301,7 +5316,8 @@ mod tests {
                 | "chaos_timeslice_range"
                 | "chaos_timeslice_draw"
                 | "chaos_timeslice"
-                | "property_snapshot" => {}
+                | "property_snapshot"
+                | "rewrite_exclusives_in_memory" => {}
                 other => expected.push(other.to_owned()),
             }
         }
@@ -5326,9 +5342,9 @@ mod tests {
         // `annotated_priority_replay`, `virtual_cpus`, `notice_host_network_abstract_binds`,
         // `replay_adopted_seeds`, `replay_continue_fairly`, `eager_lone_preemptions` and
         // `replay_edited_preemptions` and `strict_schedule_boundaries` none: fourteen more keys and
-        // forty-six fewer, so thirty-two keys fewer than fields.
+        // forty-seven fewer, so thirty-three keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 31);
+        assert_eq!(fields.len(), keys.len() + 32);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
@@ -5881,6 +5897,39 @@ mod tests {
             !from_legacy_backend_json(&array)
                 .unwrap()
                 .untrap_passthrough_syscalls
+        );
+    }
+
+    /// `rewrite_exclusives_in_memory` never enters the legacy form, whatever its value: the
+    /// legacy string keeps its bytes, and it reads back as false from both
+    /// the object and the array form.
+    #[test]
+    fn rewrite_exclusives_in_memory_never_enters_the_legacy_form() {
+        let off = Config {
+            backend: BackendCapabilities::DBT,
+            ..Config::default()
+        };
+        let on = Config {
+            rewrite_exclusives_in_memory: true,
+            ..off.clone()
+        };
+        let json = to_legacy_backend_json(&on).unwrap();
+        assert_eq!(json, to_legacy_backend_json(&off).unwrap());
+        assert!(!json.contains("rewrite_exclusives_in_memory"), "{json}");
+        assert!(
+            !from_legacy_backend_json(&json)
+                .unwrap()
+                .rewrite_exclusives_in_memory
+        );
+        let values: Vec<serde_json::Value> = ordered_entries(&json)
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect();
+        let array = serde_json::to_string(&values).unwrap();
+        assert!(
+            !from_legacy_backend_json(&array)
+                .unwrap()
+                .rewrite_exclusives_in_memory
         );
     }
 
