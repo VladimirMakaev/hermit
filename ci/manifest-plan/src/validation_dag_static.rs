@@ -1280,7 +1280,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And host_input::tests::a_guest_descriptor_is_classified_without_reaching_a_fuse_filesystem: 1977.
     // And host_input::tests::a_guest_descriptor_is_statted_only_on_a_local_kernel_filesystem: 1932.
     // And host_input::tests::the_root_is_known_by_its_mapped_image: 1978.
-    ("test.regular_crates", 1978),
+    // And host_input::tests::an_unknown_stdio_kind_is_never_compared: 1934.
+    // And config::tests::launch_namespace_mounts_never_enters_the_legacy_form: 1980.
+    ("test.regular_crates", 1980),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -4732,7 +4734,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_names_a_stdio_kind_changed_since_the_recording: 775.
     // And a_verify_run_records_the_stdio_kinds_its_guest_was_given: 776.
     // And a_library_run_records_the_stdio_kinds_of_its_commands_descriptors: 777.
-    ("test.cli", 777),
+    // And a_containerized_run_records_the_stdio_kinds_it_inherits: 778.
+    ("test.cli", 778),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5337,7 +5340,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same stdio-kind replay test: 694.
     // And the same captured-run stdio-kind test: 695.
     // And the same library-run stdio-kind test: 696.
-    ("test.cli_on_host", 696),
+    // And the same containerized-run stdio-kind test: 697.
+    ("test.cli_on_host", 697),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5354,7 +5358,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1962.
     // Kept equal to the second test.regular_crates_on_host entry below: 1963.
     // Kept equal to the second test.regular_crates_on_host entry below: 1964.
-    ("test.regular_crates_on_host", 1964),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1966.
+    ("test.regular_crates_on_host", 1966),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6574,7 +6579,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same terminal-device unit: 1962.
     // And the same guest-descriptor classifier unit: 1963.
     // And the same mapped-image unit: 1964.
-    ("test.regular_crates_on_host", 1964),
+    // And the same never-compared unit: 1920.
+    // And the same launch-namespace config unit: 1966.
+    ("test.regular_crates_on_host", 1966),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
