@@ -1891,6 +1891,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // phases::tests::the_baseline_knock_out_removes_a_real_intervention_until_none_is_left: 1191.
     // And --minimize's baseline search and minimization: phases::tests::the_baseline_search_knocks_out_the_replayed_record_until_a_replay_misses and
     // minimize::tests::a_failed_cut_of_a_threads_last_interventions_is_tested_again: 1193.
+    // And schedule_search::tests::schedules_without_a_reordering_end_with_no_single_swap: 1194.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5776,6 +5777,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same slice-end test: 1183.
     // And the same two minimize tests: 1185.
     // And the same two --minimize tests: 1187.
+    // And the same schedule-search test: 1188.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
