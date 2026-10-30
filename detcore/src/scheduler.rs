@@ -4951,7 +4951,8 @@ impl Scheduler {
                 .with_guest_ids(cfg.guest_ids)
                 .with_uncapped_slices(
                     cfg.replay_preemptions_from.is_some() || uncapped_replay_backstop.is_some(),
-                );
+                )
+                .with_chaos_timeslice(cfg.chaos_timeslice);
             if boundaries {
                 writer
                     .with_slice_boundaries()
