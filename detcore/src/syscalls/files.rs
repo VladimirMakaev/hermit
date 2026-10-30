@@ -75,6 +75,7 @@ use crate::scheduler::runqueue::LAST_PRIORITY;
 use crate::scheduler::terminal_signals;
 use crate::stat::*;
 use crate::syscalls::guest_siginfo::GuestSiginfo;
+use crate::syscalls::signal::ProcessSignalTarget;
 use crate::syscalls::threads::kernel_sigset_bit;
 use crate::tool_global::*;
 use crate::tool_local::CapturedDetFdInstallError;
@@ -1012,8 +1013,97 @@ pub(crate) fn pidfd_signal_scope(flags: u32) -> Result<PidfdSignalScope, Errno> 
 
 /// `pidfd_send_signal`'s sentinel for the calling thread (Linux 6.15 and later).
 const PIDFD_SELF_THREAD: RawFd = -10000;
-/// `pidfd_send_signal`'s sentinel for the calling thread's thread group.
+/// `pidfd_send_signal`'s sentinel for the calling thread's thread group, as
+/// Linux 6.17 and later spell it (include/uapi/linux/fcntl.h:111 at v6.17),
+/// which is the ABI Hermit presents on every host
+/// (https://github.com/rrnewton/hermit/issues/4147).
 const PIDFD_SELF_THREAD_GROUP: RawFd = -10001;
+/// The same sentinel as Linux 6.15 and 6.16 spell it
+/// (include/uapi/linux/pidfd.h:58 at v6.16), before 6.17 moved it to
+/// [`PIDFD_SELF_THREAD_GROUP`]. A guest's -20000 is no sentinel to Hermit, as
+/// to Linux 6.17: an unknown descriptor, EBADF.
+const PIDFD_SELF_THREAD_GROUP_6_15: RawFd = -20000;
+
+/// The values a host kernel may give the sentinel Hermit presents as
+/// `sentinel`, newest first.
+fn pidfd_self_spellings(sentinel: RawFd) -> &'static [RawFd] {
+    match sentinel {
+        PIDFD_SELF_THREAD => &[PIDFD_SELF_THREAD],
+        PIDFD_SELF_THREAD_GROUP => &[PIDFD_SELF_THREAD_GROUP, PIDFD_SELF_THREAD_GROUP_6_15],
+        _ => &[],
+    }
+}
+
+/// The first value of `sentinel` (`pidfd_self_spellings`) that `accepts` says
+/// the host kernel takes as that sentinel; `None` when it knows none.
+fn pidfd_self_spelling(sentinel: RawFd, accepts: impl Fn(RawFd) -> bool) -> Option<RawFd> {
+    pidfd_self_spellings(sentinel)
+        .iter()
+        .copied()
+        .find(|&spelling| accepts(spelling))
+}
+
+/// How this host's kernel spells the sentinel Hermit presents as `sentinel`,
+/// probed once per sentinel: a signal 0 sent through a value from the
+/// process Detcore runs in succeeds only where the kernel takes that value as
+/// the sentinel (a signal-0 send checks only that the target exists, and any
+/// other negative descriptor is EBADF, kernel/signal.c:4090-4092 at v6.17).
+/// Detcore decides what a sentinel names itself and forwards a send in the
+/// host's spelling, so that what the guest sees does not depend on the host
+/// kernel's version.
+///
+/// The probe is deterministic and invisible to the guest. The kernel's
+/// answer depends only on its version, which a run cannot change, so every
+/// run and both runs of `--verify` take the same spelling. A signal-0 send
+/// queues no signal and changes no task's state, and the probe puts `errno`
+/// back as it found it, which matters where Detcore runs inside the guest's
+/// process (LiteInst, SaBRe, DBT). A `hermit replay` probes too: the replay
+/// tool compares each forwarded call's arguments with the recorded call
+/// before it returns the recorded result, and the recording carries the
+/// recording host's spelling, so a replay on a host whose kernel spells the
+/// sentinel differently stops with a named desynchronization rather than a
+/// different answer.
+fn host_pidfd_self_spelling(sentinel: RawFd) -> Option<RawFd> {
+    static THREAD: std::sync::OnceLock<Option<RawFd>> = std::sync::OnceLock::new();
+    static GROUP: std::sync::OnceLock<Option<RawFd>> = std::sync::OnceLock::new();
+    let probe = || {
+        // SAFETY: `__errno_location` returns this thread's `errno`.
+        let errno = unsafe { libc::__errno_location() };
+        let saved = unsafe { *errno };
+        let spelling = pidfd_self_spelling(sentinel, accepts);
+        unsafe { *errno = saved };
+        spelling
+    };
+    match sentinel {
+        PIDFD_SELF_THREAD => *THREAD.get_or_init(probe),
+        PIDFD_SELF_THREAD_GROUP => *GROUP.get_or_init(probe),
+        _ => None,
+    }
+}
+
+/// Whether the host kernel takes `spelling` as a `pidfd_send_signal` sentinel
+/// (`host_pidfd_self_spelling`).
+fn accepts(spelling: RawFd) -> bool {
+    // SAFETY: a signal-0 pidfd_send_signal with no siginfo reads no memory
+    // and sends no signal.
+    let rc = unsafe {
+        libc::syscall(
+            libc::SYS_pidfd_send_signal,
+            spelling,
+            0,
+            std::ptr::null::<libc::siginfo_t>(),
+            0,
+        )
+    };
+    rc == 0
+}
+
+/// `call`, a `pidfd_send_signal`, with `pidfd` as its descriptor.
+fn with_pidfd(call: Syscall, pidfd: RawFd) -> Syscall {
+    let (sysno, mut args) = call.into_parts();
+    args.arg0 = pidfd as usize;
+    Syscall::from_raw(sysno, args)
+}
 
 /// The task a `PIDFD_SELF_*` sentinel names, and the scope Linux gives it when
 /// no flag is set: the calling thread (thread-directed) or its thread group
@@ -13421,6 +13511,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         signal: i32,
         flags: u32,
     ) -> Result<i64, Error> {
+        let mut call = call;
         // Linux checks the flags before it looks at the descriptor.
         let mut scope = pidfd_signal_scope(flags)?;
         let info = AddrMut::<GuestSiginfo>::from_raw(call.into_parts().1.arg2);
@@ -13435,6 +13526,26 @@ impl<T: RecordOrReplay> Detcore<T> {
         // or its thread group (`PIDFD_SELF_THREAD_GROUP`)
         // (https://github.com/rrnewton/hermit/issues/4147).
         let named = if let Some((target, default)) = pidfd_self_target(guest, pidfd) {
+            // Hermit presents Linux 6.17's sentinels whatever the host's
+            // version: what the call names is Detcore's decision, and a
+            // forwarded send carries the value this host's kernel takes for
+            // the same sentinel (`host_pidfd_self_spelling`). A host that
+            // knows none (before Linux 6.15) cannot carry it out.
+            let Some(spelling) = host_pidfd_self_spelling(pidfd) else {
+                tracing::error!(
+                    "[detcore, dtid {}] pidfd_send_signal through the sentinel {} is not \
+                     supported: this host's kernel does not know it \
+                     (https://github.com/rrnewton/hermit/issues/4147)",
+                    guest.thread_state().dettid,
+                    pidfd,
+                );
+                return self
+                    .refuse_unserviceable_operation(guest, Sysno::pidfd_send_signal, Errno::ENOSYS)
+                    .await;
+            };
+            if spelling != pidfd {
+                call = with_pidfd(call, spelling);
+            }
             if flags == 0 {
                 scope = default;
             }
@@ -13697,33 +13808,48 @@ impl<T: RecordOrReplay> Detcore<T> {
             return Ok(value);
         }
         // A process-directed signal. To a process with two or more live threads
-        // it is refused by name as `kill` refuses it: Linux's complete_signal
-        // picks the receiving thread, which Detcore does not model
-        // (https://github.com/rrnewton/hermit/issues/4047). Everything else is
-        // forwarded and the kernel answers: signal 0, which only checks that
-        // the process exists; a SIGKILL that could not be reserved, which kills
-        // the whole group whichever thread it reaches (the scheduler is told
-        // below); a process with one live thread, whose receiver the scheduler
-        // is then told about, as `kill` does; and a process with none (a
-        // zombie, which Linux still signals successfully).
+        // it goes to the thread Linux's complete_signal picks, as Detcore
+        // decides it, or waits in the shared queue when none wants it, as for
+        // `kill` (https://github.com/rrnewton/hermit/issues/4034). Everything
+        // else is forwarded and the kernel answers: signal 0, which only
+        // checks that the process exists; a SIGKILL that could not be
+        // reserved, which kills the whole group whichever thread it reaches
+        // (the scheduler is told below); a process with one live thread, whose
+        // receiver the scheduler is then told about, as `kill` does; and a
+        // process with none (a zombie, which Linux still signals
+        // successfully).
         let mut receiver = None;
+        // Whether the scheduler chose `receiver` among several threads, so a
+        // successful send moves the process's `curr_target`.
+        let mut chosen = false;
         if signal != 0
             && signal != libc::SIGKILL
             && guest.config().sequentialize_threads
             && let Some(target) = process
         {
-            match resolve_kill_targets(guest, target).await.as_slice() {
-                [] => {}
-                [thread] => receiver = Some((*thread, target)),
-                _ => {
-                    self.process_signal_target(
-                        guest,
-                        reverie::syscalls::Sysno::pidfd_send_signal,
-                        target,
-                        signal,
-                    )
-                    .await?;
+            // A process-scoped pidfd names the process's leader; a
+            // `/proc/<tid>` descriptor names its thread.
+            let named_task = DetTid::from_raw(named.unwrap_or(target).as_raw());
+            match self
+                .process_signal_target(
+                    guest,
+                    reverie::syscalls::Sysno::pidfd_send_signal,
+                    target,
+                    named_task,
+                    signal,
+                )
+                .await
+            {
+                Ok(ProcessSignalTarget::Thread(thread)) => receiver = Some((thread, target)),
+                Ok(ProcessSignalTarget::Chosen(thread)) => {
+                    receiver = Some((thread, target));
+                    chosen = true;
                 }
+                // Forwarded below, waking no thread: into the shared queue,
+                // to a zombie, or to a process the kernel answers for.
+                Ok(ProcessSignalTarget::SharedQueue | ProcessSignalTarget::Zombie)
+                | Err(Error::Errno(Errno::ESRCH)) => {}
+                Err(error) => return Err(error),
             }
         }
         let value = match receiver {
@@ -13743,6 +13869,9 @@ impl<T: RecordOrReplay> Detcore<T> {
             }
             None => self.record_or_replay(guest, call).await?,
         };
+        if chosen && let Some((_, process)) = receiver {
+            crate::tool_global::process_signal_sent(guest, process).await;
+        }
         if let Some((thread, process)) = receiver {
             // Tell the scheduler, as `kill` does, so a receiver parked in a
             // blocking call (pause(), a futex wait) is woken to take it
@@ -19528,24 +19657,32 @@ mod rebound_path_tests {
 
 #[cfg(test)]
 mod untraced_code_tests {
+    use std::os::fd::RawFd;
     use std::path::Path;
     use std::path::PathBuf;
 
     use nix::fcntl::OFlag;
     use reverie::syscalls::Errno;
+    use reverie::syscalls::Syscall;
     use reverie::syscalls::SyscallArgs;
+    use reverie::syscalls::SyscallInfo;
     use reverie::syscalls::Sysno;
 
     use super::DescriptorFacts;
     use super::DetPid;
+    use super::PIDFD_SELF_THREAD;
+    use super::PIDFD_SELF_THREAD_GROUP;
     use super::PROC_ROOT_INO;
     use super::PidfdSignalScope;
     use super::ProcessDirectoryDescriptor;
     use super::classify_process_directory;
     use super::descriptor_identity;
+    use super::host_pidfd_self_spelling;
     use super::may_change_untraced_code;
     use super::may_write_process_memory;
+    use super::pidfd_self_spelling;
     use super::pidfd_signal_scope;
+    use super::with_pidfd;
 
     const PAGE: (u64, u64) = (0x7100_0000, 0x7100_1000);
 
@@ -19811,6 +19948,54 @@ mod untraced_code_tests {
         for flags in [3, 5, 6, 7, 8, 9, 1 << 31, u32::MAX] {
             assert_eq!(pidfd_signal_scope(flags), Err(Errno::EINVAL), "{flags:#x}");
         }
+    }
+
+    /// The thread-group sentinel Hermit presents is Linux 6.17's -10001 on
+    /// every host: a forwarded send carries the host kernel's own value for it,
+    /// -10001 from Linux 6.17 on and -20000 in 6.15 and 6.16, and none before
+    /// 6.15 (https://github.com/rrnewton/hermit/issues/4147). The probe takes
+    /// the newest value the host accepts. A send keeps every other argument.
+    #[test]
+    fn a_pidfd_self_sentinel_is_forwarded_in_the_hosts_spelling() {
+        let linux_6_17 = |fd: RawFd| fd == PIDFD_SELF_THREAD || fd == -10001;
+        let linux_6_16 = |fd: RawFd| fd == PIDFD_SELF_THREAD || fd == -20000;
+        let linux_6_14 = |_: RawFd| false;
+        assert_eq!(
+            pidfd_self_spelling(PIDFD_SELF_THREAD_GROUP, linux_6_17),
+            Some(-10001)
+        );
+        assert_eq!(
+            pidfd_self_spelling(PIDFD_SELF_THREAD_GROUP, linux_6_16),
+            Some(-20000)
+        );
+        assert_eq!(
+            pidfd_self_spelling(PIDFD_SELF_THREAD_GROUP, linux_6_14),
+            None
+        );
+        for host in [linux_6_17, linux_6_16] {
+            assert_eq!(
+                pidfd_self_spelling(PIDFD_SELF_THREAD, host),
+                Some(PIDFD_SELF_THREAD)
+            );
+        }
+        // -20000 is no sentinel Hermit presents: a guest's -20000 is an
+        // unknown descriptor, as on Linux 6.17.
+        assert_eq!(pidfd_self_spelling(-20000, linux_6_16), None);
+        // This host's own answer is one of the two values.
+        assert!(matches!(
+            host_pidfd_self_spelling(PIDFD_SELF_THREAD_GROUP),
+            Some(-10001 | -20000) | None
+        ));
+        let call = Syscall::from_raw(
+            Sysno::pidfd_send_signal,
+            SyscallArgs::new(PIDFD_SELF_THREAD_GROUP as usize, 10, 0x1000, 0, 0, 0),
+        );
+        let (sysno, args) = with_pidfd(call, -20000).into_parts();
+        assert_eq!(sysno, Sysno::pidfd_send_signal);
+        assert_eq!(
+            (args.arg0 as RawFd, args.arg1, args.arg2, args.arg3),
+            (-20000, 10, 0x1000, 0)
+        );
     }
 
     /// A descriptor names a process for `pidfd_send_signal` only when it is a

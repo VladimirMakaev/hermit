@@ -3322,6 +3322,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // msg_dontwait_runs_a_call_once_on_a_socket_the_guest_left_blocking: 2724.
     // And syscalls::helpers::tests::msg_errqueue_marks_only_a_receive_as_an_error_queue_read
     // and fd::tests::error_queue_reads_never_wait_on_the_protocols_that_read_the_queue: 2726.
+    // And the eight scheduler::process_signal_receiver units
+    // (https://github.com/rrnewton/hermit/issues/4034): 2746.
+    // And the pidfd sentinel spelling unit (lander review of #4625): 2747.
+    // And the chosen-receiver selection unit (lander review of #4625): 2748.
+    // And the curr_target commit unit (lander review of #4625): 2749.
+    // And the fatal all-blocked unit (lander review of #4625): 2750.
+    // And the own-process walk unit (second review of #4625): 2751.
+    // And the commit-guard unit (second review of #4625): 2752.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4226,7 +4234,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (https://github.com/rrnewton/hermit/issues/3904) retain all 276: 278.
     // a_real_time_signal_timer_is_refused_by_name_when_it_expires
     // (https://github.com/rrnewton/hermit/issues/3893) retains all 278: 279.
-    // a_process_directed_signal_to_several_threads_is_refused_by_name
+    // a_process_directed_signal_to_several_threads_is_refused_by_name (now
+    // a_process_directed_signal_to_a_sleeping_sibling_is_refused_by_name)
     // (https://github.com/rrnewton/hermit/issues/4034) retains all 279: 280.
     // a_signal_to_a_process_group_is_refused_by_name
     // (https://github.com/rrnewton/hermit/issues/4046) retains all 280: 281.
@@ -4263,7 +4272,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 293, listed with this node's arguments.
     // a_futex_wait_on_an_unreadable_word_is_efault
     // (https://github.com/rrnewton/hermit/issues/4030) retains all 293: 294.
-    // a_pidfd_signal_to_several_threads_is_refused_by_name
+    // a_pidfd_signal_to_several_threads_is_refused_by_name (now
+    // a_pidfd_signal_to_a_sleeping_sibling_is_refused_by_name)
     // (https://github.com/rrnewton/hermit/issues/4047) retains all 294: 295.
     // signals_to_hermits_own_tasks_are_dropped_in_every_mode,
     // a_nested_pid_namespace_signals_its_own_tasks and
@@ -4673,6 +4683,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // run_kvm_virtual_timeout_is_reported_from_the_childs_note): 629.
     // And msg_dontwait_returns_at_once_on_a_blocking_socket: 645.
     // And msg_errqueue_returns_at_once_on_inet_sockets_and_waits_on_unix_sockets: 646.
+    // And a_process_directed_signal_goes_to_the_thread_linux_chooses,
+    // a_signal_to_the_senders_own_process_that_another_thread_takes_is_refused_by_name,
+    // and each_unforced_signal_to_the_senders_own_process_reaches_the_thread_linux_chooses
+    // split from the own-process refusal test
+    // (https://github.com/rrnewton/hermit/issues/4034): 657.
+    // And a_schedule_replay_delivers_a_process_directed_signal_as_its_recording_did: 658.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -4730,7 +4746,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // scratch contract: 192, listed.
     // The 2026-10-17 test audit deleted rr_simple_threads_stress
     // (rr_join_threads without its asserts): 191.
-    ("test.rr_suite_contract", 191),
+    // And rr_multiple_pending_signals_sequential's new case, with
+    // rr_multiple_pending_signals no longer ignored, now that Detcore chooses
+    // a process-directed signal's receiving thread
+    // (https://github.com/rrnewton/hermit/issues/4034): 193.
+    ("test.rr_suite_contract", 193),
     ("privileged-test.pmu_buck_chaos_cases", 6),
     // PMU-subject cases moved out of test.hermit_unit and test.cli so the
     // hosted lane, which has no PMU, does not select them (see
@@ -5231,6 +5251,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // one too): 548.
     // And msg_dontwait_returns_at_once_on_a_blocking_socket: 564.
     // And msg_errqueue_returns_at_once_on_inet_sockets_and_waits_on_unix_sockets: 565.
+    // And the same three process-directed signal tests: 576.
+    // And the same process-directed signal schedule-replay test: 577.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5735,6 +5757,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same MSG_DONTWAIT unit: 2723.
     // And the same MSG_DONTWAIT decision unit: 2724.
     // And the same two MSG_ERRQUEUE units: 2726.
+    // And the same eight process_signal_receiver units: 2746.
+    // And the same pidfd sentinel spelling unit: 2747.
+    // And the same chosen-receiver selection unit: 2748.
+    // And the same curr_target commit unit: 2749.
+    // And the same fatal all-blocked unit: 2750.
+    // And the same own-process walk unit: 2751.
+    // And the same commit-guard unit: 2752.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6372,7 +6401,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
-    ("test.rr_suite_contract_on_host", 190),
+    // And the same two multiple-pending-signals cases: 192.
+    ("test.rr_suite_contract_on_host", 192),
     // The host twin also selects the two startup-order tests, and the three
     // SaBRe host-input tests (12).
     // And the same target-scoped DETLOG forwarding test (13), and the same
