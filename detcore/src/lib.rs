@@ -88,6 +88,7 @@ pub mod race_probe;
 pub mod random;
 mod record_or_replay;
 pub mod refused_signal_controls;
+pub mod replay_departure;
 mod resources;
 mod scheduler;
 mod shared_open_files;
@@ -1803,6 +1804,15 @@ impl<T: RecordOrReplay> Detcore<T> {
                     && rcb_timer_overshot(delta_rcbs, last_timer, instruction_offset)
                     && precise_timers
                 {
+                    // The slice ending here classifies a recorded end this
+                    // thread is past by its largest overshoot
+                    // (`classify_replay_overshoot`).
+                    let past = delta_rcbs - last_timer;
+                    thread_state.timer_overshoot = Some(
+                        thread_state
+                            .timer_overshoot
+                            .map_or(past, |seen| seen.max(past)),
+                    );
                     report_rcb_overshoot(
                         self.cfg.panic_on_rcb_overshoot,
                         tid,
@@ -3455,6 +3465,8 @@ impl<T: RecordOrReplay> Detcore<T> {
             let thread_state = guest.thread_state();
             let dettid = thread_state.dettid;
             let end_time = thread_state.thread_logical_time.as_nanos();
+            // The slice this pass ends; `next_timeslice` below counts the next.
+            let ending_slice = thread_state.stats.timeslice_count;
             if let Some(origin) = &checkpoint {
                 checkpoint = Some(thread_state.callback_history.refresh(thread_state, origin));
             }
@@ -3524,17 +3536,29 @@ impl<T: RecordOrReplay> Detcore<T> {
             // no time in it). Filed, it was never granted and the replay
             // stalled until `--timeout`. Report it and run on without the
             // record's remaining ends for this thread: the run ends in the
-            // skid-overshoot refusal instead.
+            // replay-departure refusal instead. The departure goes to the
+            // scheduler with the thread's next request.
             if !replay_checkpoint && maybe_prio.is_some() {
                 let thread = guest.thread_state_mut();
                 if let Err(last) = thread.file_replay_change_point(&self.cfg, end_time) {
                     tool_local::report_stale_replay_filing(
                         self.cfg.panic_on_rcb_overshoot,
                         dettid,
-                        thread.stats.timeslice_count,
+                        ending_slice,
                         end_time,
                         last,
                     );
+                    thread
+                        .pending_replay_departure
+                        .get_or_insert(tool_local::ReplayDeparture {
+                            slice: Some(ending_slice),
+                            kind: detcore_model::summary::ReplayDepartureKind::Departure,
+                            recorded_rcbs: None,
+                            rcbs: thread.committed_clock_value,
+                            recorded_ns: last.as_nanos(),
+                            ns: end_time.as_nanos(),
+                            passed: 0,
+                        });
                     thread.abandon_replayed_slices(&self.cfg);
                     break;
                 }
@@ -5158,6 +5182,8 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
                     slice_boundary: None,
                     callback_history: Default::default(),
                     schedule_replay_over: pts.1.schedule_replay_over,
+                    pending_replay_departure: None,
+                    timer_overshoot: None,
                     detpid: None, // Initialized later.
                     thread_start_entered: false,
                     vfork_origin: if clone_flags.contains(CloneFlags::CLONE_VFORK) {

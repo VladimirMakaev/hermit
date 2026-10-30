@@ -5665,6 +5665,9 @@ pub fn classify_container_result<T>(
                 FailureKind::SkidOvershoot { count } => error
                     .context(SkidOvershootError::new(count))
                     .context(PolicyRefusal),
+                FailureKind::ReplayDeparture { count } => error
+                    .context(hermit::ReplayDepartureError::new(count))
+                    .context(PolicyRefusal),
                 // ⚠️ THE LIMIT IS RE-DERIVED, NOT RE-PARSED. `kind` says a
                 // deadline fired; the seconds live only in the message the
                 // child wrote, and `RunTimeoutMarker` deliberately carries no

@@ -3354,6 +3354,20 @@ impl GlobalState {
             }
             request => request,
         };
+        // Where a preemption replay's thread was found off its record since
+        // its last resource request: named now, as that request arrives, with
+        // the scheduler turn and global event it is filed at. The thread holds
+        // its turn until the request is filed, so neither moves in between.
+        let request = match request {
+            GlobalRequest::WithReplayDeparture(departure, request) => {
+                self.sched
+                    .lock()
+                    .unwrap()
+                    .note_replay_departure(dtid, *departure);
+                *request
+            }
+            request => request,
+        };
         let time_from_guest = guest_time.as_nanos();
         // The thread's own computation and syscalls, excluding clock advances
         // (`DetTime::advance_to`), for `--work-span-report`.
@@ -3832,6 +3846,9 @@ impl GlobalState {
             }
             GlobalRequest::WithForwardedCount(..) => {
                 unreachable!("a counted request is unwrapped on arrival")
+            }
+            GlobalRequest::WithReplayDeparture(..) => {
+                unreachable!("a replay departure is unwrapped on arrival")
             }
             GlobalRequest::ResumeExec(process) => {
                 let mut resources = Resources::new(dtid);
@@ -8035,6 +8052,13 @@ pub enum GlobalRequest {
     /// `Scheduler::post_crash_step`), answered before any clock or scheduler
     /// accounting. Appended last.
     PostCrash(crate::post_crash::PostCrashEvent),
+    /// A resource request (`RequestResources` or `ParkedRequest`) from a
+    /// thread a preemption replay found off its record since its previous
+    /// one: the scheduler names the departure with the turn and global event
+    /// the request arrives at (`Scheduler::note_replay_departure`). Kept out
+    /// of `Resources`, which the syscall paths hold by value at every level.
+    /// Appended last.
+    WithReplayDeparture(Box<crate::tool_local::ReplayDeparture>, Box<GlobalRequest>),
 }
 
 /// Responses from the global object
@@ -8408,6 +8432,30 @@ where
     match guest.try_send_rpc_sync(request).ok()? {
         (None, GlobalResponse::CheckBrkMappings(answer)) => answer,
         _ => None,
+    }
+}
+
+/// `request`, carrying where a preemption replay found this thread off its
+/// record since its last resource request (`ThreadState::pending_replay_departure`,
+/// `GlobalRequest::WithReplayDeparture`) if it is a resource request and there
+/// is one. The departure travels beside the request rather than in its
+/// `Resources`, which the syscall paths hold by value at every level.
+fn with_replay_departure<G, T>(guest: &mut G, request: GlobalRequest) -> GlobalRequest
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    if !matches!(
+        request,
+        GlobalRequest::RequestResources(..) | GlobalRequest::ParkedRequest(..)
+    ) {
+        return request;
+    }
+    match guest.thread_state_mut().pending_replay_departure.take() {
+        Some(departure) => {
+            GlobalRequest::WithReplayDeparture(Box::new(departure), Box::new(request))
+        }
+        None => request,
     }
 }
 
@@ -9295,6 +9343,7 @@ where
     let mm = guest.thread_state().mm_id;
     let continues_sigreturn = request_continues_sigreturn(&request);
     let starts_thread = matches!(request, GlobalRequest::StartNewThread(..));
+    let request = with_replay_departure(guest, request);
     let mut resp = guest.send_rpc((mytime, mm, counted_request(request))).await;
     let lone_grant = if let GlobalResponse::WithLoneGrant(response) = resp.1 {
         resp.1 = *response;
@@ -9592,7 +9641,8 @@ async fn wait_for_process_exit(pidfd: std::os::fd::OwnedFd, valve: Duration) -> 
 /// one (`Resources::continues_sigreturn`), as an ordinary or a parked request.
 fn request_continues_sigreturn(request: &GlobalRequest) -> bool {
     match request {
-        GlobalRequest::WithForwardedCount(_, request) => request_continues_sigreturn(request),
+        GlobalRequest::WithForwardedCount(_, request)
+        | GlobalRequest::WithReplayDeparture(_, request) => request_continues_sigreturn(request),
         GlobalRequest::RequestResources(resources, _)
         | GlobalRequest::ParkedRequest(resources, ..) => resources.continues_sigreturn,
         _ => false,
@@ -9603,7 +9653,8 @@ fn request_continues_sigreturn(request: &GlobalRequest) -> bool {
 // continuation after registering a different child remains an ordinary grant.
 fn registers_own_image(sender: DetTid, request: &GlobalRequest) -> bool {
     match request {
-        GlobalRequest::WithForwardedCount(_, request) => registers_own_image(sender, request),
+        GlobalRequest::WithForwardedCount(_, request)
+        | GlobalRequest::WithReplayDeparture(_, request) => registers_own_image(sender, request),
         GlobalRequest::CreateChildThread(child, ..) => *child == sender,
         GlobalRequest::CreateVforkChildThread(_, _, child, ..) => *child == sender,
         _ => false,
@@ -9612,7 +9663,8 @@ fn registers_own_image(sender: DetTid, request: &GlobalRequest) -> bool {
 
 fn resumes_from_grant(request: &GlobalRequest) -> bool {
     match request {
-        GlobalRequest::WithForwardedCount(_, request) => resumes_from_grant(request),
+        GlobalRequest::WithForwardedCount(_, request)
+        | GlobalRequest::WithReplayDeparture(_, request) => resumes_from_grant(request),
         GlobalRequest::RequestResources(..)
         | GlobalRequest::ParkedRequest(..)
         | GlobalRequest::ResumeParkedRequest { .. }
@@ -21984,6 +22036,58 @@ mod tests {
         let rerecorded =
             crate::preemptions::boundary_recording::Recording::read(&rerecorded).unwrap();
         assert_eq!(rerecorded.host_inputs(), Some(&inputs));
+    }
+
+    /// Where a preemption replay found a thread off its record, the departure
+    /// travels beside the thread's next resource request
+    /// (`GlobalRequest::WithReplayDeparture`), not in its `Resources`. The
+    /// global state names it as the request arrives, at the turn and global
+    /// event the request is filed at, and then answers the request it wraps
+    /// as it would unwrapped; the run summary names it.
+    #[tokio::test]
+    async fn a_replay_departure_beside_a_request_is_named_as_it_arrives() {
+        let directory = tempfile::tempdir().unwrap();
+        let summary = directory.path().join("summary.json");
+        let config = Config {
+            sequentialize_threads: true,
+            ..Config::default()
+        };
+        let state = GlobalState::initialize(&config, false);
+        let dettid = DetTid::from_raw(17);
+        let departure = crate::tool_local::ReplayDeparture {
+            slice: Some(3),
+            kind: detcore_model::summary::ReplayDepartureKind::Departure,
+            recorded_rcbs: Some(40),
+            rcbs: 1_081,
+            recorded_ns: 400,
+            ns: 10_810,
+            passed: 1,
+        };
+        let response = state
+            .receive_rpc(
+                reverie::Tid::from_raw(dettid.as_raw()),
+                (
+                    DetTime::new(&config),
+                    MmId::initial(dettid),
+                    GlobalRequest::WithReplayDeparture(
+                        Box::new(departure),
+                        Box::new(GlobalRequest::RecordHostMutation {
+                            path: "/data/F".into(),
+                        }),
+                    ),
+                ),
+            )
+            .await;
+        assert_eq!(response, (None, GlobalResponse::RecordHostMutation(())));
+        state.clean_up(false, &Some(summary.clone())).await.unwrap();
+        let summary: detcore_model::summary::RunSummary =
+            serde_json::from_str(&std::fs::read_to_string(&summary).unwrap()).unwrap();
+        let named = summary.replay_departure.expect("the departure is named");
+        assert_eq!(
+            (named.dtid, named.slice, named.rcbs, named.passed),
+            (17, Some(3), 1_081, 1)
+        );
+        assert_eq!(summary.replay_departures, 1);
     }
 
     /// A host-input observation, and a report of a path the guest rebound,
