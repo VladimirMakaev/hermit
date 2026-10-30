@@ -3496,6 +3496,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's post-fork-side scheduler test: 2692.
     // And this change's store-exclusive tests: 2707.
     // And this change's counter-read tests: 2709.
+    // And the register-helper test: 2696.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6108,6 +6109,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same test: 2692.
     // And the same tests: 2707.
     // And the same tests: 2709.
+    // And the same test: 2696.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
