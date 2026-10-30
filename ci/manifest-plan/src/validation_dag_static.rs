@@ -1869,6 +1869,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (a prefix trial keeps the callback checkpoints of the slices its events
     // end): 1106.
     // And phases::tests::a_prefix_report_says_when_both_stacks_are_one_thread: 1138.
+    // And phases::tests::a_prefix_report_says_when_both_stacks_are_one_thread: 1172.
+    // And analyze's per-trial bound: rundata::tests::{the_trial_bound_derives_from_the_slowest_endpoint_run,
+    // runs_take_the_bound_and_the_target_run_does_not, a_run_the_trial_bound_ends_names_the_bound,
+    // a_trials_log_is_capped_by_the_largest_endpoint_log,
+    // a_trial_that_a_bound_ends_did_not_reach_the_target,
+    // an_unenforceable_trial_timeout_is_refused_and_auto_does_without} and
+    // global_opts::tests::a_runs_log_bound_only_tightens_the_environment_bound: 1179.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5740,6 +5747,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four analyze --prefix-search tests: 1130.
     // And the same prefix-trial checkpoint test: 1131.
     // And the same one-thread prefix report test: 1132.
+    // And the same six analyze trial-input tests: 1160.
+    // And the same four analyze --prefix-search tests: 1164.
+    // And the same prefix-trial checkpoint test: 1165.
+    // And the same one-thread prefix report test: 1166.
+    // And the same seven analyze per-trial bound tests: 1173.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
