@@ -947,6 +947,7 @@ mod tests {
             // fatal_core_capture's
             // a_fault_ends_the_run_while_the_leader_waits_on_a_condition_variable
             // (+1): 694.
+            // And lit's chaos_schedule_replay fixture (+1): 695.
             assert_eq!(population, 694);
             // The explicit utimensat mtime regression
             // (https://github.com/rrnewton/hermit/issues/3565).

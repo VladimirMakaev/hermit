@@ -3252,6 +3252,24 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // syscalls::misc::tests::random_device_streams_are_distinct_per_open_file_and_pinned: 2697.
     // And the host-input set's eight units (host_inputs seven and tool_global's
     // a_schedule_replay_reports_host_inputs_changed_since_its_recording): 2703,
+    // And tool_local::timeslice_tests::chaos_schedule_replay_draws_no_slice_end
+    // (a schedule replay under --chaos draws no chaos decision): 2739, listed.
+    // And tool_local::timeslice_tests::a_kept_replay_slice_restarts_only_the_backstop
+    // and preemptions::callback_history::tests::a_later_site_of_the_running_callback_ends_the_slice_later
+    // (a replayed slice end a callback checkpoint marks is one turn): 2741, listed.
+    // And tool_global::tests::legacy_callback_checkpoint_at_the_pmu_epsilon_ends_an_expired_deadline_once
+    // and tool_global::tests::legacy_chaos_replay_ends_an_expired_deadline_as_without_chaos
+    // (the same two fixes through the hooks): 2743, listed.
+    // And tool_local::timeslice_tests::a_schedule_deadline_on_the_backstop_keeps_its_place
+    // (a schedule deadline that falls on the backstop is still the schedule's): 2744, listed.
+    // And four units pinning each replayed slice end the schedule installs
+    // and the kept slice's backstop restart (callback_history_tests'
+    // a_replayed_event_deadline_is_the_schedules_and_no_backstop,
+    // a_replayed_slice_end_past_the_maximum_is_the_schedules_and_no_backstop,
+    // a_replayed_checkpoint_that_keeps_the_slice_restarts_its_backstop, and
+    // exec_identity_tests'
+    // an_exec_continuation_resumes_the_schedules_slice_end_not_a_backstop):
+    // 2748, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3612,6 +3630,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_fault_ends_the_run_while_the_leader_waits_on_a_condition_variable (a
     // thread's fault ends the run by its signal while main waits on a
     // condition variable): 287, listed.
+    // And lit's chaos_schedule_replay fixture (a --chaos recording replayed
+    // with --die-on-desync): 287, listed.
     ("test.hermit_integration_2", 287),
     // And standalone's 13 internal standalone targets, one ignored for the
     // per-test CPU budget, in the third shard: 60 + 263 + 244 = 567.
@@ -4573,6 +4593,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_names_a_stdio_kind_changed_since_the_recording: 641.
     // And a_small_max_timeslice_gets_one_notice (the small --max-timeslice
     // notice): 638 (637 on main plus one).
+    // And a_schedule_replay_under_chaos_follows_its_recording: 655, listed.
+    // And a_schedule_replay_ends_each_recorded_slice_once: 656, listed.
+    // Each of the two schedule-replay tests split into one test per seed
+    // (seeds 1, 2 and 3), so each fits the 57-second wall bound: 656 + 4 = 660.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5115,6 +5139,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The small --max-timeslice notice test starts no guest and needs no PMU
     // (without one it checks that no notice is written): 557 (556 on main plus
     // one).
+    // And a_schedule_replay_under_chaos_follows_its_recording: 574, listed.
+    // And a_schedule_replay_ends_each_recorded_slice_once: 575, listed.
+    // And the same per-seed split of the two schedule-replay tests:
+    // 575 + 4 = 579.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5605,6 +5633,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same TracerPid unit: 2693, listed.
     // And the same two random-device stream units: 2697.
     // And the same eight host-input set units: 2703, listed.
+    // And the same chaos schedule-replay unit: 2739, listed.
+    // And the same two callback-checkpoint replay units: 2741, listed.
+    // And the same two hook-level replay units: 2743, listed.
+    // And the same backstop-coincidence unit: 2744, listed.
+    // And the same four replayed-slice-end units: 2748, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5721,6 +5754,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two-run syscall-histogram test: 693, listed.
     // And the same random_determinism schedule-replay test: 694, listed.
     // And the same fatal_core_capture leader-waits test: 694, listed.
+    // And the same chaos_schedule_replay lit fixture: 695, listed.
     ("test.hermit_integration_on_host", 694),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode
