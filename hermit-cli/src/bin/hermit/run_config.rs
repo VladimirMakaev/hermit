@@ -1118,6 +1118,7 @@ mod tests {
         ("debug-futex-mode", &["--debug-futex-mode=polling"]),
         ("no-rcb-time", &["--no-rcb-time"]),
         ("detlog-heap", &["--detlog-heap"]),
+        ("detlog-anon", &["--detlog-anon"]),
         ("detlog-stack", &["--detlog-stack"]),
         ("detlog-regs", &["--detlog-regs"]),
         ("no-detlog-io-buffers", &["--no-detlog-io-buffers"]),

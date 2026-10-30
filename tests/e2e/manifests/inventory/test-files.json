@@ -85,6 +85,12 @@
       "why": "tests/c/aio_refusal.c is owned by target/debug/test-harness via tests/e2e/manifests/c-programs.yaml (explicit mode selection; ci=false): Direct C guest is centrally discoverable with ptrace verification enabled for explicit runs; it remains outside blocking CI until its standalone build and output contract are calibrated"
     },
     {
+      "disposition": "guest-fixture",
+      "path": "tests/c/anon_mapping_write.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/anon_mapping_write.c is owned by hermit-cli/tests/cli.rs: detlog_anon_records_a_write_to_an_anonymous_mapping compiles this guest, whose two-page private anonymous mapping is written one byte between marker syscalls, and checks the per-syscall digests --detlog-anon records (and, with --detlog-anon=pages, the pages it lists); it stays a fixture because a generic manifest cannot compare the digest records of one mapping across syscalls."
+    },
+    {
       "disposition": "manifest-test",
       "path": "tests/c/append_pwrite.c",
       "runner": "target/debug/test-harness via tests/e2e/manifests/c-programs.yaml (explicit mode selection; ci=false)",
