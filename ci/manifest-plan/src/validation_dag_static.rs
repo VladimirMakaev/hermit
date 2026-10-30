@@ -2028,6 +2028,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and phases::tests::{a_trial_the_virtual_bound_stopped_is_not_confirmed,
     // a_virtual_bound_boundary_is_reported_as_a_hang_without_a_longer_bound}:
     // 1145.
+    // And metadata::tests::record_version_rejects_polled_dontwait_socketpair_recordings: 1163.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3316,6 +3317,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test::a_virtual_timeout_stops_the_run_at_the_first_commit_past_its_bound
     // and scheduler::test::a_virtual_timeout_is_not_recorded_once_no_thread_can_be_granted_a_turn
     // (--virtual-timeout): 2686.
+    // And syscalls::helpers::tests::only_msg_dontwait_keeps_a_socket_call_from_waiting: 2723.
+    // And the decision it feeds, syscalls::helpers::kernel_signal_wait_failures::
+    // msg_dontwait_runs_a_call_once_on_a_socket_the_guest_left_blocking: 2724.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4665,6 +4669,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_virtual_timeout_verifies_as_the_same_stop_in_both_runs
     // (--virtual-timeout, tests/c/virtual_timeout_loop.c; the node skips
     // run_kvm_virtual_timeout_is_reported_from_the_childs_note): 629.
+    // And msg_dontwait_returns_at_once_on_a_blocking_socket: 645.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5221,6 +5226,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same several-thread guest-deadlock parity test: 545, listed.
     // And the same three --virtual-timeout tests (this node skips the KVM
     // one too): 548.
+    // And msg_dontwait_returns_at_once_on_a_blocking_socket: 564.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5722,6 +5728,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same guest-deadlock terminal-verdict unit: 2683, listed.
     // And the same unwind retirement unit: 2684, listed.
     // And the same two --virtual-timeout scheduler units: 2686.
+    // And the same MSG_DONTWAIT unit: 2723.
+    // And the same MSG_DONTWAIT decision unit: 2724.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6139,6 +6147,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four guest-deadlock outcome units: 1199, listed.
     // And the same three --virtual-timeout units: 1202.
     // And the same seven virtual-time trial-bound tests: 1209.
+    // And the same MSG_DONTWAIT record-version unit: 1157.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
