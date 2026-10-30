@@ -1199,6 +1199,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's
     // collections::replay_cursor::tests::drop_discards_the_head_and_keeps_the_rest
     // (a replay resync drops the events it skips): 1881, listed.
+    // And detcore-model's four host-input set tests (host_input::tests): 1884,
+    // listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3241,6 +3243,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And procfs::tests::status_shows_no_tracer: 2693, listed.
     // And tool_local::tests::each_random_device_open_reads_its_own_stream and
     // syscalls::misc::tests::random_device_streams_are_distinct_per_open_file_and_pinned: 2697.
+    // And the host-input set's eight units (host_inputs seven and tool_global's
+    // a_schedule_replay_reports_host_inputs_changed_since_its_recording): 2703,
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4554,6 +4558,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_death_test_that_looks_for_a_debugger_dies_as_it_does_natively:
     // 634 + 2 = 636.
     // And separate_random_device_opens_read_distinct_bytes_at_bitwise_parity: 638.
+    // And a_schedule_replay_names_a_host_input_changed_since_the_recording,
+    // which needs no PMU: 638, listed.
+    // And recording_host_inputs_adds_no_inotify_event_the_guest_sees and
+    // a_replay_of_a_guest_that_uses_its_private_tmp_names_no_change, which
+    // need no PMU either: 640, listed.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5089,6 +5098,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same poll-skip replay test: 557.
     // And the same two TracerPid tests: 553 + 2 = 555.
     // And the ptrace random-device opens test, which the hosted lane runs: 557.
+    // a_schedule_replay_names_a_host_input_changed_since_the_recording needs
+    // neither a PMU nor CPUID faulting: 557, listed.
+    // And the same two host-input tests, which need neither: 559, listed.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5578,6 +5590,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And replayer::tests::a_failed_attempt_hands_over_after_the_thread_blocks: 2706.
     // And the same TracerPid unit: 2693, listed.
     // And the same two random-device stream units: 2697.
+    // And the same eight host-input set units: 2703, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6197,6 +6210,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Six regular-crate tests the pin missed, as cargo nextest list counts
     // the cell at this head: 1872.
     // And the same replay-cursor drop test: 1867, listed.
+    // And the same four host-input set tests: 1870, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
