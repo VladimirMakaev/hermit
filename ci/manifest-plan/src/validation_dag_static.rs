@@ -3378,6 +3378,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_shield_dropped_with_its_handler_ends_quietly: 2697.
     // And the eight edited-record replay tests in tool_local::timeslice_tests and the one
     // in edited_replay_hook_tests: 2691.
+    // And the three scheduler::test units of a fatal delivery's committed
+    // retirement (a_fatal_delivery_retires_the_threads_parked_in_futex_waits,
+    // a_fatal_delivery_does_not_take_a_reused_thread_id_from_another_process,
+    // a_fatal_delivery_retires_nothing_where_it_cannot_commit_the_group_end):
+    // And syscalls::threads' only_an_unblocked_default_fatal_delivery_ends_the_process
+    // and only_serialized_ptrace_runs_without_a_gdbserver_retire_at_a_fatal_delivery,
+    // and tool_global::tests::fatal_delivery_tests'
+    // a_retired_siblings_late_request_stays_unanswered: 2688, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4773,6 +4781,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 623.
     // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 638.
     // And kernel_run_poll_waits_are_not_ended_by_ignored_signals: 639.
+    // And a_default_fatal_signal_ends_a_process_whose_other_threads_wait_on_a_futex:
+    // 623, listed.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5379,6 +5389,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 542.
     // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 557.
     // And kernel_run_poll_waits_are_not_ended_by_ignored_signals: 558.
+    // And the same fatal-signal futex-waiters test, not excluded: 542, listed.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5909,6 +5920,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And an_ignored_signal_shield_blocks_only_what_the_guest_ignores: 2696.
     // And a_shield_dropped_with_its_handler_ends_quietly: 2697.
     // And the same nine edited-record replay tests: 2691.
+    // And the same three fatal-delivery retirement units: 2685, listed.
+    // And the same three fatal-delivery predicate and late-request units:
+    // 2688, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
