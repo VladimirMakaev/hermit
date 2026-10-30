@@ -1989,6 +1989,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And phases::tests::a_trial_budget_that_ends_at_the_stack_trace_runs_reports_the_decision: 1238.
     // And run::replay_takes_the_recorded_seeds_and_refuses_a_contradicting_seed
     // (the scheduler seed too, and an explicit --seed checked): 1161, listed.
+    // And metadata::tests::record_version_rejects_single_stream_random_device_recordings: 1161.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3238,6 +3239,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and replayer::tests::a_recorded_poll_skip_is_the_next_decision_after_the_events_it_follows: 2705.
     // And replayer::tests::a_failed_attempt_hands_over_after_the_thread_blocks: 2706.
     // And procfs::tests::status_shows_no_tracer: 2693, listed.
+    // And tool_local::tests::each_random_device_open_reads_its_own_stream and
+    // syscalls::misc::tests::random_device_streams_are_distinct_per_open_file_and_pinned: 2697.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4550,6 +4553,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And procfs_status_shows_no_tracer_on_any_path and
     // a_death_test_that_looks_for_a_debugger_dies_as_it_does_natively:
     // 634 + 2 = 636.
+    // And separate_random_device_opens_read_distinct_bytes_at_bitwise_parity: 638.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5084,6 +5088,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 564.
     // And the same poll-skip replay test: 557.
     // And the same two TracerPid tests: 553 + 2 = 555.
+    // And the ptrace random-device opens test, which the hosted lane runs: 557.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5572,6 +5577,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two poll-skip units: 2705.
     // And replayer::tests::a_failed_attempt_hands_over_after_the_thread_blocks: 2706.
     // And the same TracerPid unit: 2693, listed.
+    // And the same two random-device stream units: 2697.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5979,6 +5985,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same decided-budget test: 1231.
     // And the same cut-path decided-budget test: 1232.
     // And the same recorded-seeds replay test: 1155, listed.
+    // And the same single-stream record-version test: 1155.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
