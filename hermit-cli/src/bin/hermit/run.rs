@@ -12481,6 +12481,8 @@ impl RunOpts {
                     && maximum.is_some()
                     && hermit::backend_delivers_preemption_timer(self.selected_backend()),
             ),
+            // Counted by the run itself, which reports it in its summary.
+            stopless_slice_ends: None,
         }
     }
 

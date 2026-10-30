@@ -1336,6 +1336,10 @@ pub struct GlobalState {
     /// The start is when we construct the global state.  Close enough.
     realtime_start: SystemTime,
 
+    /// `crate::STOPLESS_SLICE_ENDS` when this run started: the run's own
+    /// count is the counter's growth since.
+    stopless_slice_ends_at_start: u64,
+
     /// External network record or replay state, present only when a network
     /// trace mode is configured. Every operation reads global time under this
     /// lock, so an input's release point is fixed by the schedule alone.
@@ -1902,6 +1906,8 @@ impl GlobalState {
             sched_handle: handle,
             cfg: cfg.clone(),
             realtime_start: SystemTime::now(),
+            stopless_slice_ends_at_start: crate::STOPLESS_SLICE_ENDS
+                .load(std::sync::atomic::Ordering::Relaxed),
             global_time,
             preemptions_to_replay,
             network,
@@ -2451,6 +2457,11 @@ impl GlobalState {
         summary.preemption = Some(PreemptionSummary {
             max_timeslice_ns: self.cfg.max_timeslice.map(|maximum| maximum.get()),
             timer_enabled: Some(self.cfg.use_preemption_timer()),
+            stopless_slice_ends: self.cfg.replays_lone_preemptions().then(|| {
+                crate::STOPLESS_SLICE_ENDS
+                    .load(std::sync::atomic::Ordering::Relaxed)
+                    .saturating_sub(self.stopless_slice_ends_at_start)
+            }),
         });
         // The host files the guest opened, and those a replay found changed
         // since its recording. Like `preemption`, outside the INFO view.
@@ -2779,7 +2790,11 @@ impl GlobalTool for GlobalState {
         // existing ParentContinue grant must not initialize callback counters
         // or consume the budget which belongs after the startup reset.
         let self_registration = registers_own_image(dtid, &gr.2);
-        self.sched.lock().unwrap().take_grant(dtid);
+        {
+            let mut scheduler = self.sched.lock().unwrap();
+            scheduler.take_grant(dtid);
+            scheduler.take_lone_grant(dtid);
+        }
         let (time, response) = if !resumes_from_grant(&gr.2) {
             self.dispatch_rpc(from, gr).await
         } else {
@@ -2799,9 +2814,10 @@ impl GlobalTool for GlobalState {
                 _ => (time, response),
             }
         };
-        let (granted, boundary_budget, boundary_owner) = {
+        let (granted, boundary_budget, boundary_owner, lone) = {
             let mut scheduler = self.sched.lock().unwrap();
             let granted = scheduler.take_grant(dtid);
+            let lone = scheduler.take_lone_grant(dtid);
             let terminal =
                 response == GlobalResponse::ThreadExited || response == GlobalResponse::Retired;
             let mut budget = scheduler
@@ -2832,7 +2848,7 @@ impl GlobalTool for GlobalState {
             } else {
                 None
             };
-            (granted, budget, owner)
+            (granted, budget, owner, lone)
         };
         let response = match boundary_budget {
             Some(budget) => GlobalResponse::WithSliceBoundaryBudget(budget, Box::new(response)),
@@ -2846,7 +2862,12 @@ impl GlobalTool for GlobalState {
             && response != GlobalResponse::ThreadExited
             && response != GlobalResponse::Retired
         {
-            (time, GlobalResponse::Granted(Box::new(response)))
+            let response = GlobalResponse::Granted(Box::new(response));
+            if lone {
+                (time, GlobalResponse::WithLoneGrant(Box::new(response)))
+            } else {
+                (time, response)
+            }
         } else {
             (time, response)
         }
@@ -7789,6 +7810,12 @@ pub enum GlobalResponse {
     /// The answer to `GlobalRequest::CpuAffinity` and
     /// `GlobalRequest::SetCpuAffinity`. Appended last.
     CpuAffinity(crate::cpu_set::TaskAffinity),
+    /// A granted reply whose grant found the thread the only one able to run
+    /// before it next enters Detcore (`Scheduler::take_lone_grant`).
+    /// Outermost; unwrapped first by `send_and_update_time`, which records it
+    /// in `ThreadState::lone_grant`.
+    /// Appended last.
+    WithLoneGrant(Box<GlobalResponse>),
 }
 
 /// Read only the mapping predicate through a backend's synchronous external
@@ -8592,6 +8619,26 @@ where
     let continues_sigreturn = request_continues_sigreturn(&request);
     let starts_thread = matches!(request, GlobalRequest::StartNewThread(..));
     let mut resp = guest.send_rpc((mytime, mm, counted_request(request))).await;
+    let lone_grant = if let GlobalResponse::WithLoneGrant(response) = resp.1 {
+        resp.1 = *response;
+        true
+    } else {
+        false
+    };
+    guest.thread_state_mut().lone_grant = lone_grant;
+    if guest.thread_state().replaying_lone_slice_end.is_some() {
+        // A grant while a skipped slice end is processed must find the
+        // thread alone again: nothing but its own requests could have
+        // changed that (`Detcore::catch_up_lone_slice_ends` reports it).
+        if !lone_grant && matches!(resp.1, GlobalResponse::Granted(_)) {
+            guest.thread_state_mut().lone_replay_unsound = true;
+        }
+    } else if !lone_grant {
+        // Another thread may run before this one next enters Detcore: its
+        // pending slice end needs its stop again, whatever this callback
+        // does next.
+        crate::stop_skipping_lone_slice_end(guest);
+    }
     // A grant while the request was pending is a hand-off to the scheduler,
     // the one place every hand-off is noted (`ThreadState::note_scheduler_handoff`).
     if let GlobalResponse::Granted(response) = resp.1 {
@@ -12095,6 +12142,7 @@ mod tests {
                 Some(super::PreemptionSummary {
                     max_timeslice_ns: expected_maximum,
                     timer_enabled: Some(expected_timer),
+                    stopless_slice_ends: None,
                 })
             );
         }
