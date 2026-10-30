@@ -1574,6 +1574,15 @@ pub(crate) struct ProcfsSnapshotContext {
     /// its name and what the reader adds to them (`procfs::task_stat`).
     /// Built by the caller, which asks Detcore's global state.
     pub(crate) task_stat: Option<task_stat::TaskStat>,
+    /// For the kernel's own `stat` of a process (another process's, or the
+    /// reader's where the kernel opened it), whether the kernel's memory
+    /// layout fields ([`task_stat::MemoryLayout::FIELDS`]) are a guest
+    /// image's, so that [`sanitize_stat`] keeps them; elsewhere it zeroes
+    /// them. Built by the caller: the backend's kernel exec'd the guest's
+    /// image itself (`Detcore::kernel_layout_is_the_images`) and the task is
+    /// one of Detcore's process table, not Hermit's own process or a host
+    /// process. False keeps the zeros.
+    pub(crate) kernel_layout_is_the_images: bool,
 }
 
 impl ProcfsFile {
@@ -2316,6 +2325,25 @@ impl ProcfsFile {
         !matches!(self.kind, ProcfsKind::TimerSlack(_)) && self.contents.is_none()
     }
 
+    /// The number of the task a `stat` the kernel rendered describes, its
+    /// first field (`pid_nr_ns`, in the reader's PID namespace), for the
+    /// reader's own (`/proc/self/stat`, `/proc/thread-self/stat`) or a
+    /// process's or thread's named by number. `None` for any other file, and
+    /// for contents that do not start with a number and a name.
+    pub(crate) fn stat_task_number(&self, contents: &[u8]) -> Option<i32> {
+        if !matches!(
+            self.kind,
+            ProcfsKind::Stat | ProcfsKind::ThreadStat | ProcfsKind::ProcessStat
+        ) {
+            return None;
+        }
+        let text = std::str::from_utf8(contents).ok()?;
+        text[..text.find(" (")?]
+            .parse::<i32>()
+            .ok()
+            .filter(|id| *id > 0)
+    }
+
     /// The kernel process and thread numbers in `contents`, a process's
     /// `stat` or `status` named by number, where they name processes: the
     /// pid, parent, process group, session and terminal group of `stat`, and
@@ -2537,6 +2565,7 @@ impl ProcfsFile {
             cpus_allowed,
             lock_rows_kept,
             task_stat,
+            kernel_layout_is_the_images,
         } = context;
         // Linux prints a task's `Cpus_allowed` with `nr_cpu_ids` bits.
         let cpus_allowed = cpus_allowed.map(|cpus| (cpus, machine.cpus));
@@ -2554,7 +2583,11 @@ impl ProcfsFile {
             return;
         }
         self.contents = Some(match &self.kind {
-            ProcfsKind::Stat => sanitize_stat(&contents, Some((virtual_pid, virtual_ppid))),
+            ProcfsKind::Stat => sanitize_stat(
+                &contents,
+                Some((virtual_pid, virtual_ppid)),
+                kernel_layout_is_the_images,
+            ),
             ProcfsKind::Status => sanitize_status_held(
                 &contents,
                 Some((virtual_pid, virtual_pid, virtual_ppid)),
@@ -2567,7 +2600,7 @@ impl ProcfsFile {
                 let (_, tid, ppid) = self
                     .bound_thread_identity
                     .expect("thread-self stat was not bound when opened");
-                sanitize_stat(&contents, Some((tid, ppid)))
+                sanitize_stat(&contents, Some((tid, ppid)), kernel_layout_is_the_images)
             }
             ProcfsKind::ThreadStatus => {
                 let (tgid, tid, ppid) = self
@@ -2583,7 +2616,7 @@ impl ProcfsFile {
                 )
             }
             ProcfsKind::ProcessStat => {
-                let sanitized = sanitize_stat(&contents, None);
+                let sanitized = sanitize_stat(&contents, None, kernel_layout_is_the_images);
                 match &self.guest_numbers {
                     Some(numbers) => renumber_stat(&sanitized, numbers),
                     None => sanitized,
@@ -3337,12 +3370,35 @@ fn is_hwmon_input_file(path: &str) -> bool {
         })
 }
 
+/// The kernel's `stat` line of a process, with the fields that depend on the
+/// host zeroed: the fault counts, CPU and guest times (10-17, 43, 44), the
+/// start time (22), the memory sizes (23, 24), `kstkesp` and `kstkeip` (29,
+/// 30), the obsolete signal words (31-34), `wchan` and the swap counts (35-37),
+/// the last CPU (39) and the block-I/O delay (42). `virtual_identity`
+/// renumbers the reader's own process or thread.
+///
+/// The memory layout (26-28, 45-51, [`task_stat::MemoryLayout`]) is kept
+/// where it is the guest image's (`keeps_layout`,
+/// `Detcore::kernel_layout_is_the_images`) and zeroed elsewhere. The kernel
+/// already applies Linux's rules to it for the reader that captured the
+/// snapshot, the guest itself: the mm's values to a permitted reader, `1 1 0`
+/// and zeros to one that may not read the process, zeros for a zombie
+/// (`do_task_stat`, fs/proc/array.c:616-618 and 649-658 at v6.16). Its values
+/// change only in guest system calls (exec, fork, `prctl(PR_SET_MM)`), under
+/// `ADDR_NO_RANDOMIZE`. `kstkesp` and `kstkeip` are nonzero in Linux only for
+/// a task exiting or dumping core with its mm (fs/proc/array.c:503-508), a
+/// window no guest observes, as turn selection waits for a dying thread's
+/// deregistration: zero, as Linux shows them for every other task.
 // TODO-HUMAN-REVIEW(PR-723): Review /proc stat identity field normalization.
 // TODO-HUMAN-REVIEW(PR-843): Review process memory and runtime normalization.
-fn sanitize_stat(contents: &[u8], virtual_identity: Option<(i32, i32)>) -> Vec<u8> {
+fn sanitize_stat(
+    contents: &[u8],
+    virtual_identity: Option<(i32, i32)>,
+    keeps_layout: bool,
+) -> Vec<u8> {
     const VOLATILE_FIELDS: &[usize] = &[
-        10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
-        37, 39, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51,
+        10, 11, 12, 13, 14, 15, 16, 17, 21, 22, 23, 24, 29, 30, 31, 32, 33, 34, 35, 36, 37, 39, 42,
+        43, 44,
     ];
 
     let Ok(text) = std::str::from_utf8(contents) else {
@@ -3375,6 +3431,11 @@ fn sanitize_stat(contents: &[u8], virtual_identity: Option<(i32, i32)>) -> Vec<u
     };
     for field in VOLATILE_FIELDS {
         fields[*field - 3] = "0".to_owned();
+    }
+    if !keeps_layout {
+        for field in task_stat::MemoryLayout::FIELDS {
+            fields[field - 3] = "0".to_owned();
+        }
     }
     format!("{pid}{comm} {}\n", fields.join(" ")).into_bytes()
 }
@@ -7513,7 +7574,7 @@ Rss:                   4 kB\n" as &[u8];
     #[test]
     fn stat_normalizes_runtime_counters() {
         let input = b"3 (name with spaces) R 1 0 0 0 -1 0 89 0 1 2 3 4 5 6 20 0 1 7 520343512 2879488 123 18446744073709551615 100 200 300 0 0 0 0 3145728 0 0 0 0 17 114 0 0 9 10 11 400 500 600 700 800 900 1000 0\n";
-        let output = String::from_utf8(sanitize_stat(input, Some((3, 1)))).unwrap();
+        let output = String::from_utf8(sanitize_stat(input, Some((3, 1)), false)).unwrap();
         let comm_end = output.rfind(") ").unwrap();
         let fields = output[comm_end + 2..]
             .split_whitespace()
@@ -7525,6 +7586,87 @@ Rss:                   4 kB\n" as &[u8];
             assert_eq!(fields[field - 3], "0", "field {field} was not normalized");
         }
         assert!(output.starts_with("3 (name with spaces) R 1 0 0 "));
+    }
+
+    /// The task a kernel-rendered `stat` describes is its first field, for
+    /// the reader's own `stat` by either spelling and a process's or
+    /// thread's by number, whatever its name holds; other files name none.
+    #[test]
+    fn a_stat_names_its_task_by_its_first_field() {
+        let line = b"42 (a (b) S 1 7 8 0 -1 0\n";
+        for path in [
+            "/proc/self/stat",
+            "/proc/thread-self/stat",
+            "/proc/42/stat",
+            "/proc/7/task/42/stat",
+        ] {
+            let file = ProcfsFile::from_path(Path::new(path)).unwrap();
+            assert_eq!(file.stat_task_number(line), Some(42), "{path}");
+            assert_eq!(file.stat_task_number(b"x (a) S\n"), None, "{path}");
+            assert_eq!(file.stat_task_number(b"0 (a) S\n"), None, "{path}");
+        }
+        let status = ProcfsFile::from_path(Path::new("/proc/42/status")).unwrap();
+        assert_eq!(status.stat_task_number(line), None);
+    }
+
+    /// Where the kernel's memory layout is the guest image's, the kernel's
+    /// `stat` keeps it as the kernel gave it to the guest that read it
+    /// (fields 26-28 and 45-51, `do_task_stat`): the mm's values, or the
+    /// placeholder `1 1 0` and zeros for a reader that may not read the
+    /// process, or zeros for a zombie. `kstkesp` and `kstkeip` (29, 30) and
+    /// the host-dependent fields are zeroed either way, and every other
+    /// field is as before.
+    #[test]
+    fn stat_keeps_the_kernels_memory_layout_where_it_is_the_images() {
+        let input = b"42 (a) b) R 1 7 8 0 -1 4194560 89 0 1 2 3 4 5 6 20 0 1 7 520343512 2879488 123 18446744073709551615 4194304 4202181 140737488347856 140737488346000 4198000 0 0 3145728 0 0 0 0 17 114 0 0 9 10 11 4210160 4210760 4214784 140737488349857 140737488349872 140737488349872 140737488355301 0\n";
+        let kept = String::from_utf8(sanitize_stat(input, None, true)).unwrap();
+        let zeroed = String::from_utf8(sanitize_stat(input, None, false)).unwrap();
+        let fields = |output: &str| -> Vec<String> {
+            let comm_end = output.rfind(") ").unwrap();
+            output[comm_end + 2..]
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect()
+        };
+        let (kept_fields, zeroed_fields) = (fields(&kept), fields(&zeroed));
+        assert!(
+            kept.starts_with("42 (a) b) S 1 7 8 0 -1 4194560 0 "),
+            "{kept}"
+        );
+        assert_eq!(kept_fields.len(), 50, "{kept}");
+        let layout = [
+            (26, "4194304"),
+            (27, "4202181"),
+            (28, "140737488347856"),
+            (45, "4210160"),
+            (46, "4210760"),
+            (47, "4214784"),
+            (48, "140737488349857"),
+            (49, "140737488349872"),
+            (50, "140737488349872"),
+            (51, "140737488355301"),
+        ];
+        for (field, value) in layout {
+            assert_eq!(kept_fields[field - 3], value, "field {field}: {kept}");
+            assert_eq!(zeroed_fields[field - 3], "0", "field {field}: {zeroed}");
+        }
+        assert_eq!(
+            layout.map(|(field, _)| field),
+            task_stat::MemoryLayout::FIELDS
+        );
+        for field in [29, 30, 10, 14, 22, 23, 24, 33, 39, 42, 43, 44] {
+            assert_eq!(kept_fields[field - 3], "0", "field {field}: {kept}");
+        }
+        for (index, (kept, zeroed)) in kept_fields.iter().zip(&zeroed_fields).enumerate() {
+            if !task_stat::MemoryLayout::FIELDS.contains(&(index + 3)) {
+                assert_eq!(kept, zeroed, "field {}", index + 3);
+            }
+        }
+        // The placeholder for a reader that may not read the process, and a
+        // zombie's zeros, are the kernel's answer to the guest: kept.
+        let hidden = b"42 (a) S 1 7 8 0 -1 0 0 0 0 0 0 0 0 0 20 0 1 0 5 0 0 18446744073709551615 1 1 0 0 0 0 0 0 0 0 0 0 17 0 0 0 0 0 0 0 0 0 0 0 0 0 0\n";
+        let output = String::from_utf8(sanitize_stat(hidden, None, true)).unwrap();
+        assert_eq!(&fields(&output)[23..26], ["1", "1", "0"], "{output}");
     }
 
     // AUTONOMOUS-BOT-IMPLEMENTED
@@ -7579,7 +7721,7 @@ Rss:                   4 kB\n" as &[u8];
     #[test]
     fn process_accounting_preserves_identity_and_hides_live_state() {
         let stat = b"42 (worker) R 1 7 8 0 -1 0 89 0 1 2 3 4 5 6 20 0 1 7 520343512 2879488 123 18446744073709551615 100 200 300 0 0 0 0 3145728 0 0 0 0 17 114 0 0 9 10 11 400 500 600 700 800 900 1000 0\n";
-        let output = String::from_utf8(sanitize_stat(stat, None)).unwrap();
+        let output = String::from_utf8(sanitize_stat(stat, None, false)).unwrap();
         assert!(output.starts_with("42 (worker) S 1 7 8 "));
         let comm_end = output.rfind(") ").unwrap();
         let fields = output[comm_end + 2..]
@@ -10009,6 +10151,7 @@ total_commit_ms 0\n"
             rsslim: task_stat::RLIM_INFINITY,
             processor: 0,
             cpu: task_stat::TaskCpuTimes::default(),
+            layout: task_stat::MemoryLayout::default(),
         }
     }
 

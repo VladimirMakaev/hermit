@@ -1739,6 +1739,16 @@ impl DetFd {
         self.with_description(|d| d.procfs.as_ref().is_some_and(ProcfsFile::needs_boot_time))
     }
 
+    /// The number of the task a `stat` the kernel rendered describes
+    /// (`ProcfsFile::stat_task_number`).
+    pub(crate) fn procfs_stat_task_number(&self, contents: &[u8]) -> Option<i32> {
+        self.with_description(|d| {
+            d.procfs
+                .as_ref()
+                .and_then(|file| file.stat_task_number(contents))
+        })
+    }
+
     /// The kernel process numbers a process's `stat` or `status` named by
     /// number holds in `contents` (`ProcfsFile::kernel_numbers_held`).
     pub(crate) fn procfs_kernel_numbers_held(&self, contents: &[u8]) -> Vec<i32> {

@@ -157,6 +157,57 @@ fn comm_read_is_trusted(shares_root: bool, changed_root: bool) -> bool {
     !(shares_root && changed_root)
 }
 
+/// A file of a task's own procfs directory that the tool reads from the
+/// kernel beneath for a rendered `stat` (`Detcore::kernel_task_file`): the
+/// task's name, or its `stat` line for the memory layout.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum KernelTaskFile {
+    Comm,
+    Stat,
+}
+
+impl KernelTaskFile {
+    /// The file's name in the task's directory.
+    fn name(self) -> &'static str {
+        match self {
+            Self::Comm => "comm",
+            Self::Stat => "stat",
+        }
+    }
+
+    /// Why the tool reads nothing where the guest changed the root it shares
+    /// ([`comm_read_is_trusted`]).
+    fn untrusted(self) -> &'static str {
+        match self {
+            Self::Comm => {
+                "the guest changed its root, and the tool, which shares it, would look the \
+                 task's comm up through it"
+            }
+            Self::Stat => {
+                "the guest changed its root, and the tool, which shares it, would look the \
+                 task's stat up through it"
+            }
+        }
+    }
+
+    /// Why there is no file: the tool could not open or read it.
+    fn unreadable(self) -> &'static str {
+        match self {
+            Self::Comm => "the tool could not read the kernel's comm of the task",
+            Self::Stat => "the tool could not read the kernel's stat of the task",
+        }
+    }
+
+    /// Why the file is not used: it is not on a procfs
+    /// ([`comm_file_is_on_procfs`]).
+    fn not_on_procfs(self) -> &'static str {
+        match self {
+            Self::Comm => "the task's comm path is not on a procfs",
+            Self::Stat => "the task's stat path is not on a procfs",
+        }
+    }
+}
+
 /// Whether the open file `file` is on a procfs (`fstatfs` reports
 /// `PROC_SUPER_MAGIC`), which refuses an ordinary file mounted over a
 /// task's `comm` path.
@@ -2890,21 +2941,17 @@ impl<T: RecordOrReplay> Detcore<T> {
         guest.thread_state().physical_tid.is_some()
     }
 
-    /// The kernel beneath's name (`comm`) of the task a rendered `stat`
+    /// The kernel beneath's file `which` of the task a rendered `stat`
     /// describes (the thread below `task/`, else the task the top-level
-    /// number names), read by the tool itself from that task's own procfs
-    /// directory, `/proc/<pid>/task/<tid>/comm` (`/proc/<pid>/comm` for a
-    /// top-level number), by the kernel's numbers for them
+    /// number names), opened by the tool itself from that task's own procfs
+    /// directory, `/proc/<pid>/task/<tid>/<name>` (`/proc/<pid>/<name>` for
+    /// a top-level number), by the kernel's numbers for them
     /// (`tool_global::procfs_ids` wherever the backend registered kernel ids,
     /// [`Self::registered_kernel_ids`], whatever the guest's root or PID
     /// namespace), with raw syscalls; never through the reader's own
     /// `/proc/self`, so a descriptor that reached another process (across
-    /// fork or `SCM_RIGHTS`) reads the described task's name. Only where
-    /// [`Self::comm_source`] is the kernel. It runs in the reader's turn, and
-    /// the name is the guest's own history's: every way Linux renames a task
-    /// (an exec, by Linux's own rule for the host's kernel version, a clone,
-    /// `PR_SET_NAME`, a write to a `comm` file by any spelling) is a guest
-    /// system call, sequentialized.
+    /// fork or `SCM_RIGHTS`) reads the described task's file. Only where
+    /// [`Self::comm_source`] is the kernel. It runs in the reader's turn.
     ///
     /// Where the tool shares the guest's root (DBT, SaBRe, LiteInst) and the
     /// guest has changed it, nothing is read: the path would be looked up
@@ -2916,12 +2963,13 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// (ptrace) reads its own `/proc`, which no guest `chroot` changes.
     /// Otherwise the file must be on a procfs ([`comm_file_is_on_procfs`]),
     /// which refuses an ordinary file mounted over the path.
-    /// `Err` names why there is no name.
-    async fn kernel_task_comm<G: Guest<Self>>(
+    /// `Err` names why there is no file.
+    async fn kernel_task_file<G: Guest<Self>>(
         &self,
         guest: &mut G,
         task: crate::procfs::BoundTask,
-    ) -> Result<crate::procfs::task_stat::TaskComm, &'static str> {
+        which: KernelTaskFile,
+    ) -> Result<crate::util::RawFd, &'static str> {
         let changed_root = guest
             .thread_state()
             .changed_root
@@ -2930,12 +2978,9 @@ impl<T: RecordOrReplay> Detcore<T> {
             guest.config().backend.tool_shares_guest_descriptor_table,
             changed_root,
         ) {
-            return Err(
-                "the guest changed its root, and the tool, which shares it, would look the \
-                 task's comm up through it",
-            );
+            return Err(which.untrusted());
         }
-        let unreadable = "the tool could not read the kernel's comm of the task";
+        let unreadable = which.unreadable();
         let mut ids = vec![task.process];
         ids.extend(task.thread);
         let kernel = if Self::registered_kernel_ids(guest) {
@@ -2947,21 +2992,97 @@ impl<T: RecordOrReplay> Detcore<T> {
         } else {
             ids
         };
+        let name = which.name();
         let path = match kernel[..] {
-            [process] => format!("/proc/{process}/comm"),
-            [process, thread] => format!("/proc/{process}/task/{thread}/comm"),
+            [process] => format!("/proc/{process}/{name}"),
+            [process, thread] => format!("/proc/{process}/task/{thread}/{name}"),
             _ => return Err(unreadable),
         };
         let file =
             crate::util::RawFd::open(Path::new(&path), libc::O_RDONLY).map_err(|_| unreadable)?;
         if !comm_file_is_on_procfs(&file) {
-            return Err("the task's comm path is not on a procfs");
+            return Err(which.not_on_procfs());
         }
+        Ok(file)
+    }
+
+    /// The kernel beneath's name (`comm`) of the task a rendered `stat`
+    /// describes, read from its `comm` file ([`Self::kernel_task_file`]).
+    /// The name is the guest's own history's: every way Linux renames a task
+    /// (an exec, by Linux's own rule for the host's kernel version, a clone,
+    /// `PR_SET_NAME`, a write to a `comm` file by any spelling) is a guest
+    /// system call, sequentialized. `Err` names why there is no name.
+    async fn kernel_task_comm<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        task: crate::procfs::BoundTask,
+    ) -> Result<crate::procfs::task_stat::TaskComm, &'static str> {
+        let file = self
+            .kernel_task_file(guest, task, KernelTaskFile::Comm)
+            .await?;
         let mut bytes = [0_u8; 2 * crate::procfs::task_stat::TASK_COMM_LEN];
-        let read = file.read_at(&mut bytes, 0).map_err(|_| unreadable)?;
+        let read = file
+            .read_at(&mut bytes, 0)
+            .map_err(|_| KernelTaskFile::Comm.unreadable())?;
         Ok(crate::procfs::task_stat::TaskComm::from_comm_file(
             &bytes[..read],
         ))
+    }
+
+    /// Whether the kernel beneath's memory layout of a guest process is the
+    /// layout of the image the guest exec'd: where guest threads are host
+    /// tasks ([`Self::comm_source`] is the kernel: ptrace, LiteInst) and the
+    /// kernel exec'd the guest's image itself, not a launcher in its place
+    /// (`Self::declares_launcher`: DBT and SaBRe, whose process's mm is the
+    /// launcher's, and whose program break Detcore models instead). Elsewhere
+    /// (those backends, and KVM, whose guest threads are not host tasks) a
+    /// rendered `stat` shows no layout, and the kernel's in another
+    /// process's `stat` is zeroed, as before: showing the image's there
+    /// needs a layout Detcore models from the image the launcher loaded, or
+    /// one the KVM executor reports.
+    pub(in crate::syscalls::files) fn kernel_layout_is_the_images(&self) -> bool {
+        self.comm_source() == crate::procfs::task_stat::CommSource::Kernel
+            && !self.declares_launcher()
+    }
+
+    /// The memory layout of the task a rendered `stat` describes, from the
+    /// kernel beneath's own `stat` line of it ([`Self::kernel_task_file`],
+    /// `procfs::task_stat::MemoryLayout::from_kernel_stat`), only where it is
+    /// the guest image's ([`Self::kernel_layout_is_the_images`]). Linux
+    /// writes the layout only in a guest system call (an exec, a fork,
+    /// `prctl(PR_SET_MM)`), every one sequentialized, and every launcher
+    /// Hermit execs a guest through sets `ADDR_NO_RANDOMIZE`, so it is the
+    /// guest's own history's: what the guest sees of its own address space
+    /// (its initial stack pointer, its argument and environment pointers,
+    /// its mappings), restated. A task that has exited has no mm (Linux
+    /// shows zeros), and is not read. `Err` names why there is none,
+    /// including the placeholder layout the kernel shows a tool not permitted
+    /// to read the task (a task that is not dumpable, under a tool without
+    /// `CAP_SYS_PTRACE` in the task's user namespace), which is not the one
+    /// a reader in the task's own process sees.
+    async fn kernel_task_layout<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        task: crate::procfs::BoundTask,
+    ) -> Result<crate::procfs::task_stat::MemoryLayout, &'static str> {
+        let file = self
+            .kernel_task_file(guest, task, KernelTaskFile::Stat)
+            .await?;
+        // A `stat` line is a few hundred bytes; a name of at most 64 bytes
+        // and 50 numbers of at most 20 digits fit in a page.
+        let mut bytes = vec![0_u8; 4096];
+        let mut length = 0;
+        loop {
+            let read = file
+                .read_at(&mut bytes[length..], length as u64)
+                .map_err(|_| KernelTaskFile::Stat.unreadable())?;
+            if read == 0 || length + read == bytes.len() {
+                length += read;
+                break;
+            }
+            length += read;
+        }
+        crate::procfs::task_stat::MemoryLayout::from_kernel_stat(&bytes[..length])
     }
 
     /// The facts a snapshot of the rendered `stat` open as `fd` renders
@@ -2991,6 +3112,10 @@ impl<T: RecordOrReplay> Detcore<T> {
     ///   reads it (`procfs::task_stat::TaskStatFacts::rsslim`).
     /// - The CPU times, for the reader's own process's file
     ///   ([`Self::stat_cpu_times`]).
+    /// - The memory layout, the kernel's ([`Self::kernel_task_layout`])
+    ///   where it is the guest image's, none for a task that has exited; a
+    ///   failed read there is the failure policy's named refusal, as for the
+    ///   name.
     pub(super) async fn rendered_task_stat<G: Guest<Self>>(
         &self,
         guest: &mut G,
@@ -3043,6 +3168,20 @@ impl<T: RecordOrReplay> Detcore<T> {
         } else {
             crate::procfs::task_stat::TaskCpuTimes::default()
         };
+        // A zombie has no mm: Linux shows no layout.
+        let layout = if file.is_task_stat() && !facts.exited && self.kernel_layout_is_the_images() {
+            match self.kernel_task_layout(guest, task).await {
+                Ok(layout) => layout,
+                Err(why) => {
+                    let reason = format!(
+                        "the /proc/<pid>/stat of task {task:?} has no memory layout to render: {why}"
+                    );
+                    return Err(Self::scratch_failure(guest, Sysno::read, reason).await);
+                }
+            }
+        } else {
+            crate::procfs::task_stat::MemoryLayout::default()
+        };
         Ok(Some(crate::procfs::task_stat::TaskStat {
             pid: described,
             comm,
@@ -3052,6 +3191,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             rsslim: facts.rsslim,
             processor: facts.cpus.current(guest.config().virtual_cpu_count()),
             cpu,
+            layout,
         }))
     }
 

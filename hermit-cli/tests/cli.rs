@@ -184,6 +184,7 @@ static POLL_RECHECK_TIMER_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static POLL_RECHECK_ENTRY_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static IOVEC_IMPORT_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static RWF_CURRENT_OFFSET_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static PROC_STAT_MEMORY_LAYOUT_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static RESTARTABLE_TWO_SIGNALS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static PRIVATE_SIGCHLD_WAITS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SIGCHLD_BOOKKEEPING_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -58101,4 +58102,141 @@ fn a_blocking_binder_read_does_not_hold_the_guests_turn() {
         "the run does not say its binder calls are external input: {}",
         stderr(&output)
     );
+}
+
+/// A process's `/proc/<pid>/stat` shows its memory layout as Linux does
+/// (`do_task_stat`): the code and data ranges, the start of the stack, the
+/// start of the program break and the argument and environment string spans
+/// (fields 26-28 and 45-51), with `kstkesp` and `kstkeip` (29, 30) 0. Detcore
+/// used to show 0 in all of them, so bionic's `pthread_getattr_np` of the main
+/// thread, which looks for startstack in `/proc/self/maps`, aborted every ART
+/// program on an Android emulator ("Stack not found in /proc/self/maps").
+/// Each mode of `tests/c/proc_stat_memory_layout.c` checks the fields
+/// against what the process sees of its own layout (bionic's search, argc's
+/// address, argv, environ, a function, a global, `sbrk(0)`), for its own
+/// process by every spelling, a thread, a live and a zombie child, and a
+/// process that is not dumpable. Each runs natively, then at L2 (`--strict
+/// --verify --verify-strict --verify-json`, `bitwise_parity` with nonzero
+/// compared log counts), and both print the native lines; `self` also runs
+/// under `--no-namespace` (not strict: `--strict` refuses it), as on an
+/// Android emulator, and `self` and `child` record and replay.
+#[test]
+fn proc_stat_shows_the_memory_layout_linux_shows() {
+    let _guard = hermit_run_guard();
+    let guest = poll_recheck_c_guest(&PROC_STAT_MEMORY_LAYOUT_GUEST, "proc_stat_memory_layout")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let checks: [(&str, &[&str]); 4] = [
+        (
+            "self",
+            &[
+                "bionic-main-stack-search",
+                "argc-at-startstack",
+                "code-range",
+                "data-range",
+                "program-break",
+                "argument-strings",
+                "environment-strings",
+                "no-kernel-stack-registers",
+            ],
+        ),
+        (
+            "thread",
+            &[
+                "process-startstack",
+                "thread-self-stat",
+                "task-tid-stat",
+                "self-stat-from-thread",
+            ],
+        ),
+        (
+            "child",
+            &[
+                "live-child-has-parents-layout",
+                "zombie-child-has-no-layout",
+            ],
+        ),
+        (
+            "nondumpable",
+            &[
+                "bionic-main-stack-search",
+                "argc-at-startstack",
+                "code-range",
+                "data-range",
+                "program-break",
+                "argument-strings",
+                "environment-strings",
+                "no-kernel-stack-registers",
+            ],
+        ),
+    ];
+    for (mode, names) in checks {
+        let expected: String = names
+            .iter()
+            .map(|name| format!("{mode} {name} ok\n"))
+            .collect();
+        let native = Command::new(&guest)
+            .arg(mode)
+            .stdin(Stdio::null())
+            .output()
+            .expect("run the guest natively");
+        assert_eq!(stdout(&native), expected, "{mode}: native");
+        assert!(native.status.success(), "{mode}: native run failed");
+        let directory = tempfile::tempdir().expect("failed to create report directory");
+        let report = directory.path().join("verify.json");
+        let args = [
+            "run",
+            "--strict",
+            "--verify",
+            "--verify-strict",
+            "--verify-json",
+            report.to_str().expect("report path is UTF-8"),
+            "--",
+            guest.as_str(),
+            mode,
+        ];
+        let output = hermit(&args);
+        let log = stderr(&output);
+        assert_eq!(stdout(&output), expected, "{mode}: stderr:\n{log}");
+        assert_success(&output, &args);
+        let verdict: serde_json::Value =
+            serde_json::from_slice(&fs::read(&report).expect("read the verification report"))
+                .expect("parse the verification report");
+        assert_eq!(verdict["bitwise_parity"], true, "{mode}: {verdict}");
+        let compared = &verdict["compared_log_messages"];
+        assert!(
+            compared["left"].as_u64().is_some_and(|left| left > 0)
+                && compared["left"] == compared["right"],
+            "{mode}: {verdict}"
+        );
+        if mode == "self" {
+            let args = [
+                "run",
+                "--no-namespace",
+                detcore_model::config::CANONICAL_TEST_EPOCH_ARG,
+                "--",
+                guest.as_str(),
+                mode,
+            ];
+            let output = hermit(&args);
+            assert_eq!(
+                stdout(&output),
+                expected,
+                "{mode} --no-namespace: stderr:\n{}",
+                stderr(&output)
+            );
+            assert_success(&output, &args);
+        }
+        if matches!(mode, "self" | "child") {
+            let record_args = ["record", "--verify", "--", guest.as_str(), mode];
+            let recorded = hermit(&record_args);
+            assert_success(&recorded, &record_args);
+            assert_eq!(stdout(&recorded), expected, "{mode}: record");
+            assert!(
+                stderr(&recorded).contains("Success: replay matched recording."),
+                "{mode}: replay must match the recording: {recorded:?}"
+            );
+        }
+    }
 }

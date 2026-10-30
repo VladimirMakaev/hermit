@@ -1982,6 +1982,12 @@
     },
     {
       "disposition": "guest-fixture",
+      "path": "tests/c/proc_stat_memory_layout.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/proc_stat_memory_layout.c is owned by hermit-cli/tests/cli.rs: proc_stat_shows_the_memory_layout_linux_shows compiles this guest, whose modes check the memory layout /proc/<pid>/stat shows (fields 26-28 and 45-51: bionic's main-stack search of startstack in /proc/self/maps, argc at startstack, the code, data, break, argument and environment ranges, kstkesp and kstkeip 0) for its own process by every spelling, a thread, a live and a zombie child and a process that is not dumpable, and requires each mode's native lines natively, under strict verify at bitwise parity, under --no-namespace, and through record and replay. It stays a fixture because the test compares native and Hermit output."
+    },
+    {
+      "disposition": "guest-fixture",
       "path": "tests/c/proc_status_tracer_pid.c",
       "runner": "hermit-cli/tests/cli.rs",
       "why": "tests/c/proc_status_tracer_pid.c is owned by hermit-cli/tests/cli.rs: procfs_status_shows_no_tracer_on_any_path runs it natively and under ptrace and requires byte-identical output with a fixed expectation: TracerPid is 0 on /proc/self, /proc/thread-self, /proc/<pid> and /proc/<pid>/task/<tid> status, in a second thread and in a forked child, as for a program outside a debugger. It stays a fixture because the test compares native and Hermit output."

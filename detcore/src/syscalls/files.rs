@@ -7419,6 +7419,9 @@ impl<T: RecordOrReplay> Detcore<T> {
         };
         let init = path.is_some_and(|path| crate::procfs::ids::names_init(&path));
         let held = if init { Vec::new() } else { held };
+        let kernel_layout_is_the_images = self
+            .stat_shows_a_guest_layout(guest, call.fd(), &contents, init)
+            .await?;
         if let Some(numbers) = Self::guest_procfs_numbers(guest, &held).await {
             guest.thread_state().with_detfd(call.fd(), |detfd| {
                 detfd.set_procfs_guest_numbers(numbers.clone())
@@ -7940,10 +7943,55 @@ impl<T: RecordOrReplay> Detcore<T> {
                     cpus_allowed,
                     lock_rows_kept: lock_rows_kept.clone(),
                     task_stat,
+                    kernel_layout_is_the_images,
                 },
             );
         })?;
         Ok(())
+    }
+
+    /// Whether the `stat` the kernel rendered in `contents`, of the procfs
+    /// file open as `fd`, shows a guest image's memory layout, which the
+    /// snapshot then keeps (`procfs::sanitize_stat`): where the backend's
+    /// kernel exec'd the guest's image itself
+    /// ([`Self::kernel_layout_is_the_images`]), for a task of Detcore's
+    /// process table. Every guest process was exec'd through a launcher that
+    /// sets `ADDR_NO_RANDOMIZE`, or forked from one, so its layout is its own
+    /// history's. Not the namespace's init (`init`, Hermit's own process) or,
+    /// under `--no-namespace`, a host process, whose layouts the host chose.
+    /// False for every other file.
+    async fn stat_shows_a_guest_layout<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        fd: RawFd,
+        contents: &[u8],
+        init: bool,
+    ) -> Result<bool, Errno> {
+        if init || !self.kernel_layout_is_the_images() {
+            return Ok(false);
+        }
+        let Some(number) = guest
+            .thread_state()
+            .with_detfd(fd, |detfd| detfd.procfs_stat_task_number(contents))?
+        else {
+            return Ok(false);
+        };
+        // The kernel's number, as the guest numbers it where the two differ.
+        let number = match Self::guest_procfs_numbers(guest, &[number]).await {
+            Some(numbers) => numbers.get(&number).copied(),
+            None => Some(number),
+        };
+        let Some(number) = number else {
+            return Ok(false);
+        };
+        let task = crate::procfs::BoundTask {
+            process: number,
+            thread: None,
+        };
+        Ok(crate::tool_global::task_stat_facts(guest, task)
+            .await
+            .process
+            .is_some())
     }
 
     /// The bytes of the procfs file open as `fd`, if it is a process's
