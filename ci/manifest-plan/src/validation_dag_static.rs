@@ -2192,6 +2192,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // analyze::race_report::tests::a_recorded_check_stands_on_resume: 1355.
     // And analyze::races::tests::a_changed_course_is_ordered_by_its_baseline_counterpart: 1356.
     // And analyze::races::tests::candidates_none_of_which_decides_say_what_that_means: 1357.
+    // And analyze's
+    // rundata::tests::analyzer_reproducer_starts_in_the_trials_directory:
+    // 1122, listed.
+    // rundata::tests::analyzer_reproducer_starts_in_the_trials_directory
+    // and a_reproducers_directory_is_quoted_for_the_shell: 1123, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6892,6 +6897,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two resume tests: 1355.
     // And the same changed-course order test: 1356.
     // And the same undecided-candidates test: 1357.
+    // And the same reproducer unit: 1116, listed.
+    // And the same two reproducer units: 1117, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

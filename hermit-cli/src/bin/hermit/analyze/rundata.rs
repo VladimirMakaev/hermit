@@ -1321,8 +1321,6 @@ impl RunData {
         self
     }
 
-    /// The `hermit run` command line of this run, with the global options
-    /// that set its logging: none for the default warn level to stderr.
     /// Record an access trace beside the recorded schedule, leaving out
     /// records that end before event `from` and stopping after
     /// `max_records` records; with the trace's path, or the reason `hermit
@@ -1353,7 +1351,30 @@ impl RunData {
         }
     }
 
+    /// The run's reproducer: a shell line that changes to the directory the
+    /// trial ran in, then runs [`Self::repro_command`].
+    ///
+    /// A trial without `--workdir` gives its guest Hermit's working
+    /// directory, which is analyze's own; a run of the bare command from
+    /// another directory would start its guest there instead
+    /// (https://github.com/rrnewton/hermit/issues/4812). The `cd` keeps that
+    /// inherited directory rather than passing it as `--workdir`, which
+    /// would name a different one: `--workdir` resolves after the guest's
+    /// mounts, so a directory under the guest's private `/tmp` does not
+    /// exist there. The `cd` also holds Hermit's own relative paths (an
+    /// `--image` or `--bind` source) to the trial's, so it is written even
+    /// with `--workdir`. Only when analyze's directory cannot be named
+    /// (removed, or not UTF-8) is the line the bare command.
     pub fn to_repro(&self) -> String {
+        let dir = std::env::current_dir().ok();
+        reproducer_line(dir.as_deref().and_then(Path::to_str), self.repro_command())
+    }
+
+    /// The `hermit ... run ...` command that reproduces this run, without
+    /// the working directory it needs ([`Self::to_repro`]), with the global
+    /// options that set its logging: none for the default warn level to
+    /// stderr.
+    pub fn repro_command(&self) -> String {
         let logging = match self.logging() {
             (level, Some(path)) => format!(" --log={level} --log-file={}", path.display()),
             (level, None) if level != LevelFilter::WARN => format!(" --log={level}"),
@@ -1369,6 +1390,15 @@ impl RunData {
 
     pub fn into_runopts(self) -> RunOpts {
         self.runopts
+    }
+}
+
+/// `cd <dir> && <command>` with `dir` quoted for the shell, or the bare
+/// command when there is no directory to name ([`RunData::to_repro`]).
+fn reproducer_line(dir: Option<&str>, command: String) -> String {
+    match dir {
+        Some(dir) => format!("cd {} && {command}", shell_words::quote(dir)),
+        None => command,
     }
 }
 
@@ -3823,6 +3853,77 @@ mod tests {
     /// The printed reproducer carries `--timeout`, which every trial applies
     /// (`run_in_container` reads it), so the reproducer is bounded as the
     /// trial was.
+    /// A reproducer's directory is quoted for the shell: one with spaces and
+    /// an apostrophe splits back to itself, and `sh` lands in it.
+    #[test]
+    fn a_reproducers_directory_is_quoted_for_the_shell() {
+        let parent = tempfile::tempdir().unwrap();
+        let dir = parent.path().join("it's a dir");
+        std::fs::create_dir(&dir).unwrap();
+        let dir = dir.to_str().unwrap();
+        let line = reproducer_line(Some(dir), "pwd -P".to_owned());
+        let words = shell_words::split(&line).unwrap();
+        assert_eq!(words[..3], ["cd", dir, "&&"], "{line}");
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(&line)
+            .current_dir(parent.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            Path::new(String::from_utf8(output.stdout).unwrap().trim()),
+            Path::new(dir).canonicalize().unwrap()
+        );
+        assert_eq!(reproducer_line(None, "hermit run".to_owned()), "hermit run");
+    }
+
+    /// A reproducer changes to the directory its trial ran in before it runs
+    /// the command, so the guest starts in the trial's working directory
+    /// wherever the line is run (#4812). It does so with `--workdir` too,
+    /// which leaves Hermit's own relative paths depending on its directory.
+    #[test]
+    fn analyzer_reproducer_starts_in_the_trials_directory() {
+        let workspace = tempfile::tempdir().unwrap();
+        let mut options = AnalyzeOpts::try_parse_from(["analyze", "--", "/bin/true"]).unwrap();
+        options.tmp_dir = Some(workspace.path().to_path_buf());
+        let run = RunData::new_baseline(&options, "cwd-repro".to_owned()).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        let line = run.to_repro();
+        let words = shell_words::split(&line).unwrap();
+        assert_eq!(words[..3], ["cd", cwd.to_str().unwrap(), "&&"], "{line}");
+        assert_eq!(
+            words[3..],
+            shell_words::split(&run.repro_command()).unwrap()[..],
+            "{line}"
+        );
+
+        // Run from another directory, the line's own `cd` lands where the
+        // trial ran.
+        let elsewhere = tempfile::tempdir().unwrap();
+        let (cd, _) = line.split_once(" && ").unwrap();
+        let output = std::process::Command::new("sh")
+            .arg("-c")
+            .arg(format!("{cd} && pwd -P"))
+            .current_dir(elsewhere.path())
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(
+            Path::new(String::from_utf8(output.stdout).unwrap().trim()),
+            cwd.canonicalize().unwrap()
+        );
+
+        let mut pinned =
+            AnalyzeOpts::try_parse_from(["analyze", "--", "--workdir=/", "/bin/true"]).unwrap();
+        pinned.tmp_dir = Some(workspace.path().to_path_buf());
+        let run = RunData::new_baseline(&pinned, "workdir-repro".to_owned()).unwrap();
+        let line = run.to_repro();
+        let words = shell_words::split(&line).unwrap();
+        assert_eq!(words[..3], ["cd", cwd.to_str().unwrap(), "&&"], "{line}");
+        assert!(words.contains(&"--workdir=/".to_owned()), "{line}");
+    }
+
     #[test]
     fn analyzer_reproducer_retains_the_trial_timeout() {
         use clap::CommandFactory;
@@ -3831,7 +3932,7 @@ mod tests {
         let workspace = tempfile::tempdir().unwrap();
         options.tmp_dir = Some(workspace.path().to_path_buf());
         let run = RunData::new_baseline(&options, "timeout-repro".to_owned()).unwrap();
-        let repro = run.to_repro();
+        let repro = run.repro_command();
         assert_eq!(repro.matches(" --timeout=7").count(), 1, "{repro}");
         let matches = crate::Args::command()
             .try_get_matches_from(shell_words::split(&repro).unwrap())
@@ -3941,7 +4042,7 @@ mod tests {
         let trial = run.trial_global_opts();
         assert_eq!(trial.log, Some(LevelFilter::WARN));
         assert_eq!(trial.log_file, None);
-        let repro = run.to_repro();
+        let repro = run.repro_command();
         assert!(repro.starts_with("hermit run "), "{repro}");
         assert!(!repro.contains("--log"), "{repro}");
         drop(workspace);
@@ -3957,7 +4058,7 @@ mod tests {
         let log = workspace.path().join("trial.log");
         assert_eq!(trial.log, Some(LevelFilter::DEBUG));
         assert_eq!(trial.log_file.as_deref(), Some(log.as_path()));
-        let repro = run.to_repro();
+        let repro = run.repro_command();
         let expected = format!("hermit --log=debug --log-file={} run ", log.display());
         assert!(repro.starts_with(&expected), "{repro}");
     }
@@ -4012,9 +4113,9 @@ mod tests {
                 format!("hermit{repro} run ")
             };
             assert!(
-                run.to_repro().starts_with(&expected),
+                run.repro_command().starts_with(&expected),
                 "{flags:?}: {}",
-                run.to_repro()
+                run.repro_command()
             );
         }
         assert!(
@@ -4088,9 +4189,9 @@ mod tests {
                         );
                         let logging = format!("hermit --log={level} --log-file={} ", log.display());
                         assert!(
-                            run.to_repro().starts_with(&logging),
+                            run.repro_command().starts_with(&logging),
                             "{flags:?} {}",
-                            run.to_repro()
+                            run.repro_command()
                         );
                     }
                     None => {
@@ -4163,7 +4264,7 @@ mod tests {
                 run.runopts.global_backend_arg(),
                 format!(" --backend={flag}")
             );
-            let repro = run.to_repro();
+            let repro = run.repro_command();
             assert!(
                 repro.contains(&format!(" --backend={flag} run ")),
                 "{flag}: reproducer does not select the backend: {repro}"
@@ -4330,7 +4431,7 @@ mod tests {
             let workspace = tempfile::tempdir().unwrap();
             options.tmp_dir = Some(workspace.path().to_path_buf());
             let run = RunData::new_baseline(&options, "epoch-repro".to_owned()).unwrap();
-            let repro = run.to_repro();
+            let repro = run.repro_command();
             assert_eq!(repro.matches("--epoch=").count(), 1, "{repro}");
             let matches = crate::Args::command()
                 .try_get_matches_from(shell_words::split(&repro).unwrap())
@@ -5285,7 +5386,7 @@ mod tests {
                     .virtual_timeout
                     .map(NonZeroU64::get)
             };
-            let repro = trial.to_repro();
+            let repro = trial.repro_command();
             match bound(&trial) {
                 Some(nanos) => assert_eq!(
                     repro
