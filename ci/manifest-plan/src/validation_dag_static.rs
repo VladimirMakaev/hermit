@@ -3923,6 +3923,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And record_replay_reads_an_inotify_instance_received_over_scm_rights: 225.
     // And record_replay_shares_memory_between_mappings_of_one_memfd: 226.
     // And record_replay_gives_the_guest_a_private_dev_shm: 222.
+    // And record_replay_gives_the_guest_a_private_ipc_namespace: 223.
     ("test.record_replay", 226),
     // Seven proc-fallback, warning, and record/replay tests retain all 80
     // selected identities under the unchanged shipped CLI skip filters.
@@ -4694,6 +4695,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_run_gets_a_private_empty_dev_shm,
     // concurrent_runs_do_not_share_dev_shm and
     // host_dev_shm_sources_stay_the_hosts: 640.
+    // And a_run_gets_a_private_ipc_namespace and
+    // concurrent_runs_do_not_share_ipc: 642.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5259,6 +5262,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three process-directed signal tests: 576.
     // And the same process-directed signal schedule-replay test: 577.
     // And the three private /dev/shm tests: 559.
+    // And the two private IPC namespace tests: 561.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
