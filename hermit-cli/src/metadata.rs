@@ -1398,6 +1398,7 @@ fn record_or_replay_config_with_timer_support(
         happens_before: None,
         record_host_inputs: false,
         host_input_log: None,
+        property_snapshot: None,
         untraced_code_range: None,
         fatal_core_capture: None,
         fuzz_futexes: false,

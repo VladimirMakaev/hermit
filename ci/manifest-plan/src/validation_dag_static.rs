@@ -1251,6 +1251,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's four schedule_replay_options::tests (the
     // expected rows, their consistency, the rows code reads, the user
     // guide's copy): 1889.
+    // And host_input::tests::host_file_identities_without_and_with_contents
+    // (a property snapshot copy is identified by its contents): 1892, listed.
+    // And host_input::tests::a_flattened_identity_does_not_clash_with_a_records_own_content
+    // (the snapshot hash's JSON key is not a record's own `content`): 1893,
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2151,6 +2155,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_verdict_under_timing_settings_says_what_the_trial_showed and
     // analyze::phases::tests::a_trial_under_another_setting_drops_the_option and
     // the_alternative_timing_trial_decides_the_cause_by_how_it_ends: 1223.
+    // And property_snapshot.rs's five units (the Android property area
+    // copy, shared content-named copies, a changed shared copy not joined,
+    // the root and path-length refusals, stale and held copies) and
+    // host_input_change's snapshot-copy unit: 1181, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3639,6 +3647,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And tool_global's
     // a_start_grant_carries_the_threads_replayed_first_slice and
     // finish_thread_start_installs_a_replayed_first_slice: 2684, listed.
+    // And the property snapshot's path rule, content identity and
+    // property-service address units: 2741, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3762,6 +3772,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a longer clone_args, a vfork on the caller's stack, a pidfd, and the
     // sizes and faults Linux refuses): 172.
     // And kernel_run_poll_waits_time_out_through_ignored_signals: 165.
+    // And property_snapshot's four tests (pure reads served from the copy,
+    // with metadata virtualization on and off; mappings that read no
+    // property file not refused; a file the area gained after its snapshot
+    // refused): 168.
+    // And a file without a copy refused through an outside hard link: 169.
     ("test.detcore_misc", 182),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
@@ -5845,6 +5860,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same chroot connection test: 182.
     // And the same eight untraced_clone tests: 172.
     // And kernel_run_poll_waits_time_out_through_ignored_signals: 165.
+    // And the four property snapshot tests: 168.
+    // And the uncopied-file alias refusal: 169.
     ("test.detcore_misc_on_host", 182),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
@@ -6344,6 +6361,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two replayed-SIGCHLD readmission units: 2686, listed.
     // And the same two spread transition tests: 2711.
     // And the same two start-grant units: 2684, listed.
+    // And the same three property snapshot units: 2741.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6796,6 +6814,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four timeout_survivors report units: 1119.
     // And the same eleven verdict and precondition tests: 1214.
     // And the same three timing-semantics verdict tests: 1217.
+    // And the same six property snapshot units: 1169.
+    // And the same twelve property snapshot units: 1175.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -7035,6 +7055,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same discovery-mode unit: 1868.
     // And the same three schedule replay options tests: 1874.
     // And the same four schedule replay options tests: 1875.
+    // And the same host_input identity unit: 1878.
+    // And the same flattened-identity unit: 1879.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
