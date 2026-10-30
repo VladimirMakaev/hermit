@@ -3369,7 +3369,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the_uncapped_slices_mark_is_written_only_when_set, an_uncapped_records_backstop_outlasts_its_latest_event and an_uncapped_replay_ends_slices_at_its_backstop_while_the_record_lasts: 3425.
     // And a_schedule_prefix_keeps_the_uncapped_slices_mark, for main's prefix
     // records: 3426.
-    ("test.detcore_unit", 3426),
+    // And record_serde::tests::the_uncapped_slices_mark_round_trips_through_the_record_serde: 3427.
+    ("test.detcore_unit", 3427),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5923,7 +5924,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two partial-summary units: 3422, listed.
     // And the same three uncapped-slices units: 3425.
     // And the same prefix-record unit: 3426.
-    ("test.detcore_unit_on_host", 3426),
+    // And the same record-serde round trip: 3427.
+    ("test.detcore_unit_on_host", 3427),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
