@@ -2181,10 +2181,15 @@ impl AnalyzeOpts {
 
             if self.verbose {
                 eprintln!(
-                    ":: {}, repro command:\n    {}",
+                    ":: {}, repro command{}:\n    {}",
                     format!("Testing execution during search (#{})", i)
                         .yellow()
                         .bold(),
+                    if self.keep_tmp {
+                        ""
+                    } else {
+                        " (its schedules are removed after the trial; --keep-tmp keeps them)"
+                    },
                     newrun.to_repro(),
                 );
             }
@@ -2193,6 +2198,7 @@ impl AnalyzeOpts {
                 TrialEnd::Unfinished(stop) => {
                     unfinished += 1;
                     refused += usize::from(stop == Stop::Refusal);
+                    newrun.discard_schedules();
                     return Ok((true, sched.to_owned()));
                 }
                 end => end.reached_target(),
@@ -2204,6 +2210,7 @@ impl AnalyzeOpts {
             }
 
             let sched_out = PreemptionReader::new(newrun.sched_path_out()).load_all();
+            newrun.discard_schedules();
             Ok((!is_match, sched_out.into_global()))
         };
 
