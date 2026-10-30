@@ -1223,6 +1223,10 @@ pub struct GlobalState {
     /// (`GlobalState::note_syscall_observation_gap`); `--passthru-opt` is
     /// added from the configuration.
     syscall_observation_gaps: Mutex<BTreeSet<SyscallObservationGap>>,
+    /// What the run learned of its store-exclusive sequences, for its
+    /// summary, recording and warnings (`crate::store_exclusive`).
+    #[cfg(target_arch = "aarch64")]
+    store_exclusive: Mutex<crate::store_exclusive::RunTally>,
 
     // Signals whose requested disposition Detcore did not install, already
     // announced in this run (`GlobalRequest::AnnounceSignalHandlerNotInstalled`).
@@ -1702,6 +1706,18 @@ impl GlobalState {
         std::mem::take(self.unsupported_syscalls.get_mut().unwrap())
     }
 
+    /// Take a store-exclusive report. It carries no time and touches no
+    /// scheduler state, so where it lands among other requests changes
+    /// nothing a run compares.
+    #[cfg(target_arch = "aarch64")]
+    fn note_store_exclusive(
+        &self,
+        report: &crate::store_exclusive::Report,
+    ) -> (Option<LogicalTime>, GlobalResponse) {
+        self.store_exclusive.lock().unwrap().note(&self.cfg, report);
+        (None, GlobalResponse::StoreExclusive(()))
+    }
+
     /// Ordinary RPC mutation must linearize before terminal publication under
     /// the same mutex as scheduler grants. A losing callback stays pending for
     /// the backend's failure subscription to drop; no normal reply is invented.
@@ -1777,6 +1793,10 @@ impl GlobalState {
                 history
                     .require_legacy_mode()
                     .unwrap_or_else(|error| crate::scheduler::exit_on_scheduler_refusal(&error));
+                // A recording whose run retried store-exclusives may not
+                // replay; say so before the replay starts.
+                #[cfg(target_arch = "aarch64")]
+                crate::store_exclusive::warn_at_replay_start(history.store_exclusive_failures());
                 // The scheduler takes the same record's callback checkpoints,
                 // and checks them against the launch decision, before its
                 // loop runs or any thread starts.
@@ -1874,6 +1894,8 @@ impl GlobalState {
             host_id_tasks: AtomicU64::new(0),
             unsupported_syscalls: Mutex::new(BTreeSet::new()),
             syscall_observation_gaps: Mutex::new(BTreeSet::new()),
+            #[cfg(target_arch = "aarch64")]
+            store_exclusive: Mutex::new(Default::default()),
             announced_handlers_not_installed: Mutex::new(BTreeSet::new()),
             announced_refused_signal_controls: Mutex::new((0, false)),
             policy_refusal: Mutex::new(None),
@@ -2361,6 +2383,12 @@ impl GlobalState {
                 &self.host_mutations.lock().unwrap(),
             );
         }
+        // After the scheduler shut down: every guest task has exited, and its
+        // store-exclusive counts have folded into the run's counters.
+        #[cfg(target_arch = "aarch64")]
+        for warning in self.store_exclusive.lock().unwrap().warnings(&self.cfg) {
+            warn!("{}", warning);
+        }
         let summary_result = self
             .finalize_run_summary()
             .and_then(|(mut summary, description)| {
@@ -2507,6 +2535,17 @@ impl GlobalState {
         // First, the scheduler can generate part of the summary (and flush once).
         let (mut summary, info_reprio_descrip) = {
             let mut sched = self.sched.lock().unwrap();
+            // Every guest task has exited: the recording keeps the run's failed
+            // store-exclusives for a replay to warn about.
+            #[cfg(target_arch = "aarch64")]
+            if let Some(writer) = sched.preemption_writer.as_mut() {
+                writer.record_store_exclusive_failures(
+                    self.store_exclusive
+                        .lock()
+                        .unwrap()
+                        .failures_for_recording(),
+                );
+            }
             // Only a schedule written to a file carries the set; an in-memory
             // record's text goes into the INFO description.
             if let (Some(writer), Some(inputs), true) = (
@@ -2518,6 +2557,11 @@ impl GlobalState {
             }
             scheduler_half(&mut sched, self.cfg.record_preemptions_to.as_ref())?
         };
+        #[cfg(target_arch = "aarch64")]
+        self.store_exclusive
+            .lock()
+            .unwrap()
+            .fill_summary(&mut summary);
         // Second, we fill in the rest based on global state.
         // Record configuration and the runtime's timer mechanism, not whether
         // a timer is currently armed or has delivered an event. This metadata
@@ -2875,6 +2919,10 @@ impl GlobalTool for GlobalState {
     }
 
     async fn receive_rpc(&self, from: Tid, gr: Self::Request) -> Self::Response {
+        #[cfg(target_arch = "aarch64")]
+        if let GlobalRequest::StoreExclusive(report) = &gr.2 {
+            return self.note_store_exclusive(report);
+        }
         if let GlobalRequest::MappingCapture(request) = &gr.2 {
             return (
                 None,
@@ -3112,6 +3160,10 @@ impl GlobalState {
                 None,
                 GlobalResponse::MappingCapture(self.mapping_capture_request(from, gr.1, request)),
             );
+        }
+        #[cfg(target_arch = "aarch64")]
+        if let GlobalRequest::StoreExclusive(report) = &gr.2 {
+            return self.note_store_exclusive(report);
         }
         if let GlobalRequest::CheckBrkMappings(check, fact) = &gr.2 {
             return (
@@ -3652,6 +3704,10 @@ impl GlobalState {
             }
             GlobalRequest::CheckBrkMappings(..) => {
                 unreachable!("mapping capture is answered before clock accounting")
+            }
+            #[cfg(target_arch = "aarch64")]
+            GlobalRequest::StoreExclusive(_) => {
+                unreachable!("a store-exclusive report is answered before clock accounting")
             }
             GlobalRequest::Sigalrm(_) => {
                 unreachable!("SIGALRM ledger control answered before clock accounting")
@@ -7724,6 +7780,13 @@ pub enum GlobalRequest {
     /// A guest task was created with a host ID although Detcore chooses the
     /// IDs (`GlobalState::host_id_tasks`). Appended last.
     GaveHostId,
+    /// aarch64: a report of the exclusive pairs in executable mappings, or
+    /// the root guest task's first image, where the run's store-exclusive
+    /// counters start (`crate::store_exclusive`). It carries no time and changes no scheduler
+    /// state, so it is answered before any grant or clock accounting.
+    /// Appended last.
+    #[cfg(target_arch = "aarch64")]
+    StoreExclusive(crate::store_exclusive::Report),
 }
 
 /// Responses from the global object
@@ -8048,6 +8111,9 @@ pub enum GlobalResponse {
     NextGuestId(Option<i32>),
     /// The answer to `GlobalRequest::GaveHostId`. Appended last.
     GaveHostId(()),
+    /// The answer to `GlobalRequest::StoreExclusive`. Appended last.
+    #[cfg(target_arch = "aarch64")]
+    StoreExclusive(()),
 }
 
 /// Read only the mapping predicate through a backend's synchronous external
@@ -8158,6 +8224,28 @@ pub(crate) fn guest_log_reply(
         other => Err(std::io::Error::other(format!(
             "unexpected answer to a guest log record: {other:?}"
         ))),
+    }
+}
+
+/// A store-exclusive report (`crate::store_exclusive`). Like a guest log
+/// record, it carries no time.
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn store_exclusive_request(
+    report: crate::store_exclusive::Report,
+) -> (DetTime, MmId, GlobalRequest) {
+    (
+        DetTime::default(),
+        MmId::initial(DetTid::from_raw(0)),
+        GlobalRequest::StoreExclusive(report),
+    )
+}
+
+/// Check the answer to a [`store_exclusive_request`]. A report is
+/// diagnostic, so another answer (a run already failing) is only logged.
+#[cfg(target_arch = "aarch64")]
+pub(crate) fn store_exclusive_reply(response: (Option<LogicalTime>, GlobalResponse)) {
+    if response != (None, GlobalResponse::StoreExclusive(())) {
+        debug!("unexpected answer to a store-exclusive report: {response:?}");
     }
 }
 

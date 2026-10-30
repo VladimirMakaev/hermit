@@ -1235,6 +1235,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_reused_thread_id_starts_its_own_clock_and_keeps_the_old_work: 1881.
     // And detcore-model's config::tests::the_guest_numbering_never_enters_the_legacy_form
     // (--no-namespace chosen guest IDs): 1881, listed.
+    // And this change's detcore-model test: 1881.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3493,6 +3494,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And clone3_accepts_only_clone_newtime_among_the_csignal_bits: 2713 + 1 = 2714.
     // the_guest_numbering_round_trips_and_is_compared: 2691, listed.
     // And this change's post-fork-side scheduler test: 2692.
+    // And this change's store-exclusive tests: 2707.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4917,6 +4919,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And no_namespace_preemption_records_replay_under_their_base: 628.
     // And this change's no-namespace schedule replay test: 629.
     // And the --rewrite-exclusives refusal test under --no-namespace: 638.
+    // And this change's CLI test: 638.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -6102,6 +6105,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same CLONE_NEWTIME unit: 2713 + 1 = 2714.
     // And the same nine chosen-ID units: 2691.
     // And the same test: 2692.
+    // And the same tests: 2707.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6765,6 +6769,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two stream-finish tests: 1868, listed.
     // And the same reused-thread-ID detcore-model test: 1867.
     // And the same guest-numbering legacy-form test: 1867, listed.
+    // And the same test: 1867.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.

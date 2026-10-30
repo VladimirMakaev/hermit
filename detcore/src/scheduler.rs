@@ -19342,6 +19342,11 @@ impl Scheduler {
                 run_timeout_secs: None,
                 guest_ids: None,
                 host_id_tasks: 0,
+                // GlobalState records what the run learned of its
+                // store-exclusive sequences (aarch64).
+                exclusive_pairs: Default::default(),
+                store_exclusives: None,
+                store_exclusives_unavailable: None,
             },
             info_reprio_descrip,
         ))
