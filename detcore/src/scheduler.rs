@@ -4969,7 +4969,8 @@ impl Scheduler {
                 .with_uncapped_slices(
                     cfg.replay_preemptions_from.is_some() || uncapped_replay_backstop.is_some(),
                 )
-                .with_chaos_timeslice(cfg.chaos_timeslice);
+                .with_chaos_timeslice(cfg.chaos_timeslice)
+                .with_rewrite_exclusives_in_memory(cfg.rewrite_exclusives_in_memory);
             if boundaries {
                 writer
                     .with_slice_boundaries()
@@ -8606,8 +8607,8 @@ impl Scheduler {
         // recording did, and no wait filed after the schedule has run out:
         // the spread is a chaos decision (`schedule_replay_options`), and a
         // replay draws no new wake times past its schedule.
-        let spread_applies =
-            ReplayOption::ChaosTimedWaitSpread.applies(self.past_the_schedule(), self.chaos_draws_schedule);
+        let spread_applies = ReplayOption::ChaosTimedWaitSpread
+            .applies(self.past_the_schedule(), self.chaos_draws_schedule);
         let Some(spread) = self.timed_wait_spread.as_mut().filter(|_| spread_applies) else {
             self.blocked.timed_waiters.insert(deadline, dettid);
             return;
@@ -19946,6 +19947,8 @@ impl Scheduler {
                 // store-exclusive sequences (aarch64).
                 exclusive_pairs: Default::default(),
                 counter_reads: Default::default(),
+                exclusive_rewrites: Default::default(),
+                exclusive_rewrite_cache_peak: 0,
                 store_exclusives: None,
                 store_exclusives_unavailable: None,
                 // GlobalState counts binder calls (`syscalls::binder`).

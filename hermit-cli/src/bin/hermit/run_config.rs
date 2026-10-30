@@ -1070,6 +1070,10 @@ mod tests {
                 "--access-trace-max-records=9",
             ],
         ),
+        (
+            "rewrite-exclusives-mode",
+            &["--rewrite-exclusives", "--rewrite-exclusives-mode=memory"],
+        ),
         ("scheduler-turn-cost", &["--scheduler-turn-cost=10000"]),
         ("virtual-timeout", &["--virtual-timeout=1000"]),
         ("cap-preemption-charge", &["--cap-preemption-charge"]),

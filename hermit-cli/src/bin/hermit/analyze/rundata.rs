@@ -2229,6 +2229,11 @@ impl AnalyzeOpts {
         Ok(())
     }
 
+    /// Whether the trials rewrite exclusive loops in the guest's memory.
+    pub fn trial_rewrite_exclusives_in_memory(&self) -> bool {
+        RunData::get_raw_runopts(self).rewrites_exclusives_in_memory()
+    }
+
     /// `record` stamped with the trials' `--pipe-wake-latency`, signal-state
     /// copy setting, `--expired-wait-charge` and `--sleep-registration`, as
     /// every record analyze writes must be: a record that omitted one would be
@@ -2245,6 +2250,8 @@ impl AnalyzeOpts {
     /// the recordings, or `HERMIT_EPOCH`, or the default), so that a replay or
     /// bisect of it starts there too: a schedule's times are absolute virtual
     /// times from that epoch.
+    /// It also states whether the trials rewrite exclusive loops in the
+    /// guest's memory, which a replay under the other setting refuses.
     pub fn stamp_trial_record(&self, record: PreemptionRecord) -> PreemptionRecord {
         record
             .with_pipe_wake_latency(self.trial_pipe_wake_latency())
@@ -2259,6 +2266,7 @@ impl AnalyzeOpts {
             .with_uncapped_slices(self.trial_schedules_uncapped.get())
             .with_chaos_timeslice(self.trial_chaos_timeslice.map(std::num::NonZeroU64::get))
             .with_epoch(RunData::get_raw_runopts(self).det_opts.det_config.epoch)
+            .with_rewrite_exclusives_in_memory(self.trial_rewrite_exclusives_in_memory())
     }
 
     /// Whether the trials cap preemption charges (`--cap-preemption-charge`
@@ -2319,6 +2327,8 @@ impl AnalyzeOpts {
     /// record without that field states as `each`; and for the trials'
     /// `--sleep-registration` ([`Self::adopt_sleep_registration`]), which a
     /// record without that field states as `when-chosen`.
+    /// The in-memory exclusive-loop rewrite is checked too: a record without
+    /// that field was made without it.
     pub fn refuse_recordings_under_another_pipe_wake_latency(
         &self,
         recordings: &[(&str, &Path)],
@@ -2381,6 +2391,15 @@ impl AnalyzeOpts {
                 recorded,
                 config.chaos_timed_wait_spread,
                 None,
+            ) {
+                return Err(anyhow::Error::new(crate::container::PolicyRefusal).context(refusal));
+            }
+            let recorded = detcore::preemptions::read_recorded_rewrite_exclusives_in_memory(path)
+                .map_err(anyhow::Error::msg)?;
+            if let Some(refusal) = detcore::preemptions::rewrite_exclusives_in_memory_mismatch(
+                &format!("{option} {}", path.display()),
+                recorded,
+                self.trial_rewrite_exclusives_in_memory(),
             ) {
                 return Err(anyhow::Error::new(crate::container::PolicyRefusal).context(refusal));
             }

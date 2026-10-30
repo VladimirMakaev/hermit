@@ -1255,6 +1255,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (a property snapshot copy is identified by its contents): 1892, listed.
     // And host_input::tests::a_flattened_identity_does_not_clash_with_a_records_own_content
     // (the snapshot hash's JSON key is not a record's own `content`): 1893,
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1882, listed.
+    // rewrite_exclusives_in_memory_never_enters_the_legacy_form: 1883.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2159,6 +2163,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // copy, shared content-named copies, a changed shared copy not joined,
     // the root and path-length refusals, stale and held copies) and
     // host_input_change's snapshot-copy unit: 1181, listed.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1105, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3649,6 +3656,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // finish_thread_start_installs_a_replayed_first_slice: 2684, listed.
     // And the property snapshot's path rule, content identity and
     // property-service address units: 2741, listed.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 2739, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5128,6 +5138,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // no longer ignored: a replay's preemption admission now follows the
     // replay-epoch check, so the epoch refusal it asserts comes first: 639.
     // And run_timeout_names_the_guest_process_left_running_after_its_root_exited: 623.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 641, listed.
+    // And this branch's CLI tests: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5777,6 +5791,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And liteinst_replay_with_a_conflicting_epoch_is_refused_in_every_build,
     // no longer ignored: 558.
     // And the same timeout-survivor CLI test: 542.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 560, listed.
+    // And the same tests: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6362,6 +6380,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two spread transition tests: 2711.
     // And the same two start-grant units: 2684, listed.
     // And the same three property snapshot units: 2741.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 2739, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6816,6 +6837,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three timing-semantics verdict tests: 1217.
     // And the same six property snapshot units: 1169.
     // And the same twelve property snapshot units: 1175.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1172, listed.
+    // And the same unit tests as test.hermit_unit: 1115.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -7057,6 +7082,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four schedule replay options tests: 1875.
     // And the same host_input identity unit: 1878.
     // And the same flattened-identity unit: 1879.
+    // Re-derived with the node's own selection at the head of the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795), whose rewriter tests
+    // moved from hermit-cli into Detcore and grew there: 1868, listed.
+    // And the same legacy-form unit: 1869.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
