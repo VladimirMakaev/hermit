@@ -12387,6 +12387,66 @@ impl Scheduler {
         tree.external_parents.get(&process).copied()
     }
 
+    /// The process numbers a guest without a PID namespace of its own
+    /// (`--no-namespace`: `GuestIds::Chosen` or `GuestIds::Host`) sees for
+    /// the numbers the kernel reports about its task `task`: its process's
+    /// parent `kernel_parent` (`getppid`, `stat` field 4, `status` `PPid`),
+    /// and each of `kernel_ids` (`stat` fields 1 and 5 to 8, `status`'s
+    /// `Tgid`, `Pid`, `NStgid` and `NSpid`). The kernel then numbers every
+    /// task by the host's PID namespace, and the guest's tree sits inside it,
+    /// below Hermit's own process; the guest sees it as Linux shows a PID
+    /// namespace to its tasks, where a number from outside reads 0
+    /// (`pid_nr_ns`):
+    /// - The parent is the kernel's where it is a process of the guest (the
+    ///   process table has it). Any other parent is outside: the model's
+    ///   (`Self::guest_visible_parent`), the namespace's init, 1, for an
+    ///   orphan given to it, else 0, as Linux shows the parent of a PID
+    ///   namespace's init: the run's root process, and its `CLONE_PARENT`
+    ///   children, whose real parent is Hermit's own process. That is the
+    ///   `0` the model's `external_parents` holds for them.
+    /// - Any other number is the kernel's where it names a task, a process
+    ///   group or a session of the guest, else 0: the host's process group
+    ///   and session the root inherits, and a terminal's foreground group
+    ///   outside the guest. A non-positive number (`tpgid`'s -1) is kept.
+    ///
+    /// `None` for a task the guest does not have: a host process's file,
+    /// which keeps the kernel's numbers.
+    pub fn guest_visible_ids(
+        &self,
+        task: DetTid,
+        kernel_parent: i32,
+        kernel_ids: &[i32],
+    ) -> Option<(i32, Vec<i32>)> {
+        let process = self.signal_target_process(task)?;
+        let tree = &self.thread_tree;
+        let is_process = |id: i32| tree.process_wait.contains_key(&DetPid::from_raw(id));
+        let parent = if is_process(kernel_parent) {
+            kernel_parent
+        } else {
+            self.guest_visible_parent(process)
+                .unwrap_or(OUTSIDE_NAMESPACE.as_raw())
+        };
+        let visible = |id: i32| {
+            id <= 0
+                || is_process(id)
+                || tree.thread_to_leader.contains_key(&DetTid::from_raw(id))
+                || tree.process_wait.values().any(|metadata| {
+                    metadata.process_group.as_raw() == id || metadata.session.as_raw() == id
+                })
+        };
+        let ids = kernel_ids
+            .iter()
+            .map(|&id| {
+                if visible(id) {
+                    id
+                } else {
+                    OUTSIDE_NAMESPACE.as_raw()
+                }
+            })
+            .collect();
+        Some((parent, ids))
+    }
+
     /// The recorded name of task `tid` (`ThreadTree::task_comms`).
     #[cfg(test)]
     pub fn task_comm(&self, tid: DetTid) -> Option<crate::procfs::task_stat::TaskComm> {
@@ -43981,6 +44041,95 @@ mod test {
         // A committed SIGKILL dooms it, so the wait will end.
         scheduler.record_committed_sigkill(child, Some(DetPid::from_raw(5)));
         assert!(!scheduler.child_waits_wait_only_on_stuck_children());
+    }
+
+    /// A guest without a PID namespace of its own (`--no-namespace`), where
+    /// the kernel numbers by the host's, sees the numbers the kernel reports
+    /// about its tasks as Linux shows them in a PID namespace
+    /// (`guest_visible_ids`; `task_tgid_nr_ns`, `task_pgrp_nr_ns`,
+    /// `task_session_nr_ns` and `pid_nr_ns` read 0 for a pid outside it): the
+    /// root process 28672's parent 8154, Hermit's own process, and the host's
+    /// group and session 8140 it inherits read 0, as for its CLONE_PARENT
+    /// sibling; its child's parent is the root; an orphan the kernel gave to
+    /// a host reaper reads the namespace's init, 1; a group and a session the
+    /// guest made keep their numbers, even once their leader is gone; and a
+    /// host process's file keeps the kernel's numbers.
+    #[test]
+    fn a_guest_without_a_pid_namespace_sees_numbers_outside_it_as_linux_shows_them() {
+        let mut scheduler = Scheduler::new(&Config::default());
+        let [root, child, grandchild, sibling, leader] =
+            [28672, 28673, 28674, 28675, 28676].map(DetTid::from_raw);
+        let (hermit, host_group, host_reaper) = (8154, 8140, 24318);
+        scheduler.thread_tree.add_child(root, root, true);
+        scheduler.thread_tree.add_child(root, child, true);
+        scheduler.thread_tree.add_child(child, grandchild, true);
+        scheduler.thread_tree.add_child_with_wait_metadata(
+            root,
+            sibling,
+            true,
+            true,
+            libc::SIGCHLD,
+        );
+        for tid in [root, child, grandchild, sibling] {
+            register_known_thread(&mut scheduler, tid);
+        }
+        let host = [28672, host_group, host_group, -1];
+        assert_eq!(
+            scheduler.guest_visible_ids(root, hermit, &host),
+            Some((0, vec![28672, 0, 0, -1]))
+        );
+        assert_eq!(
+            scheduler.guest_visible_ids(sibling, hermit, &[28675, host_group]),
+            Some((0, vec![28675, 0]))
+        );
+        assert_eq!(
+            scheduler.guest_visible_ids(child, 28672, &[28673, host_group, host_group]),
+            Some((28672, vec![28673, 0, 0]))
+        );
+        // The rendered stat records the root's parent as the guest sees it.
+        scheduler.record_external_parent(DetPid::from_raw(28672), 0);
+        assert_eq!(
+            scheduler.guest_visible_ids(root, hermit, &[]),
+            Some((0, Vec::new()))
+        );
+        // The orphan the kernel gave to a host reaper reads the namespace's
+        // init, and a session the guest made keeps its number once its
+        // leader is gone.
+        exit_process(&mut scheduler, child);
+        assert!(
+            scheduler
+                .thread_tree
+                .is_init_orphan(DetPid::from_raw(28674))
+        );
+        assert_eq!(
+            scheduler.guest_visible_ids(grandchild, host_reaper, &[28674, host_group]),
+            Some((1, vec![28674, 0]))
+        );
+        let member = DetTid::from_raw(28677);
+        scheduler.thread_tree.add_child(root, leader, true);
+        register_known_thread(&mut scheduler, leader);
+        assert!(
+            scheduler
+                .thread_tree
+                .create_session(DetPid::from_raw(28676))
+        );
+        scheduler.thread_tree.add_child(leader, member, true);
+        register_known_thread(&mut scheduler, member);
+        exit_process(&mut scheduler, leader);
+        assert_eq!(
+            scheduler.guest_visible_ids(member, host_reaper, &[28677, 28676, 28676]),
+            Some((1, vec![28677, 28676, 28676]))
+        );
+        // A parent the guest has is the kernel's, whatever the model says.
+        assert_eq!(
+            scheduler.guest_visible_ids(grandchild, 28672, &[]),
+            Some((28672, Vec::new()))
+        );
+        // Not a task of the guest: the kernel's numbers stand.
+        assert_eq!(
+            scheduler.guest_visible_ids(DetTid::from_raw(4242), 1, &[4242]),
+            None
+        );
     }
 
     /// Detcore records each task's name (package K slice D4c-1): a new task

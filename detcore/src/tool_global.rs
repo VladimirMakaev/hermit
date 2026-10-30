@@ -5267,6 +5267,11 @@ impl GlobalState {
                     .record_external_parent(process, parent);
                 R::RecordExternalParent(())
             }
+            GlobalRequest::GuestVisibleIds(task, parent, ids) => R::GuestVisibleIds(
+                self.lock_rpc_scheduler(false)
+                    .await
+                    .guest_visible_ids(task, parent, &ids),
+            ),
             GlobalRequest::SetRssLimit(process, limit) => {
                 self.lock_rpc_scheduler(false)
                     .await
@@ -7261,7 +7266,7 @@ pub enum SignalScope {
 /// `Resources`: a change to another payload type defined elsewhere
 /// (`CommittedSendWindow`, ...) changes what is on the wire without changing
 /// the digest, and needs a revision appended by hand.
-pub(crate) const GLOBAL_RPC_REVISION: u32 = 7;
+pub(crate) const GLOBAL_RPC_REVISION: u32 = 8;
 
 /// This is public only so it can be used in the `GlobalTool` trait.
 /// It should NOT be used by any client outside of this file.
@@ -8076,6 +8081,11 @@ pub enum GlobalRequest {
     /// live thread or an existing process (`Scheduler::cpu_clock_process`).
     /// Appended last.
     CpuClockProcess(DetPid),
+    /// What a guest without a PID namespace of its own sees for the numbers
+    /// the kernel reports about one of its tasks: the task, its process's
+    /// parent, and the other numbers (`Scheduler::guest_visible_ids`).
+    /// Appended last.
+    GuestVisibleIds(DetTid, i32, Vec<i32>),
 }
 
 /// Responses from the global object
@@ -8428,6 +8438,10 @@ pub enum GlobalResponse {
     WithPostCrashBound(std::num::NonZeroU64, Box<GlobalResponse>),
     /// The answer to `GlobalRequest::CpuClockProcess`. Appended last.
     CpuClockProcess(Option<DetPid>),
+    /// The answer to `GlobalRequest::GuestVisibleIds`: the parent and the
+    /// other numbers, or `None` for a task the guest does not have.
+    /// Appended last.
+    GuestVisibleIds(Option<(i32, Vec<i32>)>),
 }
 
 /// Read only the mapping predicate through a backend's synchronous external
@@ -11711,6 +11725,27 @@ pub(crate) async fn set_task_comm<G, T>(
         .await
         .1;
     assert_eq!(response, GlobalResponse::SetTaskComm(()));
+}
+
+/// What a guest without a PID namespace of its own sees for the numbers the
+/// kernel reports about its task `task`: its process's parent
+/// `kernel_parent`, and each of `kernel_ids` (`Scheduler::guest_visible_ids`).
+/// `None` for a task the guest does not have.
+pub(crate) async fn guest_visible_ids<G, T>(
+    guest: &mut G,
+    task: DetTid,
+    kernel_parent: i32,
+    kernel_ids: Vec<i32>,
+) -> Option<(i32, Vec<i32>)>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    let request = GlobalRequest::GuestVisibleIds(task, kernel_parent, kernel_ids);
+    match send_and_update_time(guest, request).await.1 {
+        GlobalResponse::GuestVisibleIds(answer) => answer,
+        _ => unreachable!(),
+    }
 }
 
 /// Record `parent` as the guest-visible parent of `process`, whose real

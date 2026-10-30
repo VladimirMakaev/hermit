@@ -4488,11 +4488,8 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
             // Detcore neither charges them virtual time nor logs or counts
             // them.
             if config.untrap_passthrough_syscalls {
-                subscription.disable_syscalls(
-                    crate::syscall_classification::UNTRAPPED_PASSTHROUGH
-                        .iter()
-                        .copied(),
-                );
+                subscription
+                    .disable_syscalls(crate::syscall_classification::untrapped_passthrough(config));
             }
             subscription
         } else {
@@ -7465,6 +7462,12 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
                     _ => self.passthrough(guest, call).await,
                 }
             }
+            // The kernel's answer, with a parent outside the guest renumbered
+            // where the kernel numbers by the host's PID namespace
+            // (`--no-namespace`).
+            SyscallClassification::PassThrough if call.number() == Sysno::getppid => {
+                self.handle_getppid(guest, call).await
+            }
             // faccessat2 and fchmodat2 are untyped in the pinned Reverie revision; the
             // reviewed classification table routes them, and every other reviewed
             // PassThrough syscall, through the blanket arm below.
@@ -8148,11 +8151,50 @@ mod subscription_tests {
         }
     }
 
+    /// In a run without a PID namespace of its own (`--no-namespace`),
+    /// `--untrap-passthrough-syscalls` keeps `getppid` trapped, and nothing
+    /// else changes: there the kernel names the root process's parent,
+    /// Hermit's own process, by its host number, which Detcore renumbers
+    /// (`Detcore::handle_getppid`).
+    #[test]
+    fn untrapping_keeps_getppid_trapped_without_a_pid_namespace() {
+        use std::collections::BTreeSet;
+
+        use detcore_model::pid::GuestIds;
+
+        let subscribed = |guest_ids| {
+            let config = Config {
+                untrap_passthrough_syscalls: true,
+                guest_ids,
+                ..strict_config(false)
+            };
+            <Detcore as Tool>::subscriptions(&config)
+                .iter_syscalls()
+                .collect::<BTreeSet<_>>()
+        };
+        let namespaced = subscribed(GuestIds::Namespace);
+        assert!(!namespaced.contains(&Sysno::getppid));
+        for guest_ids in [
+            GuestIds::Host,
+            GuestIds::Chosen {
+                base: 5000,
+                refuse_host_ids: true,
+            },
+        ] {
+            let mut trapped = subscribed(guest_ids);
+            assert!(trapped.remove(&Sysno::getppid), "{guest_ids:?}");
+            assert_eq!(trapped, namespaced, "{guest_ids:?}");
+        }
+    }
+
     /// Each untrapped syscall is one whose Detcore handler passes it through
     /// unchanged: classified PassThrough, outside the PassThrough calls that
     /// Detcore handles itself or observes, and none that names a file or a
     /// descriptor, reads virtual time, maps memory, or has an output buffer
-    /// that `--detlog-io-buffers` hashes.
+    /// that `--detlog-io-buffers` hashes. `getppid`'s handler renumbers a
+    /// parent outside the guest only in a run without a PID namespace of its
+    /// own, which keeps it trapped
+    /// (`untrapping_keeps_getppid_trapped_without_a_pid_namespace`).
     #[test]
     fn untrapped_passthrough_syscalls_are_plain_passthroughs() {
         let handled = [

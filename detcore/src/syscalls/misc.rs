@@ -1026,6 +1026,71 @@ impl<T: RecordOrReplay> Detcore<T> {
         Ok(i64::from(answer.ok_or(Errno::ESRCH)?.as_raw()))
     }
 
+    /// Whether the kernel numbers this thread's tasks by the host's PID
+    /// namespace, with the guest's process tree inside it below Hermit's own
+    /// process: a run without a PID namespace of its own (`--no-namespace`,
+    /// `Config::guest_ids` `Chosen` or `Host`), for a thread outside any PID
+    /// namespace the guest made (`nested_pid_namespace`), whose numbers the
+    /// kernel already shows as that namespace does. Then a number the kernel
+    /// reports may name a process outside the guest: its parent, its process
+    /// group or session, and Hermit renumbers it
+    /// (`Scheduler::guest_visible_ids`).
+    pub(crate) fn kernel_numbers_by_the_host<G: Guest<Self>>(guest: &G) -> bool {
+        guest.config().guest_ids != detcore_model::pid::GuestIds::Namespace
+            && !guest.thread_state().nested_pid_namespace
+    }
+
+    /// The calling process's parent as the guest sees it, from `kernel`, the
+    /// kernel's `getppid` answer: that answer itself in a PID namespace of the
+    /// run's or the guest's own, and where the kernel numbers by the host's
+    /// (`Self::kernel_numbers_by_the_host`) a parent outside the guest as
+    /// Linux shows it in a PID namespace: 0 for the run's root process (and
+    /// its `CLONE_PARENT` children), whose real parent is Hermit's own
+    /// process, and the namespace's init, 1, for an orphan the kernel gave
+    /// to a reaper outside the guest (`Scheduler::guest_visible_ids`).
+    pub(crate) async fn guest_visible_ppid<G: Guest<Self>>(guest: &mut G, kernel: i32) -> i32 {
+        if !Self::kernel_numbers_by_the_host(guest) {
+            return kernel;
+        }
+        let task = guest.thread_state().dettid;
+        crate::tool_global::guest_visible_ids(guest, task, kernel, Vec::new())
+            .await
+            .map_or(
+                crate::scheduler::OUTSIDE_NAMESPACE.as_raw(),
+                |(parent, _)| parent,
+            )
+    }
+
+    /// The calling process's parent as the guest sees it
+    /// ([`Self::guest_visible_ppid`]), from a `getppid` Detcore injects: the
+    /// parent a `/proc/self` or `/proc/thread-self` `stat` or `status` shows,
+    /// and the one a rendered `stat` records for a parent outside the
+    /// guest's tree (`Scheduler::record_external_parent`).
+    pub(crate) async fn injected_guest_ppid<G: Guest<Self>>(guest: &mut G) -> Result<i32, Error> {
+        let kernel = guest.inject(syscalls::Getppid::new()).await? as i32;
+        Ok(Self::guest_visible_ppid(guest, kernel).await)
+    }
+
+    /// `getppid`: the kernel's answer, a pass-through, which names the parent
+    /// in the run's PID namespace; where the kernel numbers by the host's
+    /// (`--no-namespace`), a parent outside the guest is renumbered as Linux
+    /// shows it in a PID namespace ([`Self::guest_visible_ppid`]): the run's
+    /// root process otherwise read its host parent's number, which differs in
+    /// every run.
+    pub async fn handle_getppid<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        call: reverie::syscalls::Syscall,
+    ) -> Result<i64, Error> {
+        let kernel = self.passthrough(guest, call).await?;
+        if !Self::kernel_numbers_by_the_host(guest) {
+            return Ok(kernel);
+        }
+        Ok(i64::from(
+            Self::guest_visible_ppid(guest, kernel as i32).await,
+        ))
+    }
+
     /// setpgid system call, answered as Linux answers it from Detcore's model
     /// (`ThreadTree::setpgid_decision`), and mirrored to the backend, as
     /// `handle_setsid`. A caller in a nested PID namespace is answered by the

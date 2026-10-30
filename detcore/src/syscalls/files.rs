@@ -6013,7 +6013,7 @@ impl<T: RecordOrReplay> Detcore<T> {
                     // a forked process later reads the shared descriptor.
                     let tgid = guest.inject(syscalls::Getpid::new()).await? as i32;
                     let tid = guest.inject(syscalls::Gettid::new()).await? as i32;
-                    let ppid = guest.inject(syscalls::Getppid::new()).await? as i32;
+                    let ppid = Self::injected_guest_ppid(guest).await?;
                     procfs
                         .as_mut()
                         .expect("thread identity request lost its procfs file")
@@ -7259,6 +7259,41 @@ impl<T: RecordOrReplay> Detcore<T> {
         Ok(copied as i64)
     }
 
+    /// Renumber another guest process's `stat` or `status` the kernel opened
+    /// on `fd`, whose snapshot `contents` holds the kernel's numbers `held`,
+    /// where the kernel numbers by the host's PID namespace
+    /// (`--no-namespace`, `Self::kernel_numbers_by_the_host`): a number that
+    /// names a process outside the guest (the run's root process's parent,
+    /// Hermit's own process, and the host's process group and session it
+    /// inherits) reads as Linux shows it in a PID namespace, as `getppid`,
+    /// `getpgid` and `getsid` answer (`Scheduler::guest_visible_ids`). A
+    /// host process's file keeps the kernel's numbers.
+    async fn number_procfs_ids_as_the_guest_sees_them<G: Guest<Self>>(
+        guest: &mut G,
+        fd: RawFd,
+        contents: &[u8],
+        held: &[i32],
+    ) -> Result<(), Error> {
+        let described = guest
+            .thread_state()
+            .with_detfd(fd, |detfd| detfd.procfs_kernel_task_and_parent(contents))?;
+        let Some((task, parent)) = described else {
+            return Ok(());
+        };
+        let task = detcore_model::pid::DetTid::from_raw(task);
+        let Some((parent, ids)) =
+            crate::tool_global::guest_visible_ids(guest, task, parent, held.to_vec()).await
+        else {
+            return Ok(());
+        };
+        let numbers: std::collections::BTreeMap<i32, i32> = held.iter().copied().zip(ids).collect();
+        guest.thread_state().with_detfd(fd, |detfd| {
+            detfd.set_procfs_guest_numbers(numbers.clone());
+            detfd.set_procfs_guest_parent(parent);
+        })?;
+        Ok(())
+    }
+
     async fn initialize_procfs_snapshot<G: Guest<Self>>(
         &self,
         guest: &mut G,
@@ -7426,6 +7461,16 @@ impl<T: RecordOrReplay> Detcore<T> {
             guest.thread_state().with_detfd(call.fd(), |detfd| {
                 detfd.set_procfs_guest_numbers(numbers.clone())
             })?;
+        } else if !held.is_empty() && Self::kernel_numbers_by_the_host(guest) {
+            // Boxed: a path only `--no-namespace` takes, kept out of the
+            // future of every read that takes a procfs snapshot.
+            Box::pin(Self::number_procfs_ids_as_the_guest_sees_them(
+                guest,
+                call.fd(),
+                &contents,
+                &held,
+            ))
+            .await?;
         }
         let virtual_uptime_seconds = self.calculate_procfs_uptime(guest).await?;
         // A file Detcore renders at its first read: at the uptime an earlier
@@ -7457,7 +7502,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             .map_err(|_| Errno::EOVERFLOW)?;
         // TODO-HUMAN-REVIEW(PR-723): Review injected identity snapshot reads.
         let virtual_pid = guest.inject(syscalls::Getpid::new()).await? as i32;
-        let virtual_ppid = guest.inject(syscalls::Getppid::new()).await? as i32;
+        let virtual_ppid = Self::injected_guest_ppid(guest).await?;
         let virtual_pty_count = guest.thread_state().count_open_files_at_paths(&[
             std::path::Path::new("/dev/ptmx"),
             std::path::Path::new("/dev/pts/ptmx"),

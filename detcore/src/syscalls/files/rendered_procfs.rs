@@ -2759,7 +2759,9 @@ impl<T: RecordOrReplay> Detcore<T> {
             // The guest-visible parent of a process whose real parent is
             // outside the guest's tree (the run's root, and a CLONE_PARENT
             // child of such a process), which no other record of Detcore's
-            // holds, is its own getppid answer, recorded here, in its own
+            // holds, is its own getppid answer as the guest sees it
+            // (`Detcore::injected_guest_ppid`: under --no-namespace, 0 for
+            // Hermit's own process), recorded here, in its own
             // turn, before any descriptor of its rendered stat exists: a
             // descriptor that reaches another process (across fork or
             // SCM_RIGHTS) renders it (`Scheduler::guest_visible_parent`).
@@ -2769,12 +2771,12 @@ impl<T: RecordOrReplay> Detcore<T> {
             // its parent.
             if rendered
                 && facts.parent.is_none()
-                && let Ok(parent) = guest.inject(syscalls::Getppid::new()).await
+                && let Ok(parent) = Self::injected_guest_ppid(guest).await
             {
                 crate::tool_global::record_external_parent(
                     guest,
                     detcore_model::pid::DetPid::from_raw(own),
-                    parent as i32,
+                    parent,
                 )
                 .await;
             }

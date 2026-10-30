@@ -1068,12 +1068,12 @@ fn sees_syscall(nr: i64) -> bool {
 }
 
 /// Whether syscall number `nr` runs with no Tool callback because
-/// `--untrap-passthrough-syscalls` (`untrap`) leaves it untrapped.
-fn untrapped(untrap: bool, nr: i64) -> bool {
-    untrap
-        && crate::syscall_classification::UNTRAPPED_PASSTHROUGH
-            .iter()
-            .any(|&sysno| sysno as i64 == nr)
+/// `--untrap-passthrough-syscalls` leaves it untrapped in a run with `config`
+/// (`syscall_classification::untrapped_passthrough`).
+fn untrapped(config: &detcore_model::config::Config, nr: i64) -> bool {
+    config.untrap_passthrough_syscalls
+        && crate::syscall_classification::untrapped_passthrough(config)
+            .any(|sysno| sysno as i64 == nr)
 }
 
 /// `sizeof(struct ucontext)` on x86-64 Linux (`include/uapi/asm-generic/ucontext.h`):
@@ -1243,10 +1243,7 @@ where
             //   reaches no Tool callback, so the record still names an earlier
             //   event.
             None | Some(Interruption::AfterFrame) => (from_registers, true),
-            _ if orig == -1
-                || !sees_syscall(orig)
-                || untrapped(guest.config().untrap_passthrough_syscalls, orig) =>
-            {
+            _ if orig == -1 || !sees_syscall(orig) || untrapped(guest.config(), orig) => {
                 (from_registers, true)
             }
             // A known syscall that the record does not name: Detcore missed an

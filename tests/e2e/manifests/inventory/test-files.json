@@ -1681,6 +1681,12 @@
       "why": "tests/c/pid_namespace_nested.c is owned by hermit-cli/tests/cli.rs and hermit-cli/tests/record_replay.rs: the CLI test a_nested_pid_namespace_names_its_own_pids_at_bitwise_parity runs each mode in a clone(CLONE_NEWPID) namespace (the init's self-kill, fork and waitpid, waitpid(-1), a kill of a nested sibling whose pid a container process also has, the init's dropped SIGKILL and SIGTERM, orphan adoption by the nested init, a container-only pid, tgkill of a nested thread) and requires Linux's output at bitwise parity, and record_nested_pid_namespace repeats two modes under record (https://github.com/rrnewton/hermit/issues/4155, https://github.com/rrnewton/hermit/issues/4090). It stays a fixture because a generic manifest cannot assert these per-mode outputs, and natively it needs a user namespace."
     },
     {
+      "disposition": "guest-fixture",
+      "path": "tests/c/pid_namespace_outside_ids.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/pid_namespace_outside_ids.c is owned by hermit-cli/tests/cli.rs: no_namespace_shows_the_parent_group_and_session_outside_the_guest_as_0 compiles this guest, which prints the parent, process group and session a process sees by every surface (getppid, getpgrp, getpgid, getsid, /proc/self, /proc/thread-self and /proc/<pid> stat fields 1 and 4-8, status Tgid, Pid, PPid, NStgid and NSpid) for the run's root process, a child, the root's files read by the child and an orphan, and requires the PID namespace values (0 for numbers outside the guest, 1 for an orphan's parent) and the same bytes in two runs under --no-namespace --pid-base and at bitwise parity under --verify --verify-strict. It stays a fixture because the test runs it under unshare with Hermit at a different number in each run."
+    },
+    {
       "disposition": "manifest-test",
       "path": "tests/c/pid_probe.c",
       "runner": "target/debug/test-harness via tests/e2e/manifests/c-programs.yaml (explicit mode selection; ci=false)",

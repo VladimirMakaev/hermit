@@ -1837,6 +1837,11 @@ pub struct RunOpts {
     /// A replay of a record whose IDs were chosen (`--replay-preemptions-from`,
     /// `--replay-schedule-from`) takes its base from the record, as if given here.
     ///
+    /// The guest sees the numbers of processes outside it as a PID namespace's tasks do: the
+    /// first process's parent (Hermit's own process) and the host's process group and session it
+    /// inherits read 0 (`getppid`, `getpgid`, `getsid`, `/proc/<pid>/stat` and `status`), and an
+    /// orphan's parent reads 1, the namespace's init.
+    ///
     /// For tooling: the same IDs come back in every run from the same base, and a window is free
     /// for the next run as soon as one ends, so a process ID remembered from one run may name a
     /// later run's guest. Check a remembered process's identity (a pidfd, its start time or its

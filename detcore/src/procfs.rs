@@ -1187,6 +1187,13 @@ pub(crate) struct ProcfsFile {
     /// otherwise than Detcore (DBT; [`ProcfsFile::kernel_numbers_held`]).
     #[serde(default)]
     guest_numbers: Option<BTreeMap<i32, i32>>,
+    /// The parent a process's `stat` or `status` shows, where Detcore
+    /// renumbers it apart from the other numbers: a guest without a PID
+    /// namespace of its own, whose processes' parent outside it reads as
+    /// Linux shows it in a PID namespace
+    /// ([`ProcfsFile::set_guest_parent`]).
+    #[serde(default)]
+    guest_parent: Option<i32>,
     /// For a process's `mountinfo` or `mounts` the kernel opened, whether it
     /// reads the kernel's view (its task's root had changed when it was
     /// opened) rather than the container mount table, pinned at the open, as
@@ -1769,6 +1776,7 @@ impl ProcfsFile {
             timer_slack_identity: None,
             rendered: false,
             guest_numbers: None,
+            guest_parent: None,
             mount_view_kernel: None,
             contents: None,
             offset: 0,
@@ -2396,6 +2404,40 @@ impl ProcfsFile {
         self.guest_numbers = Some(numbers);
     }
 
+    /// The task a process's `stat` or `status` named by number describes and
+    /// its process's parent, as the kernel numbers them in `contents`: `stat`'s
+    /// fields 1 and 4, `status`'s `Tgid` and `PPid`. `None` for any other
+    /// file, or one without both.
+    pub(crate) fn kernel_task_and_parent(&self, contents: &[u8]) -> Option<(i32, i32)> {
+        let text = std::str::from_utf8(contents).ok()?;
+        match self.kind {
+            ProcfsKind::ProcessStat => {
+                let task = text[..text.find(" (")?].parse().ok()?;
+                let fields = &text[text.rfind(") ")? + 2..];
+                let parent = fields.split_whitespace().nth(4 - 3)?.parse().ok()?;
+                Some((task, parent))
+            }
+            ProcfsKind::ProcessStatus => {
+                let value = |label: &str| {
+                    text.lines()
+                        .find_map(|line| line.strip_prefix(label))
+                        .and_then(|value| value.trim().parse::<i32>().ok())
+                };
+                Some((value("Tgid:")?, value("PPid:")?))
+            }
+            _ => None,
+        }
+    }
+
+    /// Show `parent` as the parent in this file's snapshot, a process's
+    /// `stat` (field 4) or `status` (`PPid`), with the other numbers
+    /// renumbered by [`ProcfsFile::set_guest_numbers`]'s: the parent a guest
+    /// without a PID namespace of its own sees, which is not a function of
+    /// the kernel's number alone (`Scheduler::guest_visible_ids`).
+    pub(crate) fn set_guest_parent(&mut self, parent: i32) {
+        self.guest_parent = Some(parent);
+    }
+
     /// The guest thread whose signal mask this status snapshot reports as
     /// `SigBlk`: the thread its own `Pid:` line names, for every status view.
     /// A `/proc/<pid>` view maps that number to the guest's through
@@ -2618,7 +2660,7 @@ impl ProcfsFile {
             ProcfsKind::ProcessStat => {
                 let sanitized = sanitize_stat(&contents, None, kernel_layout_is_the_images);
                 match &self.guest_numbers {
-                    Some(numbers) => renumber_stat(&sanitized, numbers),
+                    Some(numbers) => renumber_stat(&sanitized, numbers, self.guest_parent),
                     None => sanitized,
                 }
             }
@@ -2633,7 +2675,7 @@ impl ProcfsFile {
                     cpus_allowed,
                 );
                 match &self.guest_numbers {
-                    Some(numbers) => renumber_status(&sanitized, numbers),
+                    Some(numbers) => renumber_status(&sanitized, numbers, self.guest_parent),
                     None => sanitized,
                 }
             }
@@ -3455,8 +3497,10 @@ fn renumbered(text: &str, numbers: &BTreeMap<i32, i32>) -> String {
 }
 
 /// A process's sanitized `stat` with its pid, parent, process group, session
-/// and terminal group renumbered from the kernel's numbers to the guest's.
-fn renumber_stat(contents: &[u8], numbers: &BTreeMap<i32, i32>) -> Vec<u8> {
+/// and terminal group renumbered from the kernel's numbers to the guest's;
+/// the parent is `parent` where one is given
+/// ([`ProcfsFile::set_guest_parent`]).
+fn renumber_stat(contents: &[u8], numbers: &BTreeMap<i32, i32>, parent: Option<i32>) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(contents) else {
         return contents.to_vec();
     };
@@ -3471,7 +3515,10 @@ fn renumber_stat(contents: &[u8], numbers: &BTreeMap<i32, i32>) -> Vec<u8> {
     // process group, 6 the session, 8 the terminal's process group.
     for index in [1, 2, 3, 5] {
         if let Some(field) = fields.get_mut(index) {
-            *field = renumbered(field, numbers);
+            *field = match parent {
+                Some(parent) if index == 1 => parent.to_string(),
+                _ => renumbered(field, numbers),
+            };
         }
     }
     format!(
@@ -3485,19 +3532,23 @@ fn renumber_stat(contents: &[u8], numbers: &BTreeMap<i32, i32>) -> Vec<u8> {
 
 /// A process's sanitized `status` with the numbers in its
 /// [`STATUS_NUMBER_LABELS`] lines renumbered from the kernel's to the
-/// guest's.
-fn renumber_status(contents: &[u8], numbers: &BTreeMap<i32, i32>) -> Vec<u8> {
+/// guest's; `PPid` is `parent` where one is given
+/// ([`ProcfsFile::set_guest_parent`]).
+fn renumber_status(contents: &[u8], numbers: &BTreeMap<i32, i32>, parent: Option<i32>) -> Vec<u8> {
     let mut renumbered_lines = Vec::with_capacity(contents.len());
     for line in contents.split_inclusive(|byte| *byte == b'\n') {
         let text = String::from_utf8_lossy(line);
         let body = text.strip_suffix('\n').unwrap_or(&text);
         match body.split_once(':') {
             Some((label, value)) if STATUS_NUMBER_LABELS.contains(&label) => {
-                let values = value
-                    .split_whitespace()
-                    .map(|value| renumbered(value, numbers))
-                    .collect::<Vec<_>>()
-                    .join("\t");
+                let values = match parent {
+                    Some(parent) if label == "PPid" => parent.to_string(),
+                    _ => value
+                        .split_whitespace()
+                        .map(|value| renumbered(value, numbers))
+                        .collect::<Vec<_>>()
+                        .join("\t"),
+                };
                 renumbered_lines.extend_from_slice(format!("{label}:\t{values}").as_bytes());
                 if line.ends_with(b"\n") {
                     renumbered_lines.push(b'\n');
@@ -7547,13 +7598,13 @@ Rss:                   4 kB\n" as &[u8];
         let stat = format!("4 (bash) S 1 4 4 0 -1 {}\n", vec!["0"; 44].join(" "));
         assert_eq!(file.kernel_numbers_held(stat.as_bytes()), [4, 1, 4, 4]);
         let numbers = BTreeMap::from([(4, 3), (1, 1)]);
-        let renumbered = String::from_utf8(renumber_stat(stat.as_bytes(), &numbers)).unwrap();
+        let renumbered = String::from_utf8(renumber_stat(stat.as_bytes(), &numbers, None)).unwrap();
         assert!(
             renumbered.starts_with("3 (bash) S 1 3 3 0 -1 "),
             "{renumbered}"
         );
         let outside = BTreeMap::from([(4, 3)]);
-        let renumbered = String::from_utf8(renumber_stat(stat.as_bytes(), &outside)).unwrap();
+        let renumbered = String::from_utf8(renumber_stat(stat.as_bytes(), &outside, None)).unwrap();
         assert!(
             renumbered.starts_with("3 (bash) S 0 3 3 0 -1 "),
             "{renumbered}"
@@ -7563,12 +7614,69 @@ Rss:                   4 kB\n" as &[u8];
         let status = "Name:\tbash\nTgid:\t4\nPid:\t4\nPPid:\t1\nNSpid:\t4\nUid:\t0\t0\t0\t0\n";
         assert_eq!(file.kernel_numbers_held(status.as_bytes()), [4, 4, 1, 4]);
         assert_eq!(
-            String::from_utf8(renumber_status(status.as_bytes(), &numbers)).unwrap(),
+            String::from_utf8(renumber_status(status.as_bytes(), &numbers, None)).unwrap(),
             "Name:\tbash\nTgid:\t3\nPid:\t3\nPPid:\t1\nNSpid:\t3\nUid:\t0\t0\t0\t0\n"
         );
         // Not a process's file: nothing held.
         let file = ProcfsFile::from_path(Path::new("/proc/self/stat")).unwrap();
         assert!(file.kernel_numbers_held(stat.as_bytes()).is_empty());
+    }
+
+    /// Another process's `stat` and `status` in a guest without a PID
+    /// namespace of its own (`--no-namespace`), where the kernel numbers by
+    /// the host's: the run's root process 28672, whose real parent 8154 is
+    /// Hermit's own process and whose group and session 8140 are the host's,
+    /// shows parent, group and session 0 (`Scheduler::guest_visible_ids`),
+    /// and the parent is set apart from the other numbers, so a parent
+    /// outside the guest that also leads a group shown elsewhere in the file
+    /// takes only its own value.
+    #[test]
+    fn a_parent_outside_the_guest_is_renumbered_apart_from_the_other_numbers() {
+        let file = ProcfsFile::from_path(Path::new("/proc/28672/stat")).unwrap();
+        let stat = format!(
+            "28672 (sh) S 8154 8140 8140 0 -1 {}\n",
+            vec!["0"; 44].join(" ")
+        );
+        assert_eq!(
+            file.kernel_task_and_parent(stat.as_bytes()),
+            Some((28672, 8154))
+        );
+        let numbers = BTreeMap::from([(28672, 28672), (8154, 0), (8140, 0)]);
+        let renumbered =
+            String::from_utf8(renumber_stat(stat.as_bytes(), &numbers, Some(0))).unwrap();
+        assert!(
+            renumbered.starts_with("28672 (sh) S 0 0 0 0 -1 "),
+            "{renumbered}"
+        );
+        // An orphan given to the namespace's init by a host reaper that also
+        // leads the host group the orphan is in: parent 1, group 0.
+        let orphan = format!(
+            "28674 (sh) S 8154 8154 8140 0 -1 {}\n",
+            vec!["0"; 44].join(" ")
+        );
+        let numbers = BTreeMap::from([(28674, 28674), (8154, 0), (8140, 0)]);
+        let renumbered =
+            String::from_utf8(renumber_stat(orphan.as_bytes(), &numbers, Some(1))).unwrap();
+        assert!(
+            renumbered.starts_with("28674 (sh) S 1 0 0 0 -1 "),
+            "{renumbered}"
+        );
+
+        let file = ProcfsFile::from_path(Path::new("/proc/28672/status")).unwrap();
+        let status =
+            "Name:\tsh\nTgid:\t28672\nPid:\t28672\nPPid:\t8154\nNStgid:\t28672\nNSpid:\t28672\n";
+        assert_eq!(
+            file.kernel_task_and_parent(status.as_bytes()),
+            Some((28672, 8154))
+        );
+        let numbers = BTreeMap::from([(28672, 28672), (8154, 0)]);
+        assert_eq!(
+            String::from_utf8(renumber_status(status.as_bytes(), &numbers, Some(0))).unwrap(),
+            "Name:\tsh\nTgid:\t28672\nPid:\t28672\nPPid:\t0\nNStgid:\t28672\nNSpid:\t28672\n"
+        );
+        // No other file holds a task and parent.
+        let file = ProcfsFile::from_path(Path::new("/proc/self/stat")).unwrap();
+        assert_eq!(file.kernel_task_and_parent(stat.as_bytes()), None);
     }
 
     #[test]

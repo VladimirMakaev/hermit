@@ -1784,6 +1784,27 @@ impl DetFd {
         });
     }
 
+    /// The task a process's `stat` or `status` named by number describes and
+    /// its process's parent, as the kernel numbers them in `contents`
+    /// (`ProcfsFile::kernel_task_and_parent`).
+    pub(crate) fn procfs_kernel_task_and_parent(&self, contents: &[u8]) -> Option<(i32, i32)> {
+        self.with_description(|d| {
+            d.procfs
+                .as_ref()
+                .and_then(|file| file.kernel_task_and_parent(contents))
+        })
+    }
+
+    /// The parent the snapshot about to be taken shows
+    /// (`ProcfsFile::set_guest_parent`).
+    pub(crate) fn set_procfs_guest_parent(&self, parent: i32) {
+        self.with_description(|d| {
+            if let Some(file) = d.procfs.as_mut() {
+                file.set_guest_parent(parent);
+            }
+        })
+    }
+
     /// The guest's numbers for the kernel's numbers in the snapshot about to
     /// be taken (`ProcfsFile::set_guest_numbers`).
     pub(crate) fn set_procfs_guest_numbers(&self, numbers: std::collections::BTreeMap<i32, i32>) {

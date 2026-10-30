@@ -97,6 +97,9 @@ mod tests {
         (6, "5a4ad14e74501e11", "6a1b176897e67771"),
         // The frontier stack: its GlobalRequest/GlobalResponse variants.
         (7, "81e3902d60d5ad29", "0e137ba5495ffb65"),
+        // GuestVisibleIds: the numbers a guest without a PID namespace of
+        // its own sees for its tasks' parent, groups and sessions.
+        (8, "2c3f2b2cfc227b8c", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that

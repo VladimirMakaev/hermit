@@ -68,6 +68,20 @@ pub(crate) const UNTRAPPED_PASSTHROUGH: &[Sysno] = &[
     Sysno::get_robust_list,
 ];
 
+/// The syscalls `--untrap-passthrough-syscalls` leaves untrapped in a run
+/// with `config`: [`UNTRAPPED_PASSTHROUGH`], except `getppid` in a run without
+/// a PID namespace of its own (`--no-namespace`, `Config::guest_ids` other
+/// than `Namespace`). There the kernel names the run's root process's parent,
+/// Hermit's own process, by its host number, which Detcore renumbers
+/// (`Detcore::handle_getppid`), so the call is not fixed by the container.
+pub(crate) fn untrapped_passthrough(
+    config: &detcore_model::config::Config,
+) -> impl Iterator<Item = Sysno> + '_ {
+    UNTRAPPED_PASSTHROUGH.iter().copied().filter(move |&sysno| {
+        sysno != Sysno::getppid || config.guest_ids == detcore_model::pid::GuestIds::Namespace
+    })
+}
+
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 /// Detcore's execution policy for a named Linux syscall.
 pub(crate) enum SyscallClassification {

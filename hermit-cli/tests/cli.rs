@@ -185,6 +185,7 @@ static POLL_RECHECK_ENTRY_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static IOVEC_IMPORT_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static RWF_CURRENT_OFFSET_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static PROC_STAT_MEMORY_LAYOUT_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static PID_NAMESPACE_OUTSIDE_IDS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static RESTARTABLE_TWO_SIGNALS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static PRIVATE_SIGCHLD_WAITS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SIGCHLD_BOOKKEEPING_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -10959,6 +10960,120 @@ fn no_namespace_refuses_a_held_pid_base() {
         stderr(&output)
     );
     assert!(stdout(&output).is_empty(), "{}", stdout(&output));
+}
+
+/// Under `--no-namespace` with chosen IDs, the guest sees the numbers of
+/// processes outside it as Linux shows them in a PID namespace, where
+/// `task_tgid_nr_ns`, `task_pgrp_nr_ns`, `task_session_nr_ns` and `pid_nr_ns`
+/// read 0 for a pid outside the reader's namespace. The root process's parent
+/// (Hermit's own process) and its process group and session (the host's)
+/// read 0 by every surface: `getppid`, `getpgrp`, `getpgid`, `getsid`, the
+/// root's `/proc/self/stat`, `/proc/thread-self/stat` and `/proc/<pid>/stat`
+/// (fields 4 to 8), and the `PPid` of `/proc/self/status` and
+/// `/proc/<pid>/status`, and so do the root's `stat` and `status` read by its
+/// child. An orphan's parent is the namespace's init, 1
+/// (`tests/c/pid_namespace_outside_ids.c`). The root's `getppid`, every
+/// `stat`'s field 4 and `status`'s `PPid` used to read Hermit's host
+/// number, and the child's view of the root's `stat` the host's group and
+/// session, so the guest's bytes changed with Hermit's own process number:
+/// bionic reads `/proc/self/stat` at every start, and an ART program's
+/// `--verify-strict` diverged there. Each run here is the init of a PID
+/// namespace of the test's own (`OWN_PID_NAMESPACE`), where Hermit leads a
+/// session of its own and has a different number in each (one more task
+/// starts first in the second), and both print the same bytes. A
+/// `--verify --verify-strict` run (not strict: `--strict` refuses
+/// `--no-namespace`) finds bitwise parity with nonzero compared log counts.
+#[test]
+fn no_namespace_shows_the_parent_group_and_session_outside_the_guest_as_0() {
+    let guest = poll_recheck_c_guest(
+        &PID_NAMESPACE_OUTSIDE_IDS_GUEST,
+        "pid_namespace_outside_ids",
+    );
+    // `setsid` makes Hermit lead a group and session in the namespace, so
+    // the root inherits numbers the kernel shows; `/bin/true` takes a
+    // number first in the second run, so Hermit's differ.
+    let run = |first: &str, args: &[&str]| {
+        let mut command = Command::new("unshare");
+        command
+            .args(OWN_PID_NAMESPACE)
+            .args(["sh", "-c", &format!("{first}setsid \"$0\" \"$@\"; exit $?")])
+            .arg(env!("CARGO_BIN_EXE_hermit"))
+            .args([
+                "run",
+                "--no-namespace",
+                "--base-env=minimal",
+                "--pid-base=5000",
+            ])
+            .args(args)
+            .arg("--")
+            .arg(guest);
+        let label = format!("{command:?}");
+        hermit_test::hermit_output(&label, &mut command)
+    };
+    let own = |who: &str, pid: i32, ppid: i32| {
+        let stat = |label: &str| {
+            format!("{who} {label} pid={pid} ppid={ppid} pgrp=0 session=0 tpgid=-1\n")
+        };
+        let status = |label: &str| {
+            format!("{who} {label} Tgid:{pid} Pid:{pid} PPid:{ppid} NStgid:{pid} NSpid:{pid}\n")
+        };
+        format!(
+            "{who} getppid={ppid} getpgrp=0 getpgid=0 getsid=0\n{}{}{}{}{}",
+            stat("self-stat"),
+            stat("thread-self-stat"),
+            stat("pid-stat"),
+            status("self-status"),
+            status("pid-status"),
+        )
+    };
+    let expected = format!(
+        "{}root getpgid-by-pid=0 getsid-by-pid=0\n{}\
+         child root-stat pid=5000 ppid=0 pgrp=0 session=0 tpgid=-1\n\
+         child root-status Tgid:5000 Pid:5000 PPid:0 NStgid:5000 NSpid:5000\n\
+         child root-getpgid=0 root-getsid=0\nroot child-status=0\n{}root done\n",
+        own("root", 5000, 0),
+        own("child", 5001, 5000),
+        own("orphan", 5002, 1),
+    );
+    let first = run("", &[]);
+    assert_success(&first, &["run", "--no-namespace", "--pid-base=5000"]);
+    assert_eq!(stdout(&first), expected, "stderr:\n{}", stderr(&first));
+    let second = run("/bin/true; ", &[]);
+    assert_success(&second, &["run", "--no-namespace", "--pid-base=5000"]);
+    assert_eq!(
+        stdout(&second),
+        stdout(&first),
+        "stderr:\n{}",
+        stderr(&second)
+    );
+
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let report = directory.path().join("verify.json");
+    let report_arg = format!("--verify-json={}", report.display());
+    let args = [
+        detcore_model::config::CANONICAL_TEST_EPOCH_ARG,
+        "--verify",
+        "--verify-strict",
+        &report_arg,
+    ];
+    let verified = run("", &args);
+    assert_success(&verified, &args);
+    assert_eq!(
+        stdout(&verified),
+        expected,
+        "stderr:\n{}",
+        stderr(&verified)
+    );
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report).expect("read the verification report"))
+            .expect("parse the verification report");
+    assert_eq!(verdict["bitwise_parity"], true, "{verdict}");
+    let compared = &verdict["compared_log_messages"];
+    assert!(
+        compared["left"].as_u64().is_some_and(|left| left > 0)
+            && compared["left"] == compared["right"],
+        "{verdict}"
+    );
 }
 
 /// A chosen ID at pid_max is not one `set_tid` can give. With an explicit
