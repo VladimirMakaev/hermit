@@ -772,6 +772,16 @@ pub struct Config {
     #[serde(default)]
     pub replay_continue_fairly: bool,
 
+    /// The preemption record `--replay-preemptions-from` reads is not the recording of this
+    /// run's schedule but an edited one, for example one `hermit analyze` knocked preemptions
+    /// out of. A thread then can reach recorded slices that have already ended, which a faithful
+    /// replay never does: the replay skips them and goes on with the first recorded slice still
+    /// ahead, at its priority, instead of stopping the run. (At a thread's start the record's
+    /// first priority, which the scheduler has already applied, holds until that slice ends.)
+    #[serde(default)]
+    #[clap(long, requires = "replay_preemptions_from")]
+    pub replay_edited_preemptions: bool,
+
     /// Given schedule events traced on recording or replaying, print the stack trace at the moment
     /// after the Nth event in the trace. Optionally, provide an output file into which the stack
     /// trace will be printed, otherwise it goes to stderr.
@@ -1989,6 +1999,9 @@ impl fmt::Display for Config {
         }
         if self.replay_continue_fairly {
             write!(f, " --replay-continue-fairly")?;
+        }
+        if self.replay_edited_preemptions {
+            write!(f, " --replay-edited-preemptions")?;
         }
         for (index, path) in &self.stacktrace_event {
             write!(f, " --stacktrace-event={}", index)?;
@@ -3254,7 +3267,10 @@ mod legacy_backend_json {
     /// `eager_lone_preemptions` came after it too. DBT has no PMU timer, so
     /// the option has no effect there; it is never written and reads as
     /// false.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 36] = [
+    /// `replay_edited_preemptions` came after it too. It is never written and
+    /// reads as false; it cannot matter there, since a timerless backend
+    /// such as DBT refuses `--replay-preemptions-from`, which it requires.
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 37] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -3291,6 +3307,7 @@ mod legacy_backend_json {
         "replay_adopted_seeds",
         "replay_continue_fairly",
         "eager_lone_preemptions",
+        "replay_edited_preemptions",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -3389,8 +3406,8 @@ mod legacy_backend_json {
     /// [`Config::target_timeslice_syscalls_only`],
     /// [`Config::futex_wake_yields`], [`Config::replaying`],
     /// [`Config::scheduler_turn_cost`], [`Config::cap_preemption_charge`],
-    /// [`Config::virtual_timeout`] or [`Config::inherited_seccomp`] takes an
-    /// element. Each gets a
+    /// [`Config::chaos_timed_wait_spread`], [`Config::inherited_seccomp`] or
+    /// [`Config::replay_edited_preemptions`] takes an element. Each gets a
     /// placeholder; [`super::from_legacy_backend_json`] replaces the first.
     struct LegacyPositions<'f, 'l, A> {
         inner: A,
@@ -3436,7 +3453,8 @@ mod legacy_backend_json {
                     | "container_procfs"
                     | "notice_host_network_abstract_binds"
                     | "replay_continue_fairly"
-                    | "eager_lone_preemptions",
+                    | "eager_lone_preemptions"
+                    | "replay_edited_preemptions",
                 ) => seed.deserialize(BoolDeserializer::new(false)).map(Some),
                 // Empty, as its serde default is.
                 Some("in_guest_reserved_signals") => {
@@ -3758,7 +3776,8 @@ mod legacy_backend_json {
                 | "notice_host_network_abstract_binds"
                 | "replay_adopted_seeds"
                 | "replay_continue_fairly"
-                | "eager_lone_preemptions" => Ok(()),
+                | "eager_lone_preemptions"
+                | "replay_edited_preemptions" => Ok(()),
                 _ => self.inner.serialize_field(key, value),
             }
         }
@@ -4446,9 +4465,9 @@ mod tests {
     /// `in_guest_signal_delivery`,
     /// `launch_image`, `target_timeslice_syscalls_only`, `futex_wake_yields`,
     /// `replaying`,
-    /// `scheduler_turn_cost`, `cap_preemption_charge` or
-    /// `inherited_seccomp`, which is the
-    /// key order the encoder writes.
+    /// `scheduler_turn_cost`, `cap_preemption_charge`, `chaos_timed_wait_spread`,
+    /// `inherited_seccomp` or `replay_edited_preemptions`, which is the key order
+    /// the encoder writes.
     #[test]
     fn legacy_positions_are_the_encoded_key_order() {
         let names = legacy_backend_keys(&Config::default()).map(|(name, _)| name);
@@ -4497,7 +4516,8 @@ mod tests {
                 | "notice_host_network_abstract_binds"
                 | "replay_adopted_seeds"
                 | "replay_continue_fairly"
-                | "eager_lone_preemptions" => {}
+                | "eager_lone_preemptions"
+                | "replay_edited_preemptions" => {}
                 other => expected.push(other.to_owned()),
             }
         }
@@ -4519,13 +4539,12 @@ mod tests {
         // `mountinfo_mount_namespace`, `directory_placeholder`,
         // `container_procfs`, `signal_delivery_check_fatal`,
         // `work_span_report`, `signal_at`, `in_guest_signal_delivery`,
-        // `annotated_priority_replay`, `virtual_cpus`,
-        // `notice_host_network_abstract_binds`, `replay_adopted_seeds` and
-        // `replay_continue_fairly`, `eager_lone_preemptions` and
-        // `strict_schedule_boundaries` none: fourteen more keys and
-        // thirty-three fewer, so nineteen keys fewer than fields.
+        // `annotated_priority_replay`, `virtual_cpus`, `notice_host_network_abstract_binds`,
+        // `replay_adopted_seeds`, `replay_continue_fairly`, `eager_lone_preemptions` and
+        // `replay_edited_preemptions` and `strict_schedule_boundaries` none: fourteen more keys and
+        // thirty-four fewer, so twenty keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 21);
+        assert_eq!(fields.len(), keys.len() + 22);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
@@ -5604,6 +5623,92 @@ mod tests {
                 .unwrap()
                 .in_guest_signal_delivery
         );
+    }
+
+    /// `--replay-edited-preemptions` stays out of the legacy (DBT) form, and
+    /// reads as false from it.
+    #[test]
+    fn replay_edited_preemptions_never_enters_the_legacy_form() {
+        let off = Config {
+            backend: BackendCapabilities::DBT,
+            replay_preemptions_from: Some("record.preempts".into()),
+            ..Config::default()
+        };
+        let on = Config {
+            replay_edited_preemptions: true,
+            ..off.clone()
+        };
+        let json = to_legacy_backend_json(&on).unwrap();
+        assert_eq!(json, to_legacy_backend_json(&off).unwrap());
+        assert!(!json.contains("replay_edited_preemptions"), "{json}");
+        assert!(
+            !from_legacy_backend_json(&json)
+                .unwrap()
+                .replay_edited_preemptions
+        );
+        let values: Vec<serde_json::Value> = ordered_entries(&json)
+            .into_iter()
+            .map(|(_, value)| value)
+            .collect();
+        let array = serde_json::to_string(&values).unwrap();
+        assert!(
+            !from_legacy_backend_json(&array)
+                .unwrap()
+                .replay_edited_preemptions
+        );
+    }
+
+    /// `--replay-edited-preemptions` describes the record
+    /// `--replay-preemptions-from` reads, so it needs one. It round-trips
+    /// through the rendered options and through Reverie's bincode handshake,
+    /// and a JSON configuration without the key reads as off.
+    #[test]
+    fn replay_edited_preemptions_needs_a_replayed_record_and_round_trips() {
+        assert!(Config::try_parse_from(["detcore", "--replay-edited-preemptions"]).is_err());
+        let config = Config::try_parse_from([
+            "detcore",
+            "--replay-preemptions-from=record.preempts",
+            "--replay-edited-preemptions",
+        ])
+        .unwrap();
+        assert!(config.replay_edited_preemptions);
+        // The rendered options parse back to the same replay settings.
+        let rendered = config.to_string();
+        let words: Vec<String> = shell_words::split(&rendered)
+            .unwrap()
+            .into_iter()
+            .filter(|word| word.starts_with("--replay-"))
+            .collect();
+        let reparsed =
+            Config::try_parse_from(std::iter::once("detcore".to_owned()).chain(words)).unwrap();
+        assert!(reparsed.replay_edited_preemptions, "{rendered}");
+        assert_eq!(
+            reparsed.replay_preemptions_from, config.replay_preemptions_from,
+            "{rendered}"
+        );
+        let strict =
+            Config::try_parse_from(["detcore", "--replay-preemptions-from=record.preempts"])
+                .unwrap();
+        assert!(!strict.to_string().contains("--replay-edited-preemptions"));
+
+        for config in [&config, &strict] {
+            let wire = bincode::serde::encode_to_vec(config, bincode::config::legacy()).unwrap();
+            let (decoded, read): (Config, usize) =
+                bincode::serde::decode_from_slice(&wire, bincode::config::legacy()).unwrap();
+            assert_eq!(read, wire.len());
+            assert_eq!(
+                decoded.replay_edited_preemptions,
+                config.replay_edited_preemptions
+            );
+        }
+        let mut encoded = serde_json::to_value(&config).unwrap();
+        encoded
+            .as_object_mut()
+            .unwrap()
+            .remove("replay_edited_preemptions")
+            .expect("the field is serialized");
+        let decoded: Config = serde_json::from_value(encoded).unwrap();
+        assert!(!decoded.replay_edited_preemptions);
     }
 
     /// The gate reaches every Tool image through Reverie's bincode handshake
