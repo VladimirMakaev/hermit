@@ -38,7 +38,9 @@ use reverie::Error;
 use reverie::GlobalTool;
 use reverie::Guest;
 use reverie::Pid;
+#[cfg(target_arch = "x86_64")]
 use reverie::Rdtsc;
+#[cfg(target_arch = "x86_64")]
 use reverie::RdtscResult;
 use reverie::Stack;
 use reverie::Subscription;
@@ -644,6 +646,7 @@ impl Tool for Replayer {
             Syscall::Execve(_) | Syscall::Execveat(_) => self.handle_exec(guest, syscall).await,
             Syscall::Brk(_) => self.let_through(guest, syscall).await,
             Syscall::Mprotect(_) => self.let_through(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::ArchPrctl(_) => {
                 // To properly handle arch_prctl, we should prevent calls from
                 // using ARCH_SET_CPUID since we already do that for the
@@ -694,26 +697,34 @@ impl Tool for Replayer {
             Syscall::Sendfile(syscall) => Ok(self.handle_sendfile(guest, syscall).await?),
             // AUTONOMOUS-BOT-IMPLEMENTED
             // TODO-HUMAN-REVIEW(#3598)
-            Syscall::Access(_) | Syscall::Faccessat(_) | Syscall::Other(Sysno::faccessat2, _) => {
+            Syscall::Faccessat(_) | Syscall::Other(Sysno::faccessat2, _) => {
                 self.handle_simple(guest, syscall).await
             }
+            #[cfg(target_arch = "x86_64")]
+            Syscall::Access(_) => self.handle_simple(guest, syscall).await,
             Syscall::Lseek(_) => self.handle_optional_fd_position(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Stat(syscall) => self.handle_stat_family(guest, syscall.into()).await,
             Syscall::Fstat(syscall) => self.handle_stat_family(guest, syscall.into()).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Lstat(syscall) => self.handle_stat_family(guest, syscall.into()).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Newfstatat(syscall) => self.handle_stat_family(guest, syscall.into()).await,
+            #[cfg(target_arch = "aarch64")]
+            Syscall::Fstatat(syscall) => self.handle_stat_family(guest, syscall.into()).await,
             Syscall::Statfs(syscall) => self.handle_statfs(guest, syscall.buf()).await,
             Syscall::Fstatfs(syscall) => self.handle_statfs(guest, syscall.buf()).await,
             Syscall::Statx(syscall) => self.handle_statx(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Getdents(syscall) => self.handle_getdents(guest, syscall).await,
             Syscall::Getdents64(syscall) => self.handle_getdents64(guest, syscall).await,
             Syscall::Mmap(syscall) => self.handle_mmap(guest, syscall).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
             Syscall::Madvise(syscall) => self.handle_madvise(guest, syscall).await,
             Syscall::Munmap(_) => self.let_through(guest, syscall).await,
-            Syscall::Open(_) | Syscall::Openat(_) => {
-                self.handle_virtual_fd_create(guest, syscall).await
-            }
+            Syscall::Openat(_) => self.handle_virtual_fd_create(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
+            Syscall::Open(_) => self.handle_virtual_fd_create(guest, syscall).await,
             Syscall::Openat2(call) => self.handle_openat2(guest, call).await,
             Syscall::Close(_) => self.handle_close(guest, syscall).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
@@ -757,6 +768,7 @@ impl Tool for Replayer {
                 self.handle_replayed_side_effect(guest, syscall, "dup")
                     .await
             }
+            #[cfg(target_arch = "x86_64")]
             Syscall::Dup2(_) => self.handle_dup2(guest, syscall).await,
             Syscall::Dup3(_) => {
                 self.handle_replayed_side_effect(guest, syscall, "dup3")
@@ -782,6 +794,7 @@ impl Tool for Replayer {
             Syscall::ClockGetres(syscall) => self.handle_clock_getres(guest, syscall).await,
             Syscall::Gettimeofday(syscall) => self.handle_gettimeofday(guest, syscall).await,
             Syscall::Settimeofday(_) => self.handle_simple(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Time(syscall) => self.handle_time(guest, syscall).await,
             Syscall::Setsockopt(_) => self.handle_setsockopt(guest, syscall).await,
             Syscall::Fcntl(call)
@@ -817,10 +830,13 @@ impl Tool for Replayer {
             Syscall::Accept4(call) => self.handle_accept4(guest, call).await,
             Syscall::Sendto(_) => self.handle_simple(guest, syscall).await,
             Syscall::Sendmsg(_) => self.handle_simple(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Poll(syscall) => self.handle_poll(guest, syscall).await,
             Syscall::Ppoll(syscall) => self.handle_ppoll(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Select(syscall) => self.handle_select(guest, syscall).await,
             Syscall::Pselect6(syscall) => self.handle_pselect6(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::EpollWait(syscall) => self.handle_epoll_wait(guest, syscall).await,
             Syscall::EpollPwait(syscall) => self.handle_epoll_pwait(guest, syscall).await,
             Syscall::Other(Sysno::epoll_pwait2, _) => {
@@ -834,9 +850,12 @@ impl Tool for Replayer {
                 self.handle_sockopt_family(guest, syscall.into()).await
             }
             Syscall::Getrandom(syscall) => self.handle_getrandom(guest, syscall).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Readlink(syscall) => self.handle_readlink(guest, syscall).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
+            #[cfg(target_arch = "x86_64")]
             Syscall::Mkdir(_) => self.handle_mkdir(guest, syscall, false).await,
+            #[cfg(target_arch = "x86_64")]
             Syscall::Unlink(_) => self.handle_optional_path_removal(guest, syscall).await,
             Syscall::Unlinkat(call) => self.handle_unlinkat(guest, call).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
@@ -850,6 +869,7 @@ impl Tool for Replayer {
             | Syscall::Fchmodat(_)
             | Syscall::Utimensat(_) => self.handle_confined_path_mutation(guest, syscall).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
+            #[cfg(target_arch = "x86_64")]
             Syscall::Rename(_)
             | Syscall::Link(_)
             | Syscall::Symlink(_)
@@ -859,6 +879,7 @@ impl Tool for Replayer {
             | Syscall::Mknod(_) => self.handle_confined_path_mutation(guest, syscall).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
             // TODO-HUMAN-REVIEW(#3598): rmdir shares unlink's optional removal.
+            #[cfg(target_arch = "x86_64")]
             Syscall::Rmdir(_) => self.handle_optional_path_removal(guest, syscall).await,
             // AUTONOMOUS-BOT-IMPLEMENTED
             Syscall::Other(Sysno::close_range, _) => self.handle_close_range(guest, syscall).await,
@@ -877,6 +898,7 @@ impl Tool for Replayer {
         Ok(())
     }
 
+    #[cfg(target_arch = "x86_64")]
     async fn handle_rdtsc_event<G: Guest<Self>>(
         &self,
         guest: &mut G,
@@ -1669,6 +1691,7 @@ impl Replayer {
         syscall: Syscall,
     ) -> io::Result<(libc::c_int, PathBuf, OFlag)> {
         let request = match syscall {
+            #[cfg(target_arch = "x86_64")]
             Syscall::Open(call) => (
                 libc::AT_FDCWD,
                 call.path()
@@ -1875,6 +1898,7 @@ impl Replayer {
         syscall: Syscall,
     ) -> io::Result<(libc::c_int, PathBuf)> {
         let (dirfd, path) = match syscall {
+            #[cfg(target_arch = "x86_64")]
             Syscall::Mkdir(call) => (
                 libc::AT_FDCWD,
                 call.path()
@@ -2021,6 +2045,7 @@ impl Replayer {
             Syscall::Fchmodat(call) => self.dirfd_is_confined(pid, call.dirfd()),
             // TODO-HUMAN-REVIEW(#3598): the legacy forms resolve relative
             // paths against the working directory, like AT_FDCWD.
+            #[cfg(target_arch = "x86_64")]
             Syscall::Rename(_)
             | Syscall::Link(_)
             | Syscall::Symlink(_)
@@ -2677,6 +2702,7 @@ impl Replayer {
         recorded
     }
 
+    #[cfg(target_arch = "x86_64")]
     async fn handle_dup2<G: Guest<Self>>(
         &self,
         guest: &mut G,
