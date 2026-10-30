@@ -94,6 +94,7 @@ const ARGS_ID: &str = "args";
 pub(crate) const EPOCH_KEY: &str = "epoch";
 pub(crate) const SEED_KEY: &str = "seed";
 pub(crate) const SEED_FROM_KEY: &str = "seed-from";
+pub(crate) const PID_BASE_KEY: &str = "pid-base";
 const REPLAY_NETWORKING_KEY: &str = "replay-networking";
 
 /// One run config document. See the module documentation for the format.
@@ -1079,6 +1080,7 @@ mod tests {
         ("replay-networking", &["--replay-networking=/tmp/old.trace"]),
         ("namespace-only", &["--lite"]),
         ("no-namespace", &["--core-only"]),
+        ("pid-base", &["--no-namespace", "--pid-base=4000"]),
         ("strace-only", &["--strace-only"]),
         ("tmp", &["--tmp=/tmp/guest tmp"]),
         ("image", &["--image=docker.io/library/busybox@sha256:00"]),
