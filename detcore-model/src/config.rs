@@ -3611,7 +3611,7 @@ mod legacy_backend_json {
     /// rewrite of aarch64 exclusive loops is done by the ptrace backend's
     /// global state, and no backend that reads the legacy form does it, so it
     /// is never written and reads as false.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 45] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 46] = [
         // `chaos_timeslice_range` came after it too: the scheduler draws the
         // slices, not the runtime, so it is never written and reads as unset.
         // `chaos_timeslice_draw` and `chaos_timeslice` came with it, for the same
@@ -5124,9 +5124,9 @@ mod tests {
         // `access_trace`, `access_trace_from`, `access_trace_max_records`,
         // `access_trace_max_bytes`, `chaos_instruction_offset`, `rewrite_exclusives_in_memory` and
         // `strict_schedule_boundaries` none: fourteen more keys and
-        // forty-four fewer, so thirty keys fewer than fields.
+        // forty-five fewer, so thirty-one keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 30);
+        assert_eq!(fields.len(), keys.len() + 31);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
