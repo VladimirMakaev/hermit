@@ -886,6 +886,22 @@ pub struct Config {
     #[clap(long, value_name = "factor")]
     pub chaos_timed_wait_spread: Option<f64>,
 
+    /// Let a chaos preemption land up to this many instructions past the
+    /// conditional branch its timeslice ends on. `0` (the default) is off.
+    ///
+    /// A chaos timeslice ends after a retired conditional branch, so a race
+    /// window with no conditional branch in it is never split. With this set,
+    /// each timeslice that ends on its timer is delivered `k` single steps
+    /// past that branch instead, `k` drawn uniformly from `0..=N` for each
+    /// timeslice from the seed, so a preemption can land inside straight-line
+    /// code. A preemption record keeps each `k` and its branch count, and its
+    /// replay stops at the same instruction. Each step is one ptrace stop, so
+    /// a preemption costs up to `N` more. Needs `--chaos` and the ptrace
+    /// backend's precise timers on x86_64; at most 256.
+    #[serde(default)]
+    #[clap(long, default_value = "0", value_name = "instructions")]
+    pub chaos_instruction_offset: u64,
+
     /// Record the timing of preemption events for future replay or experimentation.
     /// This is only useful in chaos modes.
     #[clap(long)]
@@ -1979,6 +1995,9 @@ impl Config {
             && self.signal_at.is_none()
             && self.happens_before.is_none()
             && self.interrupt_at.is_empty()
+            // A slice armed past its branch target needs a stop, and a lone
+            // run cannot know ahead whether a later slice's draw has one.
+            && self.chaos_instruction_offset == 0
     }
 
     /// Should we use RCB in computing logical time?
@@ -2018,6 +2037,17 @@ impl Config {
     /// recorded run's.
     pub fn chaos_draws_schedule(&self) -> bool {
         self.chaos && self.replay_schedule_from.is_none()
+    }
+
+    /// Whether every chaos timeslice end needs the guest really stopped at
+    /// its PMU branch target: `--chaos-instruction-offset` single-steps from
+    /// that stop to where the timeslice ends. Any optimization that takes a
+    /// slice end without stopping the guest there (for example a lone
+    /// runnable thread's slice end processed at its branch count) must be
+    /// off while this holds, or the offset is lost and a replay of the
+    /// record no longer stops where the recorded run did.
+    pub fn slice_ends_need_a_stop(&self) -> bool {
+        self.chaos && self.chaos_instruction_offset > 0
     }
 
     /// Whether a `FUTEX_WAKE` that woke `woken` waiters makes the waker yield
@@ -2268,6 +2298,13 @@ impl fmt::Display for Config {
         }
         if let Some(spread) = self.chaos_timed_wait_spread {
             write!(f, " --chaos-timed-wait-spread={}", spread)?;
+        }
+        if self.chaos_instruction_offset > 0 {
+            write!(
+                f,
+                " --chaos-instruction-offset={}",
+                self.chaos_instruction_offset
+            )?;
         }
         if let Some(m) = self.clock_multiplier {
             write!(f, " --clock-multiplier={}", m)?;
@@ -3863,7 +3900,7 @@ mod legacy_backend_json {
     /// is never written and reads as false.
     /// unset. So did `watch` and `watch_from`, which need the trace and the
     /// ptrace backend's watchpoints: never written, read as none and 0.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 52] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 53] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -3916,6 +3953,7 @@ mod legacy_backend_json {
         "rewrite_exclusives_in_memory",
         "watch",
         "watch_from",
+        "chaos_instruction_offset",
     ];
 
     /// Reads the top-level object or array of a legacy configuration. The
@@ -4068,9 +4106,12 @@ mod legacy_backend_json {
                     | "rewrite_exclusives_in_memory",
                 ) => seed.deserialize(BoolDeserializer::new(false)).map(Some),
                 // Empty, as its serde default is; and 0, the default.
-                Some("in_guest_reserved_signals" | "access_trace_from" | "watch_from") => {
-                    seed.deserialize(U64Deserializer::new(0)).map(Some)
-                }
+                Some(
+                    "in_guest_reserved_signals"
+                    | "access_trace_from"
+                    | "watch_from"
+                    | "chaos_instruction_offset",
+                ) => seed.deserialize(U64Deserializer::new(0)).map(Some),
                 // None, as its serde default is.
                 Some("watch") => seed
                     .deserialize(serde_json::Value::Array(Vec::new()))
@@ -4421,6 +4462,7 @@ mod legacy_backend_json {
                 | "chaos_timeslice_range"
                 | "chaos_timeslice_draw"
                 | "chaos_timeslice"
+                | "chaos_instruction_offset"
                 | "property_snapshot"
                 | "rewrite_exclusives_in_memory"
                 | "watch"
@@ -4632,6 +4674,20 @@ mod tests {
             Some(RECOMMENDED_CHAOS_TIMESLICE_RANGE)
         );
         assert_eq!(reparsed.chaos_timeslice_draw, Some(ChaosTimesliceDraw::Run));
+    }
+
+    /// `--chaos-instruction-offset` needs a real stop at every chaos slice
+    /// end; nothing else does, and the option is inert without `--chaos`.
+    #[test]
+    fn only_a_chaos_instruction_offset_needs_a_stop_at_every_slice_end() {
+        let mut config = Config::default();
+        assert!(!config.slice_ends_need_a_stop());
+        config.chaos_instruction_offset = 8;
+        assert!(!config.slice_ends_need_a_stop());
+        config.chaos = true;
+        assert!(config.slice_ends_need_a_stop());
+        config.chaos_instruction_offset = 0;
+        assert!(!config.slice_ends_need_a_stop());
     }
 
     /// The four capabilities split out of
@@ -5367,6 +5423,7 @@ mod tests {
                 | "chaos_timeslice_range"
                 | "chaos_timeslice_draw"
                 | "chaos_timeslice"
+                | "chaos_instruction_offset"
                 | "property_snapshot"
                 | "rewrite_exclusives_in_memory"
                 | "watch"
@@ -5397,7 +5454,7 @@ mod tests {
         // `replay_edited_preemptions` and `strict_schedule_boundaries` none: fourteen more keys and
         // forty-nine fewer, so thirty-five keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 37);
+        assert_eq!(fields.len(), keys.len() + 38);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:

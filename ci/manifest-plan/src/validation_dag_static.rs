@@ -1263,6 +1263,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and config::tests::config_fingerprint_includes_the_watch_element_layout
     // (--watch): 1889.
     // And this change's detcore-model tests: 1883.
+    // only_a_chaos_instruction_offset_needs_a_stop_at_every_slice_end
+    // (--chaos-instruction-offset): 1883.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2197,6 +2199,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1122, listed.
     // rundata::tests::analyzer_reproducer_starts_in_the_trials_directory
     // and a_reproducers_directory_is_quoted_for_the_shell: 1123, listed.
+    // And run's chaos_instruction_offset_round_trips_and_is_refused_where_inert
+    // and replay_of_instruction_offsets_is_refused_where_unsupported
+    // (--chaos-instruction-offset): 1164.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3711,6 +3716,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_recording_change_point_at_the_last_ones_instant_still_asserts: 2705, listed.
     // And tool_local's
     // a_replay_change_point_at_the_last_ones_instant_is_caught_before_filing: 2706, listed.
+    // And eight --chaos-instruction-offset units: tool_local's draw, its own
+    // stream and its record/replay hand-off, preemptions' offset rows, the
+    // kept timer, the replay target, a scheduler-recorded offset, and the
+    // hooks arming, recording and replaying one offset slice: 2730.
+    // And a_published_instruction_offset_dies_with_its_thread: 2731.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5198,6 +5208,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_thread_that_blocks_sigtrap_never_arms_and_the_trace_says_so,
     // a_hit_that_resets_an_ignored_sigtrap_stops_the_run and
     // a_watch_survives_exec_into_an_image_that_stores_first (--watch): 631.
+    // And chaos_instruction_offset_splits_a_branch_free_window and
+    // a_chaos_instruction_offset_run_verifies_and_replays_at_its_offsets
+    // (tests/c/branch_free_race.c, x86_64 only): 646.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5852,6 +5865,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 560, listed.
     // And the same tests: 542.
     // And the same four --watch tests, not excluded: 550.
+    // And the same two --chaos-instruction-offset tests, not excluded: 565.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6445,6 +6459,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same four replay-overshoot units: 2699, listed.
     // And the same six replay end and change-point units: 2705, listed.
     // And the same filing-time change-point unit: 2706, listed.
+    // And the same eight --chaos-instruction-offset units: 2730.
+    // And the same published-offset unit: 2731.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6914,6 +6930,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same undecided-candidates test: 1357.
     // And the same reproducer unit: 1116, listed.
     // And the same two reproducer units: 1117, listed.
+    // And the same two --chaos-instruction-offset run units: 1158.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -7161,6 +7178,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same legacy-form unit: 1869.
     // And the same two --watch detcore-model tests: 1875.
     // And the same tests: 1869.
+    // And the same --chaos-instruction-offset detcore-model unit: 1869.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
