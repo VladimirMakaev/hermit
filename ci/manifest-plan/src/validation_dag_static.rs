@@ -3699,6 +3699,18 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_peer_alive_when_watches_become_due_is_summarized_if_killed_parked:
     // 2700, listed.
     // And this change's Detcore unit tests: 2710.
+    // And tool_local's replay_slice_overshoot_classifies_by_branches_then_time,
+    // a_replay_past_a_recorded_slice_end_reports_an_overshoot and
+    // a_replay_overshoot_panics_when_asked_to and
+    // a_replay_past_several_recorded_ends_follows_the_first_ahead: 2699, listed.
+    // And tool_local's a_replay_passes_an_end_at_its_count_whose_time_is_behind,
+    // a_replay_follows_an_end_at_its_count_whose_time_is_ahead and
+    // an_end_at_the_count_closes_at_the_last_end_unless_its_time_is_ahead, and
+    // the scheduler's a_replay_change_point_at_the_last_ones_instant_is_an_overshoot,
+    // a_replay_change_point_at_the_last_ones_instant_writes_no_epoch and
+    // a_recording_change_point_at_the_last_ones_instant_still_asserts: 2705, listed.
+    // And tool_local's
+    // a_replay_change_point_at_the_last_ones_instant_is_caught_before_filing: 2706, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6430,6 +6442,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 2739, listed.
     // And the same six --watch units: 2720, listed.
     // And the same tests: 2710.
+    // And the same four replay-overshoot units: 2699, listed.
+    // And the same six replay end and change-point units: 2705, listed.
+    // And the same filing-time change-point unit: 2706, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
