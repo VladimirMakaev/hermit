@@ -2230,6 +2230,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 1163, listed.
     // And run::detlog_anon_is_ptrace_only: 1115.
+    // And a_replayed_record_that_does_not_increase_is_refused_before_the_container
+    // (https://github.com/rrnewton/hermit/issues/4859): 1136, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -7039,6 +7041,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 1157, listed.
+    // And the same replayed-record refusal unit: 1130, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
