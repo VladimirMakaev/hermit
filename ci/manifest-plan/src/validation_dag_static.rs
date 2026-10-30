@@ -2249,6 +2249,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the_pid_namespace_is_read_from_its_entry and
     // a_masked_ns_directory_is_not_read_as_a_kernel_without_pid_namespaces (a
     // kernel without PID namespaces): 1169 + 2 = 1171, listed.
+    // frontier: 1497, recomputed by cargo nextest list over the frontier stack.
+    // And verify_run::tests::a_timed_out_run_ends_the_comparison_as_run_verify_does
+    // (`--timeout` bounds each `--verify` run): 1498.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5333,6 +5336,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 640, listed.
     // And detlog_anon_records_a_write_to_an_anonymous_mapping: 623.
+    // frontier: 772, recomputed by cargo nextest list over the frontier stack.
+    // And run_verify_timeout_bounds_the_first_run_and_reports_no_result and
+    // run_verify_timeout_bounds_the_second_run_and_reports_no_result
+    // (https://github.com/rrnewton/hermit/issues/4973): 774.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -6000,6 +6007,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 559, listed.
     // And detlog_anon_records_a_write_to_an_anonymous_mapping: 542.
+    // frontier: 691, recomputed by cargo nextest list over the frontier stack.
+    // And the same two --verify --timeout tests, not excluded: 693.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -7101,6 +7110,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same replayed-record refusal unit: 1130, listed.
     // And the same four store-exclusive cause units: 1161.
     // And the same two PID-namespace units: 1165, listed.
+    // frontier: 1491, recomputed by cargo nextest list over the frontier stack.
+    // And the same timed-out --verify-run unit: 1492.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

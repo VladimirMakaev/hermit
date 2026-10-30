@@ -30,9 +30,9 @@ agreeing with each other.
 
 | Rung | Bounds | Value comes from | How it stops the run | Reports |
 | --- | --- | --- | --- | --- |
-| `hermit run --timeout N` | **one hermit invocation** = one guest execution, **ptrace only** (in-guest LiteInst refuses it) | the caller's argument | ptrace publishes termination and polls the retained original operation; unresolved cleanup retains its owner and guards. | exit 124, `HERMIT_RUN_TIMEOUT class=run-timeout`; a requested summary is kept, marked partial (see below) |
+| `hermit run --timeout N` | **one guest execution**: a plain run, or each of the two runs of `--verify` (see below), **ptrace only** (in-guest LiteInst refuses it) | the caller's argument | ptrace publishes termination and polls the retained original operation; unresolved cleanup retains its owner and guards. | exit 124, `HERMIT_RUN_TIMEOUT class=run-timeout`; a requested summary is kept, marked partial (see below); under `--verify`, a `no_result` report with failure `timeout` |
 | `hermit run --virtual-timeout N` | **one hermit invocation's virtual time**: Detcore's global virtual time since the run began, the `virttime_elapsed` of its summary, in virtual nanoseconds, checked as each scheduler turn commits it | the caller's argument | the scheduler grants no further turn; ptrace unwinds the guest as for `--timeout` and finishes the run; other backends exit 124 from the scheduler (see below) | exit 124, `HERMIT_RUN_TIMEOUT class=virtual-timeout bound_ns=N` |
-| hermit's unwind fallback | the same invocation, `N + 10s` | `RUN_TIMEOUT_UNWIND_GRACE` in `hermit-cli/src/bin/hermit/run_timeout.rs` | `_exit(124)` from a `SIGALRM` handler; no destructors | exit 124, `HERMIT_RUN_TIMEOUT_FALLBACK` |
+| hermit's unwind fallback | the same guest execution, `N + 10s` | `RUN_TIMEOUT_UNWIND_GRACE` in `hermit-cli/src/bin/hermit/run_timeout.rs` | `_exit(124)` from a `SIGALRM` handler; no destructors | exit 124, `HERMIT_RUN_TIMEOUT_FALLBACK` |
 | `hermit record --record-timeout N` | one recording | the caller's argument | `_exit(124)` from a `SIGALRM` handler | exit 124 |
 | container finalize budget | **the teardown after a run has published its result**: the container child's own exit, and reaping what is left in its namespace | `FINALIZE_BUDGET` in `hermit-cli/src/bin/hermit/owned_container.rs`: 20s, a margin of 13x over the largest measured teardown (1.52s on a saturated 316-CPU host; the Buck-parallel tail that exceeded the old 2s was not measured); `HERMIT_FINALIZE_BUDGET_MS` overrides it | the parent cancels the child (SIGKILL) and waits up to the same budget again, so a child that never exits costs up to **2 x budget** (40s) | exit 125, "container child published its result but did not exit within the ... finalize budget" |
 | nextest per-test CPU limit | one cargo test process and its descendants | 22s base, scaled by the machine CPU multiplier | owned attempt cgroup: `SIGTERM`, 2s grace, then `cgroup.kill`; retain typed `cpu_timeout` | nextest fails the named test; CPU report identifies the inner limit |
@@ -396,6 +396,26 @@ run's, as before. Without `--summary`, the summary goes to the INFO log, as a
 finished run's does. The partial summary is withheld, with a warning naming
 why, when the scheduler task did not finish, a handler panicked while holding
 the scheduler or clock lock, or the summary could not be written.
+
+## `--verify` bounds each run
+
+`hermit run --verify` runs the guest twice, and `--timeout N` bounds each run,
+as it bounds a plain run, not the pair: a verification whose runs both finish
+can take up to `2N` plus startup. A run the bound stops is never compared,
+because where it stopped depends on how fast the host is, not on the guest.
+Whichever run it was, the invocation ends as a plain run the bound stopped
+does, exit 124 with `HERMIT_RUN_TIMEOUT class=run-timeout`, and run 2 is not
+started after run 1 is stopped. `--verify-json` records `verdict: no_result`
+with `no_result_reason: {kind: run_failed, run: run1 | run2, failure: timeout}`
+and no comparison or guest status. A `--verify-run` execution records the same
+failure in its directory, and `hermit log-diff --verify-json` over it reports
+it the same way. Before, the verification runs were given no bound at all, so a
+guest that never exits kept `--verify` running until an outer rung killed it,
+with no class line.
+
+`hermit record start --verify --record-timeout N` bounds its recording, the
+execution of the guest; the replay then follows a recording that finished
+inside that bound.
 
 ## `--timeout` is qualified per backend, and refuses elsewhere
 

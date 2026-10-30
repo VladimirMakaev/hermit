@@ -1605,6 +1605,8 @@ pub struct RunOpts {
     /// down, and the container init returns normally. Exits 124, the same code
     /// GNU `timeout` and `hermit record --record-timeout` already use for a
     /// deadline. Wall-clock, so it never affects guest-visible determinism.
+    /// With `--verify`, each of the two runs gets the bound; a run it stops is
+    /// reported as a `no_result` naming the timeout and is never compared.
     #[clap(long, value_name = "SECONDS")]
     timeout: Option<NonZeroU64>,
 
@@ -16272,10 +16274,15 @@ impl RunOpts {
                 ""
             },
         );
+        // Each verification run is one guest execution, so `--timeout` bounds
+        // each, as it bounds a plain run (docs/TIMEOUT_LADDER.md): this arms
+        // the container init's unwind fallback, and `run_verify_in_container`
+        // hands the bound to the backend. A run the bound stops is never
+        // compared (`verify::run_failure_of`).
         self.launch_in_container(
             (Some(log_file), network_trace, forwarded_detlogs),
             &resources,
-            None,
+            self.run_timeout(),
             move |(log, _, forwarded), identity, native| {
                 options.run_verify_in_container(log, forwarded, &global, identity, native)
             },
@@ -17995,7 +18002,7 @@ impl RunOpts {
             self.summary,
             &self.summary_json,
             self.runtime_backend(),
-            None,
+            self.run_timeout(),
         );
         if forwarding.is_some() {
             // Records sent after the guest's last request, then close the socket.

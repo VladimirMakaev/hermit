@@ -1138,6 +1138,14 @@ pub(crate) fn run_failure_of(error: &Error) -> Option<RunFailure> {
         // every backend that cannot unwind the guest, and on ptrace a stopped
         // run completes and is compared.
         Some(RunFailure::Deadlock)
+    } else if error
+        .downcast_ref::<super::container::RunTimeoutMarker>()
+        .is_some()
+    {
+        // The wall-clock `--timeout` bound each verification run carries
+        // (`RunOpts::run_verify`) stopped this one. Where a run stops at a
+        // wall-clock instant depends on the host, so it is never compared.
+        Some(RunFailure::Timeout)
     } else {
         None
     }
@@ -2976,6 +2984,23 @@ mod tests {
                     detcore::TerminalOutcome::GuestDeadlock,
                 )),
                 Some(RunFailure::Deadlock),
+            ),
+            // `--timeout` stopped the run: the child's reported deadline, as
+            // the container boundary types it, and the init's deadline exit
+            // when the unwind did not finish (`deadline_exit`).
+            (
+                super::super::container::classify_container_result::<()>(Ok(Err(
+                    hermit::SerializableError::from(Error::new(hermit::GuestTimedOut {
+                        limit: std::time::Duration::from_secs(2),
+                        survivors: None,
+                    })),
+                )))
+                .unwrap_err(),
+                Some(RunFailure::Timeout),
+            ),
+            (
+                Error::new(super::super::container::RunTimeoutMarker),
+                Some(RunFailure::Timeout),
             ),
             (
                 Error::new(super::super::container::SchedulerOutcome(

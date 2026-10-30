@@ -34931,6 +34931,175 @@ fn run_timeout_leaves_a_guest_that_finishes_in_time_alone() {
     );
 }
 
+/// The wall-clock bound the `--verify` cells below give the whole
+/// invocation. Both runs of a guest that exits at once take about 2 s on a
+/// loaded host, a run stopped by `--timeout=2` about 3 s; an invocation
+/// still running at this bound did not bound its verification runs.
+const VERIFY_TIMEOUT_WALL_BOUND: Duration = Duration::from_secs(20);
+
+/// `hermit run --timeout <secs> --verify --verify-json <report> -- <argv>`
+/// as its own session leader (see [`spawn_timed_run`]), with stderr in a file
+/// so a waiter that polls cannot fill a pipe. Waits at most
+/// [`VERIFY_TIMEOUT_WALL_BOUND`]; past it, kills every process of the session
+/// and fails, so a verification that never ends fails the test instead of
+/// hanging it. Returns the status, the elapsed time and stderr.
+fn timed_verify(
+    secs: u64,
+    report: &Path,
+    argv: &[&str],
+) -> (std::process::ExitStatus, Duration, String) {
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let stderr_path = directory.path().join("stderr");
+    let secs = secs.to_string();
+    let report = report.to_str().expect("report path is UTF-8");
+    let mut command = hermit_command(&[
+        "run",
+        "--timeout",
+        &secs,
+        "--verify",
+        "--verify-json",
+        report,
+        "--",
+    ]);
+    command
+        .args(argv)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(fs::File::create(&stderr_path).unwrap());
+    // SAFETY: as in `spawn_timed_run`: `setsid` is async-signal-safe and
+    // allocates nothing.
+    unsafe {
+        command.pre_exec(|| {
+            if libc::setsid() == -1 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let started = Instant::now();
+    let mut child = command
+        .spawn()
+        .expect("failed to spawn hermit run --timeout --verify");
+    let session = child.id() as i32;
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break Some(status);
+        }
+        if started.elapsed() >= VERIFY_TIMEOUT_WALL_BOUND {
+            break None;
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let elapsed = started.elapsed();
+    // A failing cell must not leak the spinner it is about.
+    for pid in run_timeout_pids_in_session(session) {
+        // SAFETY: `kill` touches no caller memory; a stale pid fails with ESRCH.
+        unsafe { libc::kill(pid, libc::SIGKILL) };
+    }
+    let _ = child.wait();
+    let stderr = fs::read_to_string(&stderr_path).unwrap_or_default();
+    let status = status.unwrap_or_else(|| {
+        panic!(
+            "`--timeout={secs} --verify` was still running after {VERIFY_TIMEOUT_WALL_BOUND:?}: \
+             the verification runs were not bounded. stderr:\n{stderr}"
+        )
+    });
+    (status, elapsed, stderr)
+}
+
+/// The `run_failed` reason a `--verify-json` report names, which must be
+/// a `timeout` of `run` with no comparison and no guest disposition.
+fn assert_verify_timed_out(report: &Path, run: &str, stderr: &str) {
+    let bytes = fs::read(report).unwrap_or_else(|error| panic!("no --verify-json report: {error}"));
+    VerificationReport::from_current_json_slice(&bytes)
+        .unwrap_or_else(|error| panic!("the report does not parse as typed: {error}"));
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(json["verdict"], "no_result", "{json}\nstderr:\n{stderr}");
+    assert_eq!(json["verified"], false, "{json}");
+    let reason = &json["no_result_reason"];
+    assert_eq!(reason["kind"], "run_failed", "{json}\nstderr:\n{stderr}");
+    assert_eq!(reason["run"], run, "{json}");
+    assert_eq!(reason["failure"], "timeout", "{json}");
+    assert!(
+        reason["detail"]
+            .as_str()
+            .is_some_and(|detail| detail.contains("bound of 2 seconds")),
+        "{json}"
+    );
+    for field in ["comparison", "guest_exit_code", "guest_signal"] {
+        assert!(json[field].is_null(), "{field}: {json}");
+    }
+}
+
+/// `--timeout` bounds each `--verify` run, as it bounds a plain run
+/// (https://github.com/rrnewton/hermit/issues/4973). The verification runs
+/// were handed no bound: a guest that never exits kept `run --verify` in
+/// Run1 indefinitely, and the class line never appeared. Now run 1 is stopped
+/// at the bound, run 2 never starts, and the run is reported as the plain
+/// run's contract says: exit 124, `HERMIT_RUN_TIMEOUT class=run-timeout`, and a
+/// `no_result` naming the timeout instead of a comparison.
+#[test]
+fn run_verify_timeout_bounds_the_first_run_and_reports_no_result() {
+    let _lock = HERMIT_RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let report = directory.path().join("verify.json");
+    let (status, elapsed, stderr) = timed_verify(RUN_TIMEOUT_SECS, &report, RUN_TIMEOUT_SPINNER);
+    assert_eq!(
+        status.code(),
+        Some(124),
+        "{status:?} after {elapsed:?}. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("HERMIT_RUN_TIMEOUT class=run-timeout"),
+        "stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains(&format!("bound of {RUN_TIMEOUT_SECS} seconds")),
+        "stderr:\n{stderr}"
+    );
+    assert!(stderr.contains("Run1..."), "stderr:\n{stderr}");
+    assert!(
+        !stderr.contains("Run2..."),
+        "a first run that the bound stopped must not be followed by a second. stderr:\n{stderr}"
+    );
+    assert_verify_timed_out(&report, "run1", &stderr);
+}
+
+/// A second run that the bound stops after the first finished is reported
+/// the same way, and run 1's completed outcome is not compared with it. The
+/// guest leaves a marker on the host in run 1 and spins in run 2, where it
+/// finds the marker.
+#[test]
+fn run_verify_timeout_bounds_the_second_run_and_reports_no_result() {
+    let _lock = HERMIT_RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let report = directory.path().join("verify.json");
+    let marker = directory.path().join("ran-once");
+    let script = format!(
+        "trap '' TERM; if [ -e '{0}' ]; then while : ; do : ; done; fi; : > '{0}'",
+        marker.display()
+    );
+    let (status, elapsed, stderr) =
+        timed_verify(RUN_TIMEOUT_SECS, &report, &["/bin/sh", "-c", &script]);
+    assert!(
+        marker.exists(),
+        "the premise does not hold: run 1 left no marker. stderr:\n{stderr}"
+    );
+    assert_eq!(
+        status.code(),
+        Some(124),
+        "{status:?} after {elapsed:?}. stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("HERMIT_RUN_TIMEOUT class=run-timeout"),
+        "stderr:\n{stderr}"
+    );
+    assert!(stderr.contains("Run2..."), "stderr:\n{stderr}");
+    assert_verify_timed_out(&report, "run2", &stderr);
+}
+
 /// `--summary` of a run `--timeout` stopped: the summary still prints, before
 /// the deadline's class line, marked partial and naming the bound, and
 /// `--summary-json` records the bound beside the scheduler's turns and the
@@ -35212,41 +35381,41 @@ fn a_malformed_finalize_budget_is_refused() {
 fn run_timeout_refuses_backends_where_it_cannot_bound_the_run() {
     let _lock = HERMIT_RUN_LOCK.lock().unwrap_or_else(|e| e.into_inner());
 
-    for backend in ["sabre", "dbt", "kvm"] {
-        let output = hermit_test::hermit_output(
-            "hermit run",
-            hermit_command(&[
-                "--backend",
-                backend,
-                "run",
-                "--timeout",
-                "3",
-                "--",
-                "/bin/echo",
-                "unreachable",
-            ])
-            .stdin(Stdio::null()),
-        );
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    // With `--verify` too: each verification run gets the bound
+    // (https://github.com/rrnewton/hermit/issues/4973), so a backend that
+    // cannot enforce it must refuse it there as well.
+    for verify in [false, true] {
+        for backend in ["sabre", "dbt", "kvm"] {
+            let mut args = vec!["--backend", backend, "run", "--timeout", "3"];
+            if verify {
+                args.push("--verify");
+            }
+            args.extend(["--", "/bin/echo", "unreachable"]);
+            let output = hermit_test::hermit_output(
+                "hermit run",
+                hermit_command(&args).stdin(Stdio::null()),
+            );
+            let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 
-        // EXIT-CLASS: hermit
-        assert_eq!(
-            output.status.code(),
-            Some(122),
-            "`--timeout` on `{backend}` must REFUSE (122), not accept a bound it \
-             cannot enforce. Got {:?}. stderr:\n{stderr}",
-            output.status
-        );
-        assert!(
-            stderr.contains("HERMIT_POLICY_REFUSAL class=policy-refusal"),
-            "a refusal is hermit working, and must not be reported as a failure. \
-             backend={backend} stderr:\n{stderr}"
-        );
-        assert!(
-            stderr.contains("not qualified"),
-            "the refusal must say the bound is unqualified on this backend, and \
-             point somewhere. backend={backend} stderr:\n{stderr}"
-        );
+            // EXIT-CLASS: hermit
+            assert_eq!(
+                output.status.code(),
+                Some(122),
+                "`--timeout` on `{backend}` (verify={verify}) must REFUSE (122), not \
+                 accept a bound it cannot enforce. Got {:?}. stderr:\n{stderr}",
+                output.status
+            );
+            assert!(
+                stderr.contains("HERMIT_POLICY_REFUSAL class=policy-refusal"),
+                "a refusal is hermit working, and must not be reported as a failure. \
+                 backend={backend} verify={verify} stderr:\n{stderr}"
+            );
+            assert!(
+                stderr.contains("not qualified"),
+                "the refusal must say the bound is unqualified on this backend, and \
+                 point somewhere. backend={backend} verify={verify} stderr:\n{stderr}"
+            );
+        }
     }
 }
 

@@ -91,6 +91,11 @@ pub enum RunFailure {
     /// Detcore's scheduler found every remaining thread permanently blocked
     /// (its "Deadlock detected" report) and ended the run.
     Deadlock,
+    /// The run did not finish within the caller's wall-clock `--timeout`, and
+    /// Hermit stopped it there (`HERMIT_RUN_TIMEOUT class=run-timeout`). A run
+    /// cut short at a wall-clock instant has no outcome to compare: where it
+    /// stopped depends on the host's speed, not on the guest.
+    Timeout,
 }
 
 impl RunFailure {
@@ -100,6 +105,7 @@ impl RunFailure {
             Self::DeterminismLoss => "determinism_loss",
             Self::PolicyRefusal => "policy_refusal",
             Self::Deadlock => "deadlock",
+            Self::Timeout => "timeout",
         }
     }
 }
@@ -1039,6 +1045,7 @@ mod tests {
                 RunFailure::DeterminismLoss,
                 RunFailure::PolicyRefusal,
                 RunFailure::Deadlock,
+                RunFailure::Timeout,
             ] {
                 let mut report = VerificationReport::no_result();
                 report.no_result_reason = Some(NoResultReason::RunFailed {

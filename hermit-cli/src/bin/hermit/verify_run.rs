@@ -255,7 +255,15 @@ fn failed_run(
             if let Some(path) = verify_json {
                 write_report_json(path, &run_failed_report(run, *failure, reported))?;
             }
-            Error::msg(format!("{label}: {detail}"))
+            let error = Error::msg(format!("{label}: {detail}"));
+            // A run `--timeout` stopped ends this comparison as it ends `run
+            // --verify`: exit 124 with the run-timeout class line, not as a
+            // Hermit failure.
+            if *failure == RunFailure::Timeout {
+                error.context(super::container::RunTimeoutMarker)
+            } else {
+                error
+            }
         }
         VerifyRunOutcome::ContainerFailed { disposition } => {
             if let Some(path) = verify_json {
@@ -741,6 +749,50 @@ mod tests {
         let mut extra = json;
         extra["surprise"] = serde_json::json!(1);
         assert!(serde_json::from_value::<VerifyRunRecord>(extra).is_err());
+    }
+
+    /// `log-diff` over a `--verify-run` directory whose run `--timeout`
+    /// stopped reports it as `run --verify` does: a `run_failed` no-result of
+    /// class `timeout`, and exit 124 with the run-timeout class line.
+    #[test]
+    fn a_timed_out_run_ends_the_comparison_as_run_verify_does() {
+        use hermit::canonical_verdict::NoResultReason;
+        use hermit::canonical_verdict::VerificationReport;
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("verify.json");
+        let detail = "the --timeout bound fired: Guest exceeded the --timeout bound of 2 seconds";
+        let error = failed_run(
+            Some(&path),
+            VerificationRun::Run1,
+            "run 1",
+            &VerifyRunOutcome::RunFailed {
+                failure: RunFailure::Timeout,
+                detail: detail.into(),
+            },
+            (None, None),
+            None,
+        )
+        .unwrap();
+        assert_eq!(
+            super::super::failure_exit_code(&error),
+            hermit::HERMIT_DEADLINE_EXIT
+        );
+        assert_eq!(
+            super::super::classify_failure(&error),
+            "HERMIT_RUN_TIMEOUT class=run-timeout"
+        );
+        let report =
+            VerificationReport::from_current_json_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(
+            report.no_result_reason,
+            Some(NoResultReason::RunFailed {
+                run: VerificationRun::Run1,
+                failure: RunFailure::Timeout,
+                detail: detail.into(),
+            })
+        );
+        assert!(report.require_canonical_comparison().is_err());
     }
 
     #[test]
