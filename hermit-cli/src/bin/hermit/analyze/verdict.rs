@@ -516,10 +516,10 @@ mod tests {
     fn the_search_ends_that_no_swap_separates_are_a_precondition() {
         for error in [
             anyhow::Error::new(NoSingleSwap {
-            unshared_events: 2,
-            swaps_left: 1,
-            trimmed_failing_passed: false,
-        }),
+                unshared_events: 2,
+                swaps_left: 1,
+                trimmed_failing_passed: false,
+            }),
             anyhow::Error::new(NoReorderableDistance { edit_distance: 3 }),
         ] {
             assert_eq!(
