@@ -640,17 +640,50 @@ fn decode_relr(section: &[u8]) -> Vec<(u64, u64)> {
 }
 
 /// A minimal aarch64 ELF image: one read-and-execute `PT_LOAD` covering
-/// the file, and a `.text` section holding `words` at file offset and
-/// address 0x100. Shared with the in-memory rewrite's tests, which map
-/// such an image.
+/// the file, a `.text` section (index 1) holding `words` at file offset
+/// and address 0x100, and, unless `marks` is `None`, a symbol table
+/// whose mapping symbols are `marks`: (section index, word index, code).
 #[cfg(test)]
-pub(crate) fn elf_with_text(words: &[u32]) -> Vec<u8> {
+pub(crate) fn elf_image(words: &[u32], marks: Option<&[(u16, usize, bool)]>) -> Vec<u8> {
+    elf_image_with(words, marks, None)
+}
+
+/// [`elf_image`] with, unless `functions` is `None`, an unwind table
+/// whose FDEs cover `functions`: (first word, end word) of `.text`.
+#[cfg(test)]
+pub(crate) fn elf_image_with(
+    words: &[u32],
+    marks: Option<&[(u16, usize, bool)]>,
+    functions: Option<&[(usize, usize)]>,
+) -> Vec<u8> {
     const TEXT: usize = 0x100;
     let text_len = 4 * words.len();
-    let strtab = b"\0.text\0.shstrtab\0";
-    let strtab_at = TEXT + text_len;
-    let shoff = (strtab_at + strtab.len()).next_multiple_of(8);
-    let total = shoff + 3 * 64;
+    let shstrtab = b"\0.text\0.shstrtab\0.symtab\0.strtab\0.eh_frame\0";
+    let strtab = b"\0$x\0$d\0";
+    let symbols: Vec<[u8; 24]> = marks
+        .unwrap_or_default()
+        .iter()
+        .map(|(section, word, code)| {
+            let name = if *code { 1 } else { 4 };
+            mapping::tests::symbol(name, 0, *section, (TEXT + 4 * word) as u64)
+        })
+        .collect();
+    let shstrtab_at = TEXT + text_len;
+    let strtab_at = shstrtab_at + shstrtab.len();
+    let symtab_at = (strtab_at + strtab.len()).next_multiple_of(8);
+    let symtab_len = 24 * (symbols.len() + 1);
+    let eh_frame_at = (symtab_at + symtab_len).next_multiple_of(8);
+    let eh_frame = functions.map(|functions| {
+        let functions: Vec<(u64, u64)> = functions
+            .iter()
+            .map(|(start, end)| ((TEXT + 4 * start) as u64, (TEXT + 4 * end) as u64))
+            .collect();
+        mapping::tests::eh_frame(eh_frame_at as u64, &functions)
+    });
+    let eh_frame_len = eh_frame.as_ref().map_or(0, Vec::len);
+    let sections = 3 + if marks.is_some() { 2 } else { 0 } + usize::from(eh_frame.is_some());
+    let shoff = (eh_frame_at + eh_frame_len).next_multiple_of(8);
+    let total = shoff + sections * 64;
     let mut bytes = vec![0u8; total];
     let put = |bytes: &mut Vec<u8>, at: usize, value: &[u8]| {
         bytes[at..at + value.len()].copy_from_slice(value)
@@ -666,7 +699,7 @@ pub(crate) fn elf_with_text(words: &[u32]) -> Vec<u8> {
     put(&mut bytes, 54, &56u16.to_le_bytes()); // e_phentsize
     put(&mut bytes, 56, &1u16.to_le_bytes()); // e_phnum
     put(&mut bytes, 58, &64u16.to_le_bytes()); // e_shentsize
-    put(&mut bytes, 60, &3u16.to_le_bytes()); // e_shnum
+    put(&mut bytes, 60, &(sections as u16).to_le_bytes()); // e_shnum
     put(&mut bytes, 62, &2u16.to_le_bytes()); // e_shstrndx
     // PT_LOAD, PF_R | PF_X, the whole file at address 0.
     put(&mut bytes, 64, &1u32.to_le_bytes());
@@ -677,149 +710,65 @@ pub(crate) fn elf_with_text(words: &[u32]) -> Vec<u8> {
     for (i, word) in words.iter().enumerate() {
         put(&mut bytes, TEXT + 4 * i, &word.to_le_bytes());
     }
+    put(&mut bytes, shstrtab_at, shstrtab);
     put(&mut bytes, strtab_at, strtab);
-    // Section headers: null, .text (PROGBITS, ALLOC | EXECINSTR), .shstrtab.
-    let text = shoff + 64;
-    put(&mut bytes, text, &1u32.to_le_bytes());
-    put(&mut bytes, text + 4, &1u32.to_le_bytes());
-    put(&mut bytes, text + 8, &6u64.to_le_bytes());
-    put(&mut bytes, text + 16, &(TEXT as u64).to_le_bytes());
-    put(&mut bytes, text + 24, &(TEXT as u64).to_le_bytes());
-    put(&mut bytes, text + 32, &(text_len as u64).to_le_bytes());
-    put(&mut bytes, text + 48, &4u64.to_le_bytes());
-    let names = shoff + 128;
-    put(&mut bytes, names, &7u32.to_le_bytes());
-    put(&mut bytes, names + 4, &3u32.to_le_bytes());
-    put(&mut bytes, names + 24, &(strtab_at as u64).to_le_bytes());
-    put(&mut bytes, names + 32, &(strtab.len() as u64).to_le_bytes());
-    put(&mut bytes, names + 48, &1u64.to_le_bytes());
+    for (i, symbol) in symbols.iter().enumerate() {
+        put(&mut bytes, symtab_at + 24 * (i + 1), symbol);
+    }
+    if let Some(eh_frame) = &eh_frame {
+        put(&mut bytes, eh_frame_at, eh_frame);
+    }
+    // Section headers: null, .text (PROGBITS, ALLOC | EXECINSTR),
+    // .shstrtab, and with marks .symtab (linked to 4) and .strtab.
+    let header = |bytes: &mut Vec<u8>, index: usize, fields: [u64; 8]| {
+        let at = shoff + 64 * index;
+        let [name, kind, flags, addr, offset, size, link, entsize] = fields;
+        put(bytes, at, &(name as u32).to_le_bytes());
+        put(bytes, at + 4, &(kind as u32).to_le_bytes());
+        put(bytes, at + 8, &flags.to_le_bytes());
+        put(bytes, at + 16, &addr.to_le_bytes());
+        put(bytes, at + 24, &offset.to_le_bytes());
+        put(bytes, at + 32, &size.to_le_bytes());
+        put(bytes, at + 40, &(link as u32).to_le_bytes());
+        put(bytes, at + 48, &4u64.to_le_bytes());
+        put(bytes, at + 56, &entsize.to_le_bytes());
+    };
+    let (text, len) = (TEXT as u64, text_len as u64);
+    header(&mut bytes, 1, [1, 1, 6, text, text, len, 0, 0]);
+    header(
+        &mut bytes,
+        2,
+        [7, 3, 0, 0, shstrtab_at as u64, shstrtab.len() as u64, 0, 0],
+    );
+    if marks.is_some() {
+        let (at, len) = (symtab_at as u64, symtab_len as u64);
+        header(&mut bytes, 3, [17, 2, 0, 0, at, len, 4, 24]);
+        header(
+            &mut bytes,
+            4,
+            [25, 3, 0, 0, strtab_at as u64, strtab.len() as u64, 0, 0],
+        );
+    }
+    if eh_frame.is_some() {
+        // .eh_frame: PROGBITS, ALLOC, mapped at its file offset.
+        let (at, len) = (eh_frame_at as u64, eh_frame_len as u64);
+        header(&mut bytes, sections - 1, [33, 1, 2, at, at, len, 0, 0]);
+    }
     bytes
+}
+
+/// A minimal aarch64 ELF image whose `.text` is all code: [`elf_image`] with
+/// one `$x` mapping symbol at its first word. Shared with the in-memory
+/// rewrite's tests, which map such an image; an image without mapping symbols
+/// or an unwind table is refused before anything is counted or rewritten.
+#[cfg(test)]
+pub(crate) fn elf_with_text(words: &[u32]) -> Vec<u8> {
+    elf_image(words, Some(&[(1, 0, true)]))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A minimal aarch64 ELF image: one read-and-execute `PT_LOAD` covering
-    /// the file, a `.text` section (index 1) holding `words` at file offset
-    /// and address 0x100, and, unless `marks` is `None`, a symbol table
-    /// whose mapping symbols are `marks`: (section index, word index, code).
-    fn elf_image(words: &[u32], marks: Option<&[(u16, usize, bool)]>) -> Vec<u8> {
-        elf_image_with(words, marks, None)
-    }
-
-    /// [`elf_image`] with, unless `functions` is `None`, an unwind table
-    /// whose FDEs cover `functions`: (first word, end word) of `.text`.
-    fn elf_image_with(
-        words: &[u32],
-        marks: Option<&[(u16, usize, bool)]>,
-        functions: Option<&[(usize, usize)]>,
-    ) -> Vec<u8> {
-        const TEXT: usize = 0x100;
-        let text_len = 4 * words.len();
-        let shstrtab = b"\0.text\0.shstrtab\0.symtab\0.strtab\0.eh_frame\0";
-        let strtab = b"\0$x\0$d\0";
-        let symbols: Vec<[u8; 24]> = marks
-            .unwrap_or_default()
-            .iter()
-            .map(|(section, word, code)| {
-                let name = if *code { 1 } else { 4 };
-                mapping::tests::symbol(name, 0, *section, (TEXT + 4 * word) as u64)
-            })
-            .collect();
-        let shstrtab_at = TEXT + text_len;
-        let strtab_at = shstrtab_at + shstrtab.len();
-        let symtab_at = (strtab_at + strtab.len()).next_multiple_of(8);
-        let symtab_len = 24 * (symbols.len() + 1);
-        let eh_frame_at = (symtab_at + symtab_len).next_multiple_of(8);
-        let eh_frame = functions.map(|functions| {
-            let functions: Vec<(u64, u64)> = functions
-                .iter()
-                .map(|(start, end)| ((TEXT + 4 * start) as u64, (TEXT + 4 * end) as u64))
-                .collect();
-            mapping::tests::eh_frame(eh_frame_at as u64, &functions)
-        });
-        let eh_frame_len = eh_frame.as_ref().map_or(0, Vec::len);
-        let sections = 3 + if marks.is_some() { 2 } else { 0 } + usize::from(eh_frame.is_some());
-        let shoff = (eh_frame_at + eh_frame_len).next_multiple_of(8);
-        let total = shoff + sections * 64;
-        let mut bytes = vec![0u8; total];
-        let put = |bytes: &mut Vec<u8>, at: usize, value: &[u8]| {
-            bytes[at..at + value.len()].copy_from_slice(value)
-        };
-        // ELF header: ELFCLASS64, little-endian, ET_DYN, EM_AARCH64.
-        put(&mut bytes, 0, b"\x7fELF\x02\x01\x01");
-        put(&mut bytes, 16, &3u16.to_le_bytes());
-        put(&mut bytes, 18, &183u16.to_le_bytes());
-        put(&mut bytes, 20, &1u32.to_le_bytes());
-        put(&mut bytes, 32, &64u64.to_le_bytes()); // e_phoff
-        put(&mut bytes, 40, &(shoff as u64).to_le_bytes());
-        put(&mut bytes, 52, &64u16.to_le_bytes()); // e_ehsize
-        put(&mut bytes, 54, &56u16.to_le_bytes()); // e_phentsize
-        put(&mut bytes, 56, &1u16.to_le_bytes()); // e_phnum
-        put(&mut bytes, 58, &64u16.to_le_bytes()); // e_shentsize
-        put(&mut bytes, 60, &(sections as u16).to_le_bytes()); // e_shnum
-        put(&mut bytes, 62, &2u16.to_le_bytes()); // e_shstrndx
-        // PT_LOAD, PF_R | PF_X, the whole file at address 0.
-        put(&mut bytes, 64, &1u32.to_le_bytes());
-        put(&mut bytes, 68, &5u32.to_le_bytes());
-        put(&mut bytes, 64 + 32, &(total as u64).to_le_bytes()); // p_filesz
-        put(&mut bytes, 64 + 40, &(total as u64).to_le_bytes()); // p_memsz
-        put(&mut bytes, 64 + 48, &0x1000u64.to_le_bytes());
-        for (i, word) in words.iter().enumerate() {
-            put(&mut bytes, TEXT + 4 * i, &word.to_le_bytes());
-        }
-        put(&mut bytes, shstrtab_at, shstrtab);
-        put(&mut bytes, strtab_at, strtab);
-        for (i, symbol) in symbols.iter().enumerate() {
-            put(&mut bytes, symtab_at + 24 * (i + 1), symbol);
-        }
-        if let Some(eh_frame) = &eh_frame {
-            put(&mut bytes, eh_frame_at, eh_frame);
-        }
-        // Section headers: null, .text (PROGBITS, ALLOC | EXECINSTR),
-        // .shstrtab, and with marks .symtab (linked to 4) and .strtab.
-        let header = |bytes: &mut Vec<u8>, index: usize, fields: [u64; 8]| {
-            let at = shoff + 64 * index;
-            let [name, kind, flags, addr, offset, size, link, entsize] = fields;
-            put(bytes, at, &(name as u32).to_le_bytes());
-            put(bytes, at + 4, &(kind as u32).to_le_bytes());
-            put(bytes, at + 8, &flags.to_le_bytes());
-            put(bytes, at + 16, &addr.to_le_bytes());
-            put(bytes, at + 24, &offset.to_le_bytes());
-            put(bytes, at + 32, &size.to_le_bytes());
-            put(bytes, at + 40, &(link as u32).to_le_bytes());
-            put(bytes, at + 48, &4u64.to_le_bytes());
-            put(bytes, at + 56, &entsize.to_le_bytes());
-        };
-        let (text, len) = (TEXT as u64, text_len as u64);
-        header(&mut bytes, 1, [1, 1, 6, text, text, len, 0, 0]);
-        header(
-            &mut bytes,
-            2,
-            [7, 3, 0, 0, shstrtab_at as u64, shstrtab.len() as u64, 0, 0],
-        );
-        if marks.is_some() {
-            let (at, len) = (symtab_at as u64, symtab_len as u64);
-            header(&mut bytes, 3, [17, 2, 0, 0, at, len, 4, 24]);
-            header(
-                &mut bytes,
-                4,
-                [25, 3, 0, 0, strtab_at as u64, strtab.len() as u64, 0, 0],
-            );
-        }
-        if eh_frame.is_some() {
-            // .eh_frame: PROGBITS, ALLOC, mapped at its file offset.
-            let (at, len) = (eh_frame_at as u64, eh_frame_len as u64);
-            header(&mut bytes, sections - 1, [33, 1, 2, at, at, len, 0, 0]);
-        }
-        bytes
-    }
-
-    /// [`elf_image`] whose `.text` is all code.
-    fn elf_with_text(words: &[u32]) -> Vec<u8> {
-        elf_image(words, Some(&[(1, 0, true)]))
-    }
 
     /// nop; ldaxr w8, [x0]; add w8, w8, #1; stlxr w9, w8, [x0];
     /// cbnz w9, <ldaxr>; ret
