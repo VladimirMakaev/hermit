@@ -4679,7 +4679,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_recording_killed_while_every_thread_waits_is_refused_rather_than_parked
     // and a_parked_recording_without_its_terminal_evidence_is_refused: 747.
     // And a_recording_of_a_crash_while_a_thread_waits_replays_to_the_same_death: 760.
-    ("test.cli", 760),
+    // PR 4753 adds a_recording_from_before_readlinkat_was_recorded_is_refused_by_version: 742 + 1 = 761.
+    ("test.cli", 761),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5268,7 +5269,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_recording_killed_from_outside_is_refused_rather_than_parked: 676.
     // And the same two terminal-record cli cases: 666.
     // And the same crash-recording cli case: 679.
-    ("test.cli_on_host", 679),
+    // The same PR 4753 case: 661 + 1 = 680.
+    ("test.cli_on_host", 680),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
