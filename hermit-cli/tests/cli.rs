@@ -7680,7 +7680,7 @@ fn detcore_answers_its_procfs_links_on_every_backend() {
     );
 }
 
-/// A recording made before readlinkat was recorded (RECORD_VERSION 0x196)
+/// A recording made before readlinkat was recorded (RECORD_VERSION 0x198)
 /// holds no event for a readlinkat, while this replayer takes one Bytes event
 /// for each; replaying it would hand every readlinkat another call's event.
 /// The exact-match version gate refuses it by name instead. The fixture is a
@@ -7708,21 +7708,21 @@ fn a_recording_from_before_readlinkat_was_recorded_is_refused_by_version() {
     let mut metadata: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
     assert_eq!(
-        metadata["version"], 0x197,
+        metadata["version"], 0x199,
         "RECORD_VERSION moved; point this test at the version that records readlinkat and the \
          one before it"
     );
-    metadata["version"] = serde_json::json!(0x196);
+    metadata["version"] = serde_json::json!(0x198);
     fs::write(&metadata_path, serde_json::to_string(&metadata).unwrap()).unwrap();
     let refused = hermit(&replay_args);
     assert!(
         !refused.status.success(),
-        "a 0x196 recording was replayed:\n{}",
+        "a 0x198 recording was replayed:\n{}",
         stderr(&refused)
     );
     assert!(
-        stderr(&refused).contains("Version mismatch, recording version RecordVersion(406)"),
-        "a 0x196 recording was not refused by the version gate:\n{}",
+        stderr(&refused).contains("Version mismatch, recording version RecordVersion(408)"),
+        "a 0x198 recording was not refused by the version gate:\n{}",
         stderr(&refused)
     );
 }
@@ -40322,7 +40322,7 @@ fn the_4505_signal_guests_get_past_their_handlers_under_record() {
     };
     let mut metadata: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["version"], 0x198, "RECORD_VERSION moved");
+    assert_eq!(metadata["version"], 0x199, "RECORD_VERSION moved");
     metadata["version"] = serde_json::json!(0x17f);
     fs::write(&metadata_path, serde_json::to_string(&metadata).unwrap()).unwrap();
     let replay_args = ["replay", "--autopilot", "--data-dir", directory];

@@ -915,7 +915,15 @@ impl RecordVersion {
 // record. An older recording has none, so this replayer would refuse what its
 // recorder made parkable, and an older replayer would park a thread on a stream
 // merely cut short; it is refused here.
-pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x198);
+// 0x198 -> 0x199 (the next value above 0x198 in the landing train; the lander
+// may renumber it per its ledger at landing): readlinkat is recorded and
+// replayed as readlink is. The recorder records the bytes the kernel copied
+// out, or the error, as a Bytes event, and replay writes them back without
+// running the call. An older recording holds no event for a readlinkat, so this
+// replayer would take another call's event for it, and an older replayer would
+// leave each readlinkat's event unread and shift every later one; it is refused
+// here.
+pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x199);
 
 /// The highest RECORD_VERSION this project has ever shipped.
 ///
@@ -940,7 +948,7 @@ pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x198);
 /// the version exists to prevent.
 ///
 /// RAISE THIS IN THE SAME COMMIT THAT RAISES RECORD_VERSION.
-const HIGHEST_SHIPPED_RECORD_VERSION: u32 = 0x198;
+const HIGHEST_SHIPPED_RECORD_VERSION: u32 = 0x199;
 
 const _: () = assert!(
     RECORD_VERSION.0 >= HIGHEST_SHIPPED_RECORD_VERSION,

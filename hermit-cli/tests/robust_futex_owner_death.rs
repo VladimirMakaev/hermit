@@ -1716,11 +1716,12 @@ fn ptrace_records_a_self_aliased_word_woken_once_and_refuses_older_recordings() 
     // 0x195 runs a kernel-run poll's restart as the guest's own
     // restart_syscall,
     // 0x197 MAP_SHARED mappings of one file share memory in replay,
-    // and 0x198 a thread stream ends with a terminal record),
+    // 0x198 a thread stream ends with a terminal record,
+    // and 0x199 records and replays readlinkat's link target),
     // and a recording from before the change, 0x14f, is still refused by
     // the exact-match gate.
     assert_eq!(
-        metadata["version"], 0x198,
+        metadata["version"], 0x199,
         "RECORD_VERSION moved; point this test at the current version and the one before"
     );
     metadata["version"] = serde_json::json!(0x14f);
