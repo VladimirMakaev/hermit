@@ -950,7 +950,7 @@ mod tests {
             // And lit's chaos_schedule_replay fixture (+1): 695.
             // And robust_futex_owner_death's native and ptrace SIGKILL
             // owner-death tests (+2): 696.
-            assert_eq!(population, 694);
+            assert_eq!(population, 704);
             // The explicit utimensat mtime regression
             // (https://github.com/rrnewton/hermit/issues/3565).
             assert!(
