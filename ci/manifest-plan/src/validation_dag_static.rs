@@ -1301,7 +1301,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's watch::tests::a_watch_takes_an_address_a_length_and_an_access
     // and config::tests::config_fingerprint_includes_the_watch_element_layout
     // (--watch): 1958 + 2 = 1991.
-    ("test.regular_crates", 1991),
+    // The #4682 re-land's two detcore-model config units and hermit-verify's
+    // interpolation unit: 1958 + 3 = 1994.
+    ("test.regular_crates", 1994),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2022,7 +2024,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and run's only_strict_runs_and_replays_refuse_a_skid_overshoot: 1340, listed.
     // And run::watch_is_refused_where_it_could_not_arm_or_report (--watch):
     // 1319 + 1 = 1341.
-    ("test.hermit_unit", 1341),
+    // The #4682 re-land's eight hermit units (the sleep-registration admission
+    // and loader-route refusals, its error class, metadata, and the run,
+    // analyze and bisect plumbing): 1319 + 8 = 1349.
+    ("test.hermit_unit", 1349),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3482,7 +3487,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and scheduler's
     // a_peer_alive_when_watches_become_due_is_summarized_if_killed_parked:
     // 3300 + 6 = 3504.
-    ("test.detcore_unit", 3504),
+    // The #4682 re-land's sixteen detcore units (first-pass registration, the
+    // parked-sleep deadline and send time, the readable-state rule, the
+    // controlled loop, the schedule prefix and the record envelope):
+    // 3279 + 16 = 3520.
+    ("test.detcore_unit", 3520),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4869,7 +4878,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_thread_that_blocks_sigtrap_never_arms_and_the_trace_says_so,
     // a_hit_that_resets_an_ignored_sigtrap_stops_the_run and
     // a_watch_survives_exec_into_an_image_that_stores_first (--watch): 765 + 4 = 785.
-    ("test.cli", 785),
+    // The #4682 re-land's two sleep CLI tests,
+    // an_ignored_or_blocked_sigchld_does_not_end_a_sleep and
+    // a_signal_after_a_sleeps_deadline_does_not_interrupt_it: 763 + 2 = 787.
+    ("test.cli", 787),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5488,7 +5500,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Less the same test, skipped here by exact name: 665 - 1 = 698.
     // And the same two synchronization edge tests, not excluded: 700.
     // And the same four --watch tests, not excluded: 704.
-    ("test.cli_on_host", 704),
+    // And the same two #4682 re-land tests: 682 + 2 = 706.
+    ("test.cli_on_host", 706),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1958 - 14 = 1944, re-measured 2026-10-31.
     // And the cases added since, as this twin's entry further down counts: 1950.
@@ -5513,7 +5526,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's tests, as at this node's second entry below: 1973.
     // And this change's tests, as at this node's second entry below: 1975.
     // Kept equal to the second test.regular_crates_on_host entry below: 1977.
-    ("test.regular_crates_on_host", 1977),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1980.
+    ("test.regular_crates_on_host", 1980),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6095,7 +6109,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same five edge-soundness tests: 3497.
     // And the same non-leader exec test: 3498.
     // And the same six --watch units: 3504, listed.
-    ("test.detcore_unit_on_host", 3504),
+    // And the same sixteen #4682 re-land units: 3279 + 16 = 3520.
+    ("test.detcore_unit_on_host", 3520),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6509,7 +6524,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same background-starts trial unit: 1332.
     // And the same two skid-overshoot policy units: 1334, listed.
     // And the same --watch refusal test: 1335.
-    ("test.hermit_unit_on_host", 1335),
+    // And the same eight #4682 re-land units: 1313 + 8 = 1343.
+    ("test.hermit_unit_on_host", 1343),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6770,7 +6786,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same post-crash refusal unit: 1973, listed.
     // And the same two interpolation units: 1975.
     // And the same two --watch detcore-model tests: 1977.
-    ("test.regular_crates_on_host", 1977),
+    // And the same three #4682 re-land units: 1944 + 3 = 1980.
+    ("test.regular_crates_on_host", 1980),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
