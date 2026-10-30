@@ -38,9 +38,18 @@ use crate::types::SchedEvent;
 /// The newest preemption-record format this Hermit writes and reads
 /// (`PreemptionRecord::format_version`). Format 1 has no version field: every
 /// record written before the field existed, and every record since that holds
-/// nothing a format-1 reader would misread. Format 2 adds `poll_skips`. A
-/// record of a newer format is refused (`PreemptionRecord::validate`).
-pub const PREEMPTION_RECORD_FORMAT: u32 = 2;
+/// nothing a format-1 reader would misread. Format 2 adds `poll_skips`.
+/// Format 3 adds `background_starts` (`BACKGROUND_STARTS_FORMAT`). A record of
+/// a newer format is refused (`PreemptionRecord::validate`).
+pub const PREEMPTION_RECORD_FORMAT: u32 = 3;
+
+/// The format a record that holds a background start (`BackgroundStart`)
+/// is stamped with.
+pub const BACKGROUND_STARTS_FORMAT: u32 = 3;
+
+/// The format a record that holds a poll skip (`PollSkip`) and no newer
+/// field is stamped with.
+const POLL_SKIPS_FORMAT: u32 = 2;
 
 /// A turn the scheduler gave a polling thread only to skip it
 /// (`Scheduler::step4_resource_block`): a scheduling decision that runs no
@@ -57,6 +66,28 @@ pub struct PollSkip {
     pub after: u64,
     /// The polling thread the scheduler skipped.
     pub thread: DetTid,
+}
+
+/// The turn that began a kernel-run blocking call
+/// (`ResourceID::is_kernel_run_blocking`: a blocking read of an external
+/// descriptor, a binder call that waits for another process, a vfork, an
+/// `rt_sigsuspend`), committed as BACKGROUND: the call runs in the kernel from
+/// then on, while other threads' turns commit. Like a poll skip, the turn runs
+/// no guest code and so leaves no event; it is recorded after the global
+/// schedule's first `after` events. When a call starts can decide what it
+/// sees: a binder read waiting in the driver is the idle looper a later read
+/// on another thread finds, or not. A schedule replay starts the call at the
+/// same point, before the event that follows it.
+#[derive(PartialEq, Debug, Eq, Clone, Copy, Hash, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BackgroundStart {
+    /// How many events of the global schedule came before the turn.
+    pub after: u64,
+    /// The thread whose call the turn began.
+    pub thread: DetTid,
+    /// The call's per-thread sequence number (`ExternalOpId::sequence`), as
+    /// the readmissions name it (`rejoins`).
+    pub call: u64,
 }
 
 /// The `--chaos-timed-wait-spread` a record was produced under
@@ -210,6 +241,12 @@ pub struct PreemptionRecord {
     /// checkpoints are, by any edit of the schedule.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     poll_skips: Vec<PollSkip>,
+    /// The turns that began kernel-run blocking calls, in the order they
+    /// committed (`BackgroundStart`). Absent in records written before the
+    /// field existed, which replay as before, and dropped, as the poll skips
+    /// are, by any edit of the schedule.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    background_starts: Vec<BackgroundStart>,
     /// The host files the recorded run's guest opened
     /// (`detcore_model::host_input::HostInputSet`), so that a replay can
     /// report one that changed since (`HERMIT_HOST_INPUT_CHANGED_SINCE_RECORDING`).
@@ -368,6 +405,7 @@ impl PreemptionRecord {
             sched_seed: None,
             format_version: None,
             poll_skips: Vec::new(),
+            background_starts: Vec::new(),
             host_inputs: None,
             queued_sleeps_registered_at_first_pass: false,
             store_exclusive_failures: HostObservedCount::default(),
@@ -435,6 +473,7 @@ impl PreemptionRecord {
             sched_seed,
             format_version,
             poll_skips,
+            background_starts,
             host_inputs,
             queued_sleeps_registered_at_first_pass,
             timed_wait_spread,
@@ -456,7 +495,22 @@ impl PreemptionRecord {
             .filter(|skip| skip.after <= len as u64)
             .copied()
             .collect();
-        let format_version = format_version.filter(|_| !poll_skips.is_empty());
+        // So does a background start.
+        let background_starts: Vec<BackgroundStart> = background_starts
+            .iter()
+            .filter(|start| start.after <= len as u64)
+            .copied()
+            .collect();
+        // A record that notes every background start keeps its format: the
+        // prefix's starts are its run's starts up to the prefix's end.
+        let notes_starts = format_version.is_some_and(|format| format >= BACKGROUND_STARTS_FORMAT);
+        let format_version = if notes_starts {
+            *format_version
+        } else {
+            format_version
+                .filter(|_| !poll_skips.is_empty())
+                .map(|format| format.min(POLL_SKIPS_FORMAT))
+        };
         let followed = len < global.len();
         let global = global[..len.min(global.len())].to_vec();
         let mut reached = BTreeMap::<DetTid, callback_history::Progress>::new();
@@ -503,6 +557,7 @@ impl PreemptionRecord {
             sched_seed: *sched_seed,
             format_version,
             poll_skips,
+            background_starts,
             host_inputs: host_inputs.clone(),
             queued_sleeps_registered_at_first_pass: *queued_sleeps_registered_at_first_pass,
             timed_wait_spread: *timed_wait_spread,
@@ -786,6 +841,7 @@ impl PreemptionRecord {
             sched_seed: self.sched_seed,
             format_version: None,
             poll_skips: Vec::new(),
+            background_starts: Vec::new(),
             host_inputs: self.host_inputs.clone(),
             queued_sleeps_registered_at_first_pass: self.queued_sleeps_registered_at_first_pass,
             // A count of this run's host, not part of the preemptions.
@@ -863,6 +919,7 @@ impl PreemptionRecord {
             sched_seed: None,
             format_version: None,
             poll_skips: Vec::new(),
+            background_starts: Vec::new(),
             host_inputs: None,
             queued_sleeps_registered_at_first_pass: false,
             store_exclusive_failures: HostObservedCount::default(),
@@ -883,10 +940,24 @@ impl PreemptionRecord {
         &self.poll_skips
     }
 
-    /// Forget the poll skips: an edit of the schedule moves the events they
-    /// follow. The format goes back to 1 with them.
+    /// The background starts the record holds, in order (`BackgroundStart`).
+    pub fn background_starts(&self) -> &[BackgroundStart] {
+        &self.background_starts
+    }
+
+    /// Whether the record notes every background start its run took: a
+    /// record of `BACKGROUND_STARTS_FORMAT` or newer. Absent starts in an
+    /// older record say nothing about when its calls began.
+    pub fn notes_background_starts(&self) -> bool {
+        self.format_version
+            .is_some_and(|format| format >= BACKGROUND_STARTS_FORMAT)
+    }
+
+    /// Forget the poll skips and background starts: an edit of the schedule
+    /// moves the events they follow. The format goes back to 1 with them.
     fn drop_poll_skips(&mut self) {
         self.poll_skips.clear();
+        self.background_starts.clear();
         self.format_version = None;
     }
 
@@ -946,6 +1017,24 @@ impl PreemptionRecord {
                 "poll skip after event {} of thread {} is out of order or past the {} recorded \
                  events",
                 skip.after, skip.thread, events
+            ));
+        }
+        if let Some(start) = self
+            .background_starts
+            .iter()
+            .zip(self.background_starts.iter().skip(1))
+            .find(|(a, b)| a.after > b.after)
+            .map(|(_, b)| b)
+            .or_else(|| {
+                self.background_starts
+                    .iter()
+                    .find(|start| start.after > events)
+            })
+        {
+            return Err(format!(
+                "background start of call {} of thread {} after event {} is out of order or \
+                 past the {} recorded events",
+                start.call, start.thread, start.after, events
             ));
         }
         self.validate_callback_checkpoints()?;
@@ -1413,7 +1502,7 @@ mod tests {
         let json = writer.into_string();
         let record: PreemptionRecord = serde_json::from_str(&json).unwrap();
         record.validate().unwrap();
-        assert_eq!(record.format_version, Some(PREEMPTION_RECORD_FORMAT));
+        assert_eq!(record.format_version, Some(POLL_SKIPS_FORMAT));
         let skip = |after, tid| PollSkip {
             after,
             thread: DetTid::from_raw(tid),
@@ -1444,6 +1533,66 @@ mod tests {
         assert!(out_of_order.validate().is_err());
         let mut past_the_end = record;
         past_the_end.poll_skips.push(skip(3, 5));
+        assert!(past_the_end.validate().is_err());
+    }
+
+    /// A writer notes a background start after the events recorded so far and
+    /// stamps the record with `BACKGROUND_STARTS_FORMAT`; a prefix keeps the
+    /// starts its events reach, and an edit drops them. A start out of order
+    /// or past the recorded events is refused.
+    #[test]
+    fn background_starts_are_recorded_after_their_events_and_version_the_record() {
+        let event = |tid: i32| SchedEvent {
+            dettid: DetTid::from_raw(tid),
+            op: Op::OtherInstructions,
+            count: 1,
+            start_rip: None,
+            end_rip: None,
+            end_time: Some(LogicalTime::from_nanos(5)),
+            stopless: false,
+            strex_fails: Default::default(),
+        };
+        let mut writer = PreemptionWriter::new(None).noting_background_starts();
+        writer.insert_schedevent(event(3));
+        writer.insert_background_start(DetTid::from_raw(3), 7);
+        writer.insert_poll_skip(DetTid::from_raw(5));
+        writer.insert_schedevent(event(5));
+        writer.insert_background_start(DetTid::from_raw(5), 2);
+        let record: PreemptionRecord = serde_json::from_str(&writer.into_string()).unwrap();
+        let start = |after, tid, call| BackgroundStart {
+            after,
+            thread: DetTid::from_raw(tid),
+            call,
+        };
+        assert_eq!(record.background_starts(), [start(1, 3, 7), start(2, 5, 2)]);
+        assert_eq!(record.format_version, Some(BACKGROUND_STARTS_FORMAT));
+        assert!(record.notes_background_starts());
+        assert!(record.validate().is_ok());
+        let prefix = record.schedule_prefix(1);
+        assert_eq!(prefix.background_starts(), [start(1, 3, 7)]);
+        assert!(prefix.notes_background_starts());
+        let only_skip = PreemptionRecord {
+            background_starts: Vec::new(),
+            format_version: Some(POLL_SKIPS_FORMAT),
+            ..record.schedule_prefix(1)
+        }
+        .schedule_prefix(1);
+        assert_eq!(only_skip.format_version, Some(POLL_SKIPS_FORMAT));
+        let mut plain = PreemptionWriter::new(None);
+        plain.insert_schedevent(event(3));
+        plain.insert_background_start(DetTid::from_raw(3), 7);
+        let plain: PreemptionRecord = serde_json::from_str(&plain.into_string()).unwrap();
+        assert!(plain.background_starts().is_empty());
+        assert!(!plain.notes_background_starts());
+        let mut edited = record.clone();
+        edited.preemptions_only();
+        assert!(edited.background_starts().is_empty());
+        assert!(!edited.notes_background_starts());
+        let mut out_of_order = record.clone();
+        out_of_order.background_starts.swap(0, 1);
+        assert!(out_of_order.validate().is_err());
+        let mut past_the_end = record;
+        past_the_end.background_starts.push(start(3, 5, 3));
         assert!(past_the_end.validate().is_err());
     }
 
@@ -2867,7 +3016,34 @@ impl PreemptionWriter {
             after: self.inner.global.len() as u64,
             thread,
         });
-        self.inner.format_version = Some(PREEMPTION_RECORD_FORMAT);
+        self.stamp_format(POLL_SKIPS_FORMAT);
+    }
+
+    /// Note that the scheduler just began `thread`'s kernel-run call `call`
+    /// (a BACKGROUND commit), after the events recorded so far
+    /// (`BackgroundStart`).
+    pub(crate) fn insert_background_start(&mut self, thread: DetTid, call: u64) {
+        if self.boundary_records.is_some() || !self.inner.notes_background_starts() {
+            return;
+        }
+        self.inner.background_starts.push(BackgroundStart {
+            after: self.inner.global.len() as u64,
+            thread,
+            call,
+        });
+    }
+
+    /// Stamp the record as noting every background start its run takes
+    /// (`BACKGROUND_STARTS_FORMAT`): the run records its schedule without
+    /// replaying one, so a record without any says its run began none.
+    pub fn noting_background_starts(mut self) -> Self {
+        self.stamp_format(BACKGROUND_STARTS_FORMAT);
+        self
+    }
+
+    /// Stamp the record with `format` unless it already has a newer one.
+    fn stamp_format(&mut self, format: u32) {
+        self.inner.format_version = Some(self.inner.format_version.unwrap_or(1).max(format));
     }
 
     /// Append the observation of an existing slice-end request at its exact
