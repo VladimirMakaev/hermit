@@ -3483,6 +3483,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (a_clone3_struct_is_refused_only_when_every_kernel_refuses_it,
     // a_traced_legacy_clone_drops_only_clone_untraced): 2711 + 2 = 2713.
     // And clone3_accepts_only_clone_newtime_among_the_csignal_bits: 2713 + 1 = 2714.
+    // the_guest_numbering_round_trips_and_is_compared: 2691, listed.
+    // And this change's post-fork-side scheduler test: 2692.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4903,6 +4905,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And no_namespace_gives_a_new_pid_namespace_child_its_chosen_id and
     // no_namespace_refuses_before_the_task_a_call_that_cannot_carry_a_chosen_id: 645 + 2 = 647.
     // And no_namespace_preemption_records_replay_under_their_base: 647 + 1 = 648.
+    // no_namespace_concurrent_runs_take_different_windows: 627.
+    // And no_namespace_preemption_records_replay_under_their_base: 628.
+    // And this change's no-namespace schedule replay test: 629.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5526,6 +5531,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two clone tests, not excluded: 562 + 2 = 564.
     // And the same two tests, not excluded: 564 + 2 = 566.
     // And the same --no-namespace replay test: 566 + 1 = 567.
+    // And the same five --no-namespace chosen-ID tests, not excluded: 546.
+    // And the same --no-namespace replay test: 547.
+    // And the same test: 548.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6082,6 +6090,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same definite-fault unit: 2710 + 1 = 2711.
     // And the same two clone3-read and traced-clone units: 2711 + 2 = 2713.
     // And the same CLONE_NEWTIME unit: 2713 + 1 = 2714.
+    // And the same nine chosen-ID units: 2691.
+    // And the same test: 2692.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
