@@ -3783,6 +3783,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the scheduler's a_scheduler_task_panic_reaches_its_handler: 2693, listed.
     // And a_scheduler_panic_during_backend_failure_cleanup_still_unwinds: 2694, listed.
     // And this change's three unit tests: 2698.
+    // And the two aarch64 exclusive-loop units for Rust std's loop shapes (a
+    // flag-setting read-modify-write, a compare-and-swap that retries
+    // elsewhere): 2741.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6561,6 +6564,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same scheduler-panic unit: 2693, listed.
     // And the same backend-failure-cleanup panic unit: 2694, listed.
     // And the same tests: 2698.
+    // And the same two aarch64 exclusive-loop units: 2741.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
