@@ -119,9 +119,9 @@ impl BisectOpts {
             jitter_dist: self.jitter_dist,
             execution_context: self.execution_context,
             tmp_dir: None,
-            // Bisect keeps its workspace whatever this says
-            // (`bisect_schedule_pair`).
-            keep_tmp: false,
+            // Bisect keeps its workspace (`bisect_schedule_pair`), and every
+            // trial's schedules in it, as it has no --keep-tmp to ask.
+            keep_tmp: true,
             success_exit_code: None,
             run_arg: Vec::new(),
             run_args: self.run_args.clone(),
