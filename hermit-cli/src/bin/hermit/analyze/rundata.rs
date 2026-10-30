@@ -1020,6 +1020,15 @@ impl RunData {
         // want to make it possible to do analyze with the stick random scheduler instead of the
         // one.
         ro.det_opts.det_config.chaos = true;
+        if ro.det_opts.det_config.chaos_timed_wait_spread.is_some() && !aopts.prefix_search {
+            bail!(
+                "hermit analyze cannot bisect or minimize --chaos-timed-wait-spread runs: their \
+                 trials replay schedules found under different scheduler seeds, and the \
+                 spread's wake factors are keyed on the seed, so a mixed schedule would wake \
+                 its sleepers at times neither run had. Use --prefix-search --run1-seed N, \
+                 which replays one run's schedule, or drop --chaos-timed-wait-spread"
+            );
+        }
 
         // Trials may differ only in their schedule. `--seed` also seeds what the guest reads
         // as randomness (getrandom, /dev/urandom) and syscall fuzzing, so a run2 seed or a
@@ -1028,6 +1037,11 @@ impl RunData {
         let config = &mut ro.det_opts.det_config;
         let target_seed = aopts.run1_seed.unwrap_or(config.seed);
         config.rng_seed.get_or_insert(target_seed);
+        // A spread's wake times are drawn from the scheduler seed, so every
+        // trial draws them from the target's.
+        if config.chaos_timed_wait_spread.is_some() {
+            config.sched_seed.get_or_insert(target_seed);
+        }
         config.fuzz_seed.get_or_insert(target_seed);
 
         ro.validate_args()?;
@@ -1895,7 +1909,18 @@ impl AnalyzeOpts {
             .det_opts
             .det_config
             .sleep_registration
-            .unwrap_or(SleepRegistration::WhenChosen)
+            .unwrap_or(
+                if RunData::get_raw_runopts(self)
+                    .det_opts
+                    .det_config
+                    .chaos_timed_wait_spread
+                    .is_some()
+                {
+                    SleepRegistration::FirstPass
+                } else {
+                    SleepRegistration::WhenChosen
+                },
+            )
     }
 
     /// Run every trial under one `--sleep-registration`: the run arguments'
@@ -1922,7 +1947,11 @@ impl AnalyzeOpts {
                 detcore::preemptions::read_recorded_queued_sleeps_registered_at_first_pass(path)
                     .map_err(anyhow::Error::msg)?
             }
-            None => false,
+            None => RunData::get_raw_runopts(self)
+                .det_opts
+                .det_config
+                .chaos_timed_wait_spread
+                .is_some(),
         };
         self.run_arg.push(format!(
             "--sleep-registration={}",
@@ -2061,6 +2090,16 @@ impl AnalyzeOpts {
                 recorded,
                 Some(self.trial_sleep_registration()),
                 true,
+            ) {
+                return Err(anyhow::Error::new(crate::container::PolicyRefusal).context(refusal));
+            }
+            let recorded = detcore::preemptions::read_recorded_timed_wait_spread(path)
+                .map_err(anyhow::Error::msg)?;
+            if let Some(refusal) = detcore::preemptions::timed_wait_spread_mismatch(
+                &format!("{option} {}", path.display()),
+                recorded,
+                config.chaos_timed_wait_spread,
+                None,
             ) {
                 return Err(anyhow::Error::new(crate::container::PolicyRefusal).context(refusal));
             }
@@ -2231,6 +2270,44 @@ mod tests {
     use clap::Parser;
 
     use super::*;
+
+    /// Under `--chaos-timed-wait-spread`, analyze searches only by prefix:
+    /// each trial replays the target's own schedule, with first-pass sleep
+    /// registration (the spread's default, which a schedule replay
+    /// reproduces) and the target's scheduler seed, which keys the spread's
+    /// factors. A bisection, whose trials mix two runs' schedules, is refused,
+    /// naming why and `--prefix-search`.
+    #[test]
+    fn analyze_searches_a_timed_wait_spread_run_only_by_prefix() {
+        use detcore_model::config::SleepRegistration;
+        let workspace = tempfile::tempdir().unwrap();
+        let parse = |extra: &[&str]| {
+            let mut argv = vec!["hermit", "analyze"];
+            argv.extend_from_slice(extra);
+            argv.extend(["--", "--chaos-timed-wait-spread=8", "/bin/true"]);
+            let args = crate::Args::try_parse_from(&argv).unwrap();
+            let crate::Subcommand::Analyze(mut options) = args.command else {
+                panic!("not analyze")
+            };
+            options.apply_global(&args.global);
+            options.tmp_dir = Some(workspace.path().to_path_buf());
+            options
+        };
+        let options = parse(&["--prefix-search", "--run1-seed=5"]);
+        let runopts = RunData::get_base_runopts(&options).unwrap();
+        assert_eq!(runopts.det_opts.det_config.sched_seed, Some(5));
+        assert_eq!(
+            options.trial_sleep_registration(),
+            SleepRegistration::FirstPass
+        );
+        let error =
+            RunData::get_base_runopts(&parse(&["--run1-seed=5", "--run2-seed=6"])).unwrap_err();
+        let error = format!("{error:#}");
+        assert!(
+            error.contains("keyed on the seed") && error.contains("Use --prefix-search"),
+            "{error}"
+        );
+    }
 
     /// The target run of `--run1-preemptions` replays a copy of the record in
     /// the workspace (the guest's container does not see the host's /tmp),
