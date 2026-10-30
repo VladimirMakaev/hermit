@@ -1572,7 +1572,9 @@ impl<T: RecordOrReplay> Detcore<T> {
             return thread_state.replayed_stopless_end == Some(end);
         }
         !self.cfg.replay_edited_preemptions
-            && thread_state.replay_rcb_end.is_none_or(|recorded| recorded == end)
+            && thread_state
+                .replay_rcb_end
+                .is_none_or(|recorded| recorded == end)
     }
 
     /// Update logical thread time with any outstanding ticks of the Reverie clock.  Returns a list
@@ -2090,22 +2092,28 @@ impl<T: RecordOrReplay> Detcore<T> {
             mycount,
             boundary_token,
         } = turn;
-        // Under `--pipe-wake-latency` or `--virtual-timeout`, a delivery
-        // that ends the process dooms its threads at this committed turn,
-        // before their host-timed removal (`Scheduler::thread_is_doomed`).
-        if (self.cfg.pipe_wake_latency_in_effect().is_some() || self.cfg.virtual_timeout.is_some())
-            && match crate::syscalls::signal_shadow::copied_dispositions_for(guest, signal.raw()) {
-                Some(copied) => crate::syscalls::default_action_ends_process(
-                    copied.ignored,
-                    copied.caught,
-                    signal.raw(),
-                ),
-                None => crate::syscalls::read_kernel_signal_state(guest.pid(), guest.tid())
-                    .is_ok_and(|state| state.default_action_ends_process(signal.raw())),
-            }
-        {
-            tool_global::record_fatal_signal(guest).await;
-        }
+        // A delivery that ends the process is committed in this turn
+        // (`Scheduler::commit_fatal_delivery`). Under `--pipe-wake-latency`
+        // the doom feeds the hand-off scan (`scheduler::pipe_wake`), and under
+        // `--virtual-timeout` its check (`Scheduler::thread_is_doomed`). Where the
+        // kernel's signal state is the guest's own (ptrace), the process's
+        // other threads also leave the scheduler now, as Linux kills them at
+        // this delivery, instead of at their host-timed exit reports. That
+        // needs the kernel to carry out the default action when it resumes
+        // this thread, as its signal state says now: the signal is unblocked
+        // (`ptrace_signal` requeues a blocked one) and no gdbserver client
+        // can change or cancel it at the resume.
+        let may_retire_others = crate::syscalls::retires_others_at_fatal_delivery(&self.cfg);
+        let retired_the_others = (may_retire_others
+            || self.cfg.pipe_wake_latency_in_effect().is_some()
+            || self.cfg.virtual_timeout.is_some())
+            && match crate::syscalls::fatal_default_delivery(guest, signal.raw(), may_retire_others)
+            {
+                Some(retire_others) => {
+                    tool_global::commit_fatal_delivery(guest, retire_others).await
+                }
+                None => false,
+            };
         // A timer entry's siginfo, with its overrun counted now that the
         // delivery's turn is granted, where the handler's time begins.
         if timer_entry {
@@ -2154,6 +2162,13 @@ impl<T: RecordOrReplay> Detcore<T> {
             "[dtid {}] finish delivering signal (#{}) {}",
             dettid, mycount, signal
         );
+        if retired_the_others {
+            // As an exit_group does after its grant, file nothing more: turn
+            // selection waits for the retired threads' deaths
+            // (`Scheduler::sigkill_fence_holds`), which only this delivery
+            // causes, so a request filed here would never be granted.
+            return Ok(Some(signal));
+        }
         self.record_handler_restore_mask(guest, signal).await;
 
         self.post_handler_hook_observed(guest, CheckIn::Event, boundary_token)
