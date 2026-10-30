@@ -1281,6 +1281,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // divergence names its store-exclusive retries): 1886.
     // And hermit-verify's split_branches
     // a_split_timer_stop_keeps_its_rip_on_the_second_half: 1883, listed.
+    // And hermit-verify's schedule_trace
+    // interpolate_refuses_schedules_recorded_under_different_cap_preemption_charges
+    // and an_interpolated_schedule_carries_its_inputs_cap_and_charge_rule: 1893.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3805,6 +3808,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_cpu_clock_names_only_tasks_linux_still_has): 2727, listed.
     // And cpu_clock::handler_tests'
     // timer_settime_on_a_timer_whose_thread_exited_is_esrch: 2728, listed.
+    // And scheduler's a_replayed_switch_wakes_its_due_target: 2737, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6586,6 +6590,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two aarch64 exclusive-loop units: 2741.
     // And the same five CPU-clock fix-forward units: 2727, listed.
     // And the same timer_settime ESRCH unit: 2728, listed.
+    // And the same replayed-switch wake unit: 2737, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -7325,6 +7330,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // rewrite tests on top add none here: 1868, listed.
     // And the same three store-exclusive cause units: 1872.
     // And the same split_branches unit: 1869, listed.
+    // And the same two interpolation units: 1879.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
