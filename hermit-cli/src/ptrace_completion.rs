@@ -15,6 +15,7 @@ use std::any::TypeId;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::BTreeMap;
+use std::ffi::CStr;
 use std::fmt;
 use std::fs::File;
 use std::future::Future;
@@ -322,19 +323,16 @@ impl std::error::Error for RecoveryRefusal {}
 struct OriginNumbers {
     thread: ThreadId,
     pid: u32,
-    namespace_dev: u64,
-    namespace_ino: u64,
+    namespace: PidNamespace,
 }
 impl OriginNumbers {
-    fn current() -> Result<(Self, File), RecoveryRefusal> {
-        let file = File::open("/proc/self/ns/pid").map_err(RecoveryRefusal::Identity)?;
-        let meta = file.metadata().map_err(RecoveryRefusal::Identity)?;
+    fn current() -> Result<(Self, Option<File>), RecoveryRefusal> {
+        let (namespace, file) = open_pid_namespace().map_err(RecoveryRefusal::Identity)?;
         Ok((
             Self {
                 thread: std::thread::current().id(),
                 pid: std::process::id(),
-                namespace_dev: meta.dev(),
-                namespace_ino: meta.ino(),
+                namespace,
             },
             file,
         ))
@@ -346,6 +344,100 @@ impl OriginNumbers {
         } else {
             Err(RecoveryRefusal::WrongIdentity)
         }
+    }
+}
+
+/// The PID namespace a process is in.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PidNamespace {
+    /// The device and inode of its `/proc/<pid>/ns/pid` file.
+    Inode(u64, u64),
+    /// The only one: a kernel built without PID namespaces (`CONFIG_PID_NS`
+    /// unset, as Android's kernels are) has one, which every process shares,
+    /// and its procfs lists no `ns/pid` entry.
+    Only,
+}
+
+/// The calling process's PID namespace, with its `ns/pid` file opened, which
+/// a caller holds while it records the namespace's identity so that no later
+/// namespace can take that identity (none where the kernel has only the one).
+/// An error when `/proc` cannot say.
+///
+/// Both lookups happen in the caller's own `ns` directory, held open and
+/// checked to be procfs, so neither a filesystem mounted over it nor a mount
+/// change between the lookups passes as a missing entry. A missing `pid`
+/// entry means the kernel has no PID namespaces only when the `mnt` entry,
+/// which every kernel lists, is there.
+pub(crate) fn open_pid_namespace() -> std::io::Result<(PidNamespace, Option<File>)> {
+    // A path handle (`O_PATH`), which needs only search permission: reading
+    // the directory needs the right to inspect its process, which a thread
+    // whose thread group leader has exited no longer has over the leader.
+    // SAFETY: the path is a C string, and a returned descriptor is owned here.
+    let fd = unsafe {
+        libc::open(
+            c"/proc/self/ns".as_ptr(),
+            libc::O_PATH | libc::O_DIRECTORY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just opened and nothing else owns it.
+    let directory = unsafe { File::from_raw_fd(fd) };
+    match open_entry(&directory, c"pid") {
+        Ok(file) => {
+            let meta = file.metadata()?;
+            Ok((PidNamespace::Inode(meta.dev(), meta.ino()), Some(file)))
+        }
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound
+                && is_procfs(&directory)
+                && has_entry(&directory, c"mnt") =>
+        {
+            Ok((PidNamespace::Only, None))
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Opens the entry `name` of `directory`.
+fn open_entry(directory: &File, name: &CStr) -> std::io::Result<File> {
+    // SAFETY: `name` is a C string, and a returned descriptor is owned here.
+    let fd = unsafe {
+        libc::openat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        )
+    };
+    if fd < 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `fd` was just opened and nothing else owns it.
+    Ok(unsafe { File::from_raw_fd(fd) })
+}
+
+/// Whether `directory` is on procfs.
+fn is_procfs(directory: &File) -> bool {
+    // SAFETY: an all-zero `statfs` is a valid value, and `fstatfs` writes only
+    // the struct it is given.
+    let mut fs: libc::statfs = unsafe { std::mem::zeroed() };
+    let found = unsafe { libc::fstatfs(directory.as_raw_fd(), &mut fs) } == 0;
+    found && fs.f_type == libc::PROC_SUPER_MAGIC
+}
+
+/// Whether `directory` has an entry `name`.
+fn has_entry(directory: &File, name: &CStr) -> bool {
+    // SAFETY: an all-zero `stat` is a valid value, `name` is a C string, and
+    // `fstatat` writes only the struct it is given.
+    let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+    unsafe {
+        libc::fstatat(
+            directory.as_raw_fd(),
+            name.as_ptr(),
+            &mut stat,
+            libc::AT_SYMLINK_NOFOLLOW,
+        ) == 0
     }
 }
 
@@ -545,7 +637,7 @@ struct Driver {
 struct Entry {
     key: u64,
     origin: OriginNumbers,
-    _namespace: File,
+    _namespace: Option<File>,
     original_process: OriginalProcess,
     result_type: TypeId,
     driver: RefCell<ManuallyDrop<Driver>>,
