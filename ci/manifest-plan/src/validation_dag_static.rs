@@ -3501,6 +3501,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // the_live_thread_group_is_the_tree_walk_less_exited_threads,
     // a_reused_thread_id_is_live_only_in_its_current_group and
     // a_former_leaders_id_reused_as_a_thread_joins_its_new_group: 2685, listed.
+    // And syscalls::binder's five units (return-command and object parsing
+    // for descriptors a binder read installs): 2700, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4926,6 +4928,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's no-namespace schedule replay test: 629.
     // And the --rewrite-exclusives refusal test under --no-namespace: 638.
     // And this change's CLI test: 638.
+    // And a_descriptor_received_in_a_binder_transaction_is_usable (skips
+    // where the kernel has no binder filesystem): 638.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5553,6 +5557,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same --no-namespace replay test: 547.
     // And the same test: 548.
     // And the same test: 557.
+    // And the same binder descriptor test, not excluded: 557.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6115,6 +6120,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same tests: 2709.
     // And the same test: 2696.
     // And the same three live-thread-group units: 2685, listed.
+    // And the same five binder parsing units: 2700, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
