@@ -2081,6 +2081,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the --no-namespace replay units
     // a_replayed_base_is_required_and_named_by_its_record and
     // no_namespace_replays_follow_only_records_whose_ids_were_chosen_alike: 1169 + 2 = 1171.
+    // And fifteen for the aarch64 exclusive-loop rewrite: thirteen in
+    // hermit-cli/src/aarch64_lse (the decoder, the four idioms and their
+    // refusals), one for the packed-relative-relocation decoder, and one
+    // that the rewrite flags survive into a printed reproducer: 1175,
+    // listed. Derived with this node's own selection: `cargo nextest list
+    // -p hermit-run --features third-party-backends,kvm-native-test-support
+    // --lib --bins` lists 1171, of which this node's `--skip` patterns
+    // remove 5 and one `#[ignore]` test is listed but never executed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -4908,6 +4916,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // no_namespace_concurrent_runs_take_different_windows: 627.
     // And no_namespace_preemption_records_replay_under_their_base: 628.
     // And this change's no-namespace schedule replay test: 629.
+    // And the --rewrite-exclusives refusal test under --no-namespace: 638.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5534,6 +5543,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same five --no-namespace chosen-ID tests, not excluded: 546.
     // And the same --no-namespace replay test: 547.
     // And the same test: 548.
+    // And the same test: 557.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6524,6 +6534,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same six --pid-base resolution units: 1154 + 6 = 1160.
     // And the same three units: 1160 + 3 = 1163.
     // And the same two --no-namespace replay units: 1163 + 2 = 1165.
+    // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1169.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
