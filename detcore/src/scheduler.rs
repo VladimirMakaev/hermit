@@ -4852,6 +4852,8 @@ impl Scheduler {
                             .map(|(tid, points)| (*tid, points.clone().into()))
                             .collect();
                         let poll_skips = record.poll_skips().to_vec();
+                        let background_starts = record.background_starts().to_vec();
+                        let notes_background_starts = record.notes_background_starts();
                         let vec = record.into_global();
                         trace!("Trace loaded, length {}", vec.len());
                         // Indices are schedule positions (`Replayer::stacktrace_position`),
@@ -4863,7 +4865,9 @@ impl Scheduler {
                             .iter()
                             .map(|(ix, path)| (*ix, None, path.clone()))
                             .collect();
-                        let mut replayer = Replayer::new(vec).with_poll_skips(&poll_skips);
+                        let mut replayer = Replayer::new(vec)
+                            .with_poll_skips(&poll_skips)
+                            .with_background_starts(&background_starts, notes_background_starts);
                         replayer.replay_exhausted_panic = cfg.replay_exhausted_panic;
                         replayer.die_on_desync = cfg.die_on_desync;
                         (Some(replayer), Some(toprint))
@@ -4971,6 +4975,14 @@ impl Scheduler {
                 )
                 .with_chaos_timeslice(cfg.chaos_timeslice)
                 .with_rewrite_exclusives_in_memory(cfg.rewrite_exclusives_in_memory);
+            // A legacy recording made without replaying a schedule notes every
+            // background start it takes; a schedule replay follows its record's
+            // starts, and a slice-boundary recording keeps none.
+            let writer = if cfg.replay_schedule_from.is_none() && !boundaries {
+                writer.noting_background_starts()
+            } else {
+                writer
+            };
             if boundaries {
                 writer
                     .with_slice_boundaries()
@@ -16230,6 +16242,55 @@ impl Scheduler {
         Err(SkipTurn)
     }
 
+    /// The scheduler just began `dettid`'s kernel-run call `call` (a BACKGROUND
+    /// commit). A recording notes the start after the events recorded so far
+    /// (`PreemptionWriter::insert_background_start`). A schedule replay
+    /// retires it if it is the recorded start due next, and then hands the
+    /// foreground to the thread the schedule runs next, as it does after a
+    /// recorded poll skip (`record_or_replay_poll_skip`). A start the replay
+    /// takes while another one is due is not the recording's: it is reported,
+    /// and the due one stays due until the next event shows it was not taken.
+    fn record_or_replay_background_start(&mut self, dettid: DetTid, call: u64) {
+        if !self.has_schedule_replay()
+            && let Some(writer) = &mut self.preemption_writer
+        {
+            writer.insert_background_start(dettid, call);
+        }
+        let Some(replayer) = self.replayer.as_mut() else {
+            return;
+        };
+        if !replayer.take_background_start(dettid, call) {
+            if replayer.records_background_starts() && replayer.has_events_left() {
+                tracing::warn!(
+                    "[tracereplay] [dtid {}] began its call {}, which the replayed record does not start here (start due: {:?})",
+                    dettid,
+                    call,
+                    replayer.pending_background_start()
+                );
+                if replayer.note_unrecorded_background_start(dettid) {
+                    immediate_fatal_exit();
+                }
+            }
+            return;
+        }
+        debug!(
+            "[dtid {}] took the recorded background start of call {}",
+            dettid, call
+        );
+        if let Some((next_tid, timeslice)) = replayer.next_resume()
+            && next_tid != dettid
+        {
+            self.requeue_with_new_priority(dettid, REPLAY_DEFERRED_PRIORITY);
+            self.requeue_with_new_priority(next_tid, REPLAY_FOREGROUND_PRIORITY);
+            self.wake_due_replay_target(next_tid);
+            self.note_replay_switch(dettid, next_tid, false);
+            self.timeslices.insert(next_tid, timeslice);
+        }
+        // A start after the schedule's last event may have been its last
+        // decision: then the replay is over, as at its last event.
+        self.release_replay_priorities_if_exhausted();
+    }
+
     /// The scheduler just skipped the polling thread `dettid`
     /// (`step4_resource_block`). A recording notes the skip after the events
     /// recorded so far (`PreemptionWriter::insert_poll_skip`). A schedule
@@ -16561,6 +16622,7 @@ impl Scheduler {
                 //   (2) Request a BlockedExternalContinue as the first thing after the external IO is complete.
                 self.run_queue.undo_tentative_pop(); // Begun in step3
                 assert!(self.run_queue.remove_tid(dettid)); // Deschedule while in background.
+                self.record_or_replay_background_start(dettid, op_id.sequence);
 
                 // TODO: Register the action that is occuring in the background:
                 // let act = self.new_action(Ivar::new());
@@ -17191,7 +17253,14 @@ impl Scheduler {
     /// is queued, since it goes first, and everything outside a schedule
     /// replay. Of several eligible turns, the one queued first goes first.
     fn replay_prehook_handoff(&self) -> Option<DetTid> {
-        if self.replay_prehook_callers.is_empty() {
+        // A record that notes every background start says when each call
+        // began (`record_or_replay_background_start`); none begins otherwise.
+        if self.replay_prehook_callers.is_empty()
+            || self
+                .replayer
+                .as_ref()
+                .is_some_and(Replayer::records_background_starts)
+        {
             return None;
         }
         let (next, _) = self.replay_next_resume()?;
@@ -19825,6 +19894,19 @@ impl Scheduler {
             None
         };
 
+        // Name the recorded background starts the replay never took.
+        if let Some(left) = self
+            .replayer
+            .as_ref()
+            .map(Replayer::unconsumed_background_starts)
+            .filter(|left| *left > 0)
+        {
+            let message = format!("DESYNC {left} recorded background starts were not taken");
+            tracing::warn!("{}", message);
+            desync_descrip
+                .get_or_insert_with(String::new)
+                .push_str(&format!("{message}\n"));
+        }
         // Legacy EOF policy does not make an unconsumed suffix fatal. Name
         // incomplete callback metadata separately; do not invent guest events.
         // A stopped run's replay is unfinished by definition.

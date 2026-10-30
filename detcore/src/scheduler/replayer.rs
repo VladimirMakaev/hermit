@@ -74,6 +74,20 @@ pub struct Replayer {
     /// The recorded poll skips due now, in order: those after the events
     /// consumed so far, until the scheduler takes them (`take_poll_skip`).
     pending_skips: VecDeque<DetTid>,
+    /// The recorded background starts not yet due, by how many events they
+    /// follow (`crate::preemptions::BackgroundStart`): thread and call.
+    background_starts: BTreeMap<u64, VecDeque<(DetTid, u64)>>,
+    /// The recorded background starts due now, in order, until the scheduler
+    /// takes them (`take_background_start`).
+    pending_starts: VecDeque<(DetTid, u64)>,
+    /// Whether the replayed record notes every background start
+    /// (`crate::preemptions::BACKGROUND_STARTS_FORMAT`), so that a call the
+    /// record does not start at a point did not start there.
+    records_background_starts: bool,
+    /// How many recorded events a fast-forward dropped unconsumed, so that
+    /// `events_popped + skipped` is the replay's position in the schedule,
+    /// which places the background starts.
+    skipped: u64,
 }
 
 /// The count of desyncs for a particular thread.
@@ -268,6 +282,10 @@ impl Replayer {
             events_popped: 0,
             poll_skips: BTreeMap::new(),
             pending_skips: VecDeque::new(),
+            background_starts: BTreeMap::new(),
+            pending_starts: VecDeque::new(),
+            records_background_starts: false,
+            skipped: 0,
             unmatched_run: 0,
             released: false,
         }
@@ -287,10 +305,107 @@ impl Replayer {
         self
     }
 
-    /// Make the poll skips recorded after the events consumed so far due.
+    /// The same replayer, with the background starts its record holds
+    /// (`crate::preemptions::BackgroundStart`): each becomes due once the
+    /// events it follows are consumed. `complete` says whether the record
+    /// notes every start (`records_background_starts`).
+    pub fn with_background_starts(
+        mut self,
+        starts: &[crate::preemptions::BackgroundStart],
+        complete: bool,
+    ) -> Self {
+        for start in starts {
+            self.background_starts
+                .entry(start.after)
+                .or_default()
+                .push_back((start.thread, start.call));
+        }
+        self.records_background_starts = complete;
+        self.queue_poll_skips();
+        self
+    }
+
+    /// Make the poll skips and background starts recorded after the events
+    /// consumed so far due.
     fn queue_poll_skips(&mut self) {
         if let Some(threads) = self.poll_skips.remove(&self.events_popped) {
             self.pending_skips.extend(threads);
+        }
+        let position = self.events_popped + self.skipped;
+        while let Some(entry) = self.background_starts.first_entry() {
+            if *entry.key() > position {
+                break;
+            }
+            self.pending_starts.extend(entry.remove());
+        }
+    }
+
+    /// A fast-forward dropped the next `dropped` recorded events. The starts
+    /// recorded among them, or after the last of them (before the event the
+    /// replay matched instead), are past: each counts a hard desync of its
+    /// thread and is dropped. The position moves past the dropped events.
+    fn retire_skipped_starts(&mut self, dropped: u64) -> usize {
+        let position = self.events_popped + self.skipped;
+        let past: Vec<u64> = self
+            .background_starts
+            .range(position + 1..=position + dropped)
+            .map(|(after, _)| *after)
+            .collect();
+        let mut retired = 0;
+        for after in past {
+            for (thread, call) in self.background_starts.remove(&after).unwrap_or_default() {
+                tracing::warn!(
+                    "[tracereplay] the recorded background start of thread {}'s call {} after event {} was fast-forwarded past",
+                    thread,
+                    call,
+                    after
+                );
+                self.desync_counts.entry(thread).or_default().hard += 1;
+                retired += 1;
+            }
+        }
+        self.skipped += dropped;
+        retired
+    }
+
+    /// How many recorded background starts the replay has not taken.
+    pub(super) fn unconsumed_background_starts(&self) -> usize {
+        self.pending_starts.len()
+            + self
+                .background_starts
+                .values()
+                .map(VecDeque::len)
+                .sum::<usize>()
+    }
+
+    /// The scheduler began `thread`'s call with no recorded start of it due,
+    /// in a replay of a record that notes every start, within the schedule: a
+    /// hard desync of `thread`. Whether the replay must stop.
+    pub(super) fn note_unrecorded_background_start(&mut self, thread: DetTid) -> bool {
+        self.desync_counts.entry(thread).or_default().hard += 1;
+        self.die_on_desync
+    }
+
+    /// The thread and call of the background start the recording took next,
+    /// if one is due: a decision before the schedule's next event.
+    pub(super) fn pending_background_start(&self) -> Option<(DetTid, u64)> {
+        self.pending_starts.front().copied()
+    }
+
+    /// Whether the replayed record notes every background start
+    /// (`records_background_starts`).
+    pub(super) fn records_background_starts(&self) -> bool {
+        self.records_background_starts
+    }
+
+    /// The scheduler began `thread`'s kernel-run call `call`. Whether that was
+    /// the recorded background start due next, which it then retires.
+    pub(super) fn take_background_start(&mut self, thread: DetTid, call: u64) -> bool {
+        if self.pending_starts.front() == Some(&(thread, call)) {
+            self.pending_starts.pop_front();
+            true
+        } else {
+            false
         }
     }
 
@@ -414,6 +529,10 @@ impl Replayer {
         if let Some(tid) = self.pending_poll_skip() {
             return Some((tid, None));
         }
+        // So does a recorded background start: its turn runs no guest code.
+        if let Some((tid, _)) = self.pending_background_start() {
+            return Some((tid, None));
+        }
         self.cursor.peek().map(|next| {
             (
                 next.dettid,
@@ -452,6 +571,8 @@ impl Replayer {
     /// end the run goes on unguided (`ReplayAction::Continue`).
     pub(super) fn has_events_left(&self) -> bool {
         self.cursor.peek().is_some()
+            || !self.pending_starts.is_empty()
+            || !self.background_starts.is_empty()
     }
 
     fn next_replay_matches(&self, observed: &SchedEvent) -> bool {
@@ -476,6 +597,22 @@ impl Replayer {
                 mytid, self.pending_skips, current_ix
             );
             self.pending_skips.clear();
+        }
+        // Likewise the recording began its due background starts before this
+        // event. One still due means the call the recording began here is not
+        // waiting to begin, so the replay has left its recording.
+        if !self.pending_starts.is_empty() {
+            tracing::warn!(
+                "[tracereplay] the recorded background starts (thread, call) {:?} before event #{} were not taken; the replay has left its recording",
+                self.pending_starts,
+                current_ix
+            );
+            for (thread, _) in std::mem::take(&mut self.pending_starts) {
+                self.desync_counts.entry(thread).or_default().hard += 1;
+            }
+            if self.die_on_desync {
+                return ReplayAction::Stop(StopReason::FatalDesync);
+            }
         }
         if self.cursor.is_empty() && self.exhausted_from.is_none() {
             self.exhausted_from = Some(current_ix);
@@ -533,6 +670,11 @@ impl Replayer {
                 // This counts DELETIONS (missing events from observed stream):
                 let counts = self.desync_counts.entry(mytid).or_default();
                 counts.resync_deletions += 1;
+                // The background starts recorded among the dropped events were
+                // missed, before the matched event is accepted.
+                if self.retire_skipped_starts(ix as u64) > 0 && self.die_on_desync {
+                    return ReplayAction::Stop(StopReason::FatalDesync);
+                }
                 in_hard_desync_mode = false;
                 // is_desync = false; // Logically correct, but... unused_assignments
             }
@@ -605,6 +747,8 @@ impl Replayer {
         let dropped = self.cursor.by_ref().count();
         self.poll_skips.clear();
         self.pending_skips.clear();
+        self.background_starts.clear();
+        self.pending_starts.clear();
         self.released = true;
         tracing::warn!(
             "[tracereplay] {} observed events in a row, through event #{}, matched none of the replayed schedule's next event; the replay no longer follows the schedule ({} recorded events left unreplayed)",
@@ -683,7 +827,21 @@ impl Replayer {
     /// grant), and an unmatched head names no end of this thread's.
     fn check_context_switch(&mut self, observed: &SchedEvent, matched: bool) -> ReplayAction {
         // We run after the pop of any matched action, so the next action in replay represents the
-        // FUTURE not the PRESENT/PAST:
+        // FUTURE not the PRESENT/PAST. A recorded background start after the
+        // last event is still the schedule's next decision.
+        if self.cursor.peek().is_none()
+            && let Some((thread, _)) = self.pending_background_start()
+        {
+            return if thread != observed.dettid {
+                let is_prehook = matches!(
+                    observed.op,
+                    Op::Syscall(_, SyscallPhase::Prehook | SyscallPhase::Polling)
+                );
+                ReplayAction::ContextSwitch(!is_prehook, thread, None)
+            } else {
+                ReplayAction::Continue(None)
+            };
+        }
         if let Some(next_ev) = self.cursor.peek() {
             let mytid = observed.dettid;
             let time = observed.end_time.expect("timestamps required for now");
@@ -701,7 +859,9 @@ impl Replayer {
             // A recorded poll skip due now is the schedule's next decision: its
             // thread runs next only to be skipped (`take_poll_skip`), so the
             // next event's slice length waits until then.
-            let pending_skip = self.pending_poll_skip();
+            let pending_skip = self
+                .pending_poll_skip()
+                .or_else(|| self.pending_background_start().map(|(thread, _)| thread));
             let next_tid = pending_skip.unwrap_or(next_ev.dettid);
             // Checking for an optional timeslice in case of RCB
             let timeslice = if pending_skip.is_some() {
