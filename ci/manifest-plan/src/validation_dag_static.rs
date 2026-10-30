@@ -2217,6 +2217,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // chaos_timeslice::tests::the_fallback_is_at_least_one_rcb and
     // run::preemption_tests::seeded_replays_and_baseline_keep_a_minimum_above_the_default:
     // 1162, listed (1160 on main plus two).
+    // And error::tests::replay_departure_is_serialized_with_its_count and
+    // tests::replay_departure_uses_the_policy_refusal_exit_and_its_own_cause
+    // (a preemption replay that left its record refuses with its own cause),
+    // and tests::a_replay_departure_refuses_through_the_verify_path: 1163,
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3747,6 +3751,16 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // armed thread, replay transitions) and preemptions'
     // the_post_crash_switch_round_trips_and_a_replay_takes_the_recorded_bound:
     // 2710, listed.
+    // And the replay-departure units: tool_local's
+    // a_replay_far_past_a_recorded_slice_end_is_a_departure,
+    // a_replay_overshoot_is_a_skid_only_within_the_bound_with_its_time_agreeing
+    // and a_replay_departure_panics_when_asked_to, scheduler's
+    // a_replay_departure_is_named_with_its_turn_and_event and preemptions'
+    // a_departed_replays_record_says_it_is_not_exact, and scheduler's
+    // strict_schedule_boundaries_refuse_a_preemption_replay: 2712, listed.
+    // And tool_global's
+    // a_replay_departure_beside_a_request_is_named_as_it_arrives: 2713,
+    // listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6501,6 +6515,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same published-offset unit: 2731.
     // And the same two summarized-desync position units: 2696.
     // And the same fifteen post-crash units: 2710, listed.
+    // And the same six replay-departure units: 2712, listed.
+    // And the same departure-beside-a-request unit: 2713, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6976,6 +6992,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three trial-guest-random-seed units: 1157.
     // And the same two --chaos-seeded-timeslice fallback units: 1156, listed
     // (1154 on main plus two).
+    // And the same three replay-departure units: 1157, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

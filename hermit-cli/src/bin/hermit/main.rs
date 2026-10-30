@@ -963,7 +963,11 @@ fn failure_exit_code(error: &Error) -> i32 {
     // vouch for the result, so it uses the same coarse exit class as other
     // policy refusals; the verification receipt carries the finer cause and
     // count.
-    if error.downcast_ref::<hermit::SkidOvershootError>().is_some() {
+    if error.downcast_ref::<hermit::SkidOvershootError>().is_some()
+        || error
+            .downcast_ref::<hermit::ReplayDepartureError>()
+            .is_some()
+    {
         return detcore_model::HERMIT_POLICY_REFUSAL_EXIT;
     }
     // ⚠️ A REFUSAL IS NOT A FAILURE, AND IT IS CHECKED FIRST FOR THAT REASON.
@@ -1022,6 +1026,12 @@ fn failure_exit_code(error: &Error) -> i32 {
 }
 
 fn classify_failure(error: &Error) -> String {
+    if let Some(departure) = error.downcast_ref::<hermit::ReplayDepartureError>() {
+        return format!(
+            "HERMIT_POLICY_REFUSAL class=policy-refusal cause=replay-departure count={}",
+            departure.count()
+        );
+    }
     if let Some(overshoot) = error.downcast_ref::<hermit::SkidOvershootError>() {
         return format!(
             "HERMIT_POLICY_REFUSAL class=policy-refusal cause=skid-overshoot count={}",
@@ -2142,6 +2152,22 @@ mod tests {
         assert_eq!(
             classify_failure(&prose),
             "HERMIT_INTERNAL_FAILURE class=cli-error"
+        );
+    }
+
+    /// A replay that left its record refuses with the same exit class and its
+    /// own cause, ahead of any skid in the same chain.
+    #[test]
+    fn replay_departure_uses_the_policy_refusal_exit_and_its_own_cause() {
+        let error = Error::new(hermit::SkidOvershootError::new(1))
+            .context(hermit::ReplayDepartureError::new(3));
+        assert_eq!(
+            failure_exit_code(&error),
+            detcore_model::HERMIT_POLICY_REFUSAL_EXIT
+        );
+        assert_eq!(
+            classify_failure(&error),
+            "HERMIT_POLICY_REFUSAL class=policy-refusal cause=replay-departure count=3"
         );
     }
 

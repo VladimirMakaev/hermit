@@ -560,6 +560,11 @@ mod tests {
                 "HERMIT_POLICY_REFUSAL class=policy-refusal cause=skid-overshoot count=7",
             ),
             (
+                hermit::FailureKind::ReplayDeparture { count: 4 },
+                122,
+                "HERMIT_POLICY_REFUSAL class=policy-refusal cause=replay-departure count=4",
+            ),
+            (
                 hermit::FailureKind::RunTimeout,
                 124,
                 "HERMIT_RUN_TIMEOUT class=run-timeout",

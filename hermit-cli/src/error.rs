@@ -47,6 +47,10 @@ pub enum FailureKind {
     /// carried across the container boundary so the parent can publish the
     /// named infrastructure error instead of leaving the pending no-result.
     SkidOvershoot { count: u64 },
+    /// A preemption replay left its record (`detcore::replay_departure`):
+    /// the count of departures it detected crosses the container boundary as
+    /// the skid count does, so the parent publishes the named refusal.
+    ReplayDeparture { count: u64 },
     /// The child stopped because HERMIT'S OWN `--timeout` BOUND was reached.
     ///
     /// ⚠️ THE SAME ARGUMENT A THIRD TIME, and it is not hypothetical: measured
@@ -233,7 +237,11 @@ fn classify_unwrapped(error: &Error) -> FailureKind {
     if let Some(primary) = finalization_primary(error) {
         return classify_preserving_cleanup(primary).0;
     }
-    if let Some(error) = error.downcast_ref::<crate::SkidOvershootError>() {
+    if let Some(error) = error.downcast_ref::<crate::ReplayDepartureError>() {
+        FailureKind::ReplayDeparture {
+            count: error.count(),
+        }
+    } else if let Some(error) = error.downcast_ref::<crate::SkidOvershootError>() {
         FailureKind::SkidOvershoot {
             count: error.count(),
         }
@@ -480,6 +488,13 @@ mod tests {
                 .map(ToString::to_string)
                 .collect::<Vec<String>>(),
         )
+    }
+
+    #[test]
+    fn replay_departure_is_serialized_with_its_count() {
+        let refusal = SerializableError::from(Error::new(crate::ReplayDepartureError::new(3)));
+        assert_eq!(refusal.kind(), FailureKind::ReplayDeparture { count: 3 });
+        assert!(refusal.error.contains("observed 3 HERMIT_REPLAY_DEPARTED"));
     }
 
     #[test]

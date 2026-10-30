@@ -2445,6 +2445,11 @@ pub struct Scheduler {
     /// Whether the run replays a preemption record (`--replay-preemptions-from`),
     /// whose threads can diverge from it ([`Scheduler::perform_priority_changepoint`]).
     replays_preemptions: bool,
+    /// Under a preemption replay, where it first left its record, with the
+    /// global event named ([`Scheduler::note_replay_departure`]).
+    replay_departure: Option<detcore_model::summary::ReplayDepartureSummary>,
+    /// Under a preemption replay, how many times it was found off its record.
+    replay_departures: u64,
     /// Fixed by recording configuration or the loaded legacy annotations,
     /// never by whether the mutable per-thread checkpoint queues are empty.
     pub(crate) callback_history_active: bool,
@@ -4800,26 +4805,52 @@ enum ThreadStatus {
 
 /// Reports a preemption replay's change point for `dettid` at `time`, not
 /// after its last recorded one at `last` ([`Scheduler::perform_priority_changepoint`]):
-/// a skid overshoot, counted where every overshoot is
-/// (`reverie::record_skid_overshoot`) so the run ends in the skid-overshoot
-/// policy refusal, and named with `reverie::SKID_OVERSHOOT_MARKER`. One
-/// departure from the record can be detected both here and where the replay
-/// passes a recorded end (`report_replay_slice_overshoot` in tool_local), so
-/// the refusal's count is of detections, as it already is for the timer's
-/// own overshoot check, not of distinct departures.
+/// a departure from the record (no timer skid closes a slice with no time in
+/// it), counted with the others (`crate::replay_departure::record`) so the run
+/// ends in the replay-departure policy refusal, and named with
+/// [`crate::replay_departure::REPLAY_DEPARTED_MARKER`]. One departure can be
+/// detected both here and where the replay passes a recorded end
+/// (tool_local's `report_replay_departure`), so the refusal's count is of
+/// detections, not of distinct departures.
 #[cold]
 fn report_stale_replay_change_point(dettid: DetTid, time: LogicalTime, last: LogicalTime) {
-    reverie::record_skid_overshoot();
+    crate::replay_departure::record();
     tracing::error!(
         "{} preemption replay: thread {} changed priority at {}, not after its last change \
          point at {}: a slice closed at the instant the last one did, which the replayed \
          record never does. The change point is left out of the new record; the rest of this \
          run does not replay the record exactly.",
-        reverie::SKID_OVERSHOOT_MARKER,
+        crate::replay_departure::REPLAY_DEPARTED_MARKER,
         dettid,
         time,
         last,
     );
+}
+
+/// Warns, once per process (`--verify` builds two schedulers), when the record
+/// a run replays was written by a replay that left change points out of it
+/// ([`crate::preemptions::PreemptionRecord::replay_departed_at`]): it is not a
+/// complete record of any run, so this replay cannot reproduce one.
+fn warn_if_replaying_an_inexact_record(cfg: &Config) {
+    static WARNED: std::sync::Once = std::sync::Once::new();
+    if WARNED.is_completed() {
+        return;
+    }
+    for path in [&cfg.replay_preemptions_from, &cfg.replay_schedule_from]
+        .into_iter()
+        .flatten()
+    {
+        if let Ok(Some(event)) = crate::preemptions::read_recorded_replay_departure(path) {
+            WARNED.call_once(|| ());
+            tracing::warn!(
+                "{} was written by a preemption replay that left the record it replayed (first at \
+                 global event {}); it is not an exact record of any run, so this replay does not \
+                 reproduce one",
+                path.display(),
+                event
+            );
+        }
+    }
 }
 
 fn validate_strict_boundary_config(cfg: &Config) -> Result<(), &'static str> {
@@ -5169,7 +5200,12 @@ impl Scheduler {
             priority_rows: BTreeMap::new(),
             priority_births: BTreeSet::new(),
             replayer,
-            replays_preemptions: cfg.replay_preemptions_from.is_some(),
+            replays_preemptions: {
+                warn_if_replaying_an_inexact_record(cfg);
+                cfg.replay_preemptions_from.is_some()
+            },
+            replay_departure: None,
+            replay_departures: 0,
             boundary_replayer,
             boundary_stacktrace_events,
             recorded_host_inputs,
@@ -17592,6 +17628,44 @@ impl Scheduler {
     /// Postcondition: Same as block_for_one_resource. However, always returns SkipTurn, because the
     /// priority changepoint may not allow the current thread to continue in a regular turn (i.e.
     /// doing actual work).
+    /// Under a preemption replay, `dettid` was found off its record
+    /// (`departure`): named with the scheduler turn and, where it records a new
+    /// preemption file, the global event it left at (the number of global
+    /// events recorded so far, a record's `global` index), kept if it is the
+    /// run's first, and counted (skids and departures alike).
+    pub(crate) fn note_replay_departure(
+        &mut self,
+        dettid: DetTid,
+        departure: crate::tool_local::ReplayDeparture,
+    ) {
+        let event = self
+            .preemption_writer
+            .is_some()
+            .then_some(self.recorded_event_count);
+        self.replay_departures += 1;
+        if self.replay_departure.is_none() {
+            tracing::error!(
+                "preemption replay: thread {} was first found off its record at scheduler turn {}{} ({:?})",
+                dettid,
+                self.turn,
+                event.map_or_else(String::new, |event| format!(", global event {event}")),
+                departure.kind
+            );
+            self.replay_departure = Some(detcore_model::summary::ReplayDepartureSummary {
+                event,
+                turn: self.turn,
+                dtid: dettid.as_raw(),
+                slice: departure.slice,
+                kind: departure.kind,
+                recorded_rcbs: departure.recorded_rcbs,
+                rcbs: departure.rcbs,
+                recorded_ns: departure.recorded_ns,
+                ns: departure.ns,
+                passed: departure.passed,
+            });
+        }
+    }
+
     fn perform_priority_changepoint(
         &mut self,
         dettid: DetTid,
@@ -17617,6 +17691,8 @@ impl Scheduler {
         // Alter the threads priority and requeue.
         let old_priority = self.priorities.insert(dettid, new_priority);
 
+        let event = self.recorded_event_count;
+        let mut stale = None;
         // Do not attempt to record preemptions/priorities when we're dictated by a raw schedule replay.
         if !self.has_schedule_replay()
             && let Some(pw) = &mut self.preemption_writer
@@ -17645,6 +17721,8 @@ impl Scheduler {
             {
                 Some(last) if self.replays_preemptions => {
                     report_stale_replay_change_point(dettid, guest_time, last);
+                    pw.mark_replay_departed(event);
+                    stale = Some(last);
                 }
                 _ => {
                     for transition in chaos_epochs {
@@ -17661,6 +17739,20 @@ impl Scheduler {
                 }
             }
             pw.set_current(dettid, new_priority);
+        }
+        if let Some(last) = stale {
+            self.note_replay_departure(
+                dettid,
+                crate::tool_local::ReplayDeparture {
+                    slice: None,
+                    kind: detcore_model::summary::ReplayDepartureKind::Departure,
+                    recorded_rcbs: None,
+                    rcbs: guest_rcbs,
+                    recorded_ns: last.as_nanos(),
+                    ns: guest_time.as_nanos(),
+                    passed: 0,
+                },
+            );
         }
 
         let popped = self.run_queue.commit_tentative_pop(); // Begun in step3.
@@ -20344,6 +20436,9 @@ impl Scheduler {
                 sched_turns: self.turn,
                 schedevent_replayed,
                 schedevent_recorded: self.recorded_event_count,
+                replay_departure: self.replay_departure.clone(),
+                replay_departures: self.replay_departures,
+                guest_exit: None,
                 schedevent_desynced: total_desyncs,
                 // schedevent_desynced_at_context_switch: total_desyncs.at_context_switch,
                 desync_descrip,
@@ -32616,6 +32711,85 @@ mod test {
     /// timeout cleanup tripped `&time > last` on its stalled second one).
     /// The scheduler and the re-recording writer, on a run that replays a
     /// preemption record and records a new one.
+    /// A departure handed to the scheduler is named with the turn and, where
+    /// the replay records a new preemption file, the global event count; the
+    /// first is kept and every one counted; the new record says it is not an
+    /// exact one.
+    #[test]
+    fn a_replay_departure_is_named_with_its_turn_and_event() {
+        let departure = crate::tool_local::ReplayDeparture {
+            slice: Some(3),
+            kind: detcore_model::summary::ReplayDepartureKind::Departure,
+            recorded_rcbs: Some(40),
+            rcbs: 1_081,
+            recorded_ns: 400,
+            ns: 10_810,
+            passed: 1,
+        };
+        let cfg = Config {
+            replay_preemptions_from: Some(PathBuf::from("history.json")),
+            ..Config::default()
+        };
+        let mut scheduler = Scheduler::new(&cfg);
+        scheduler.note_replay_departure(DetTid::from_raw(5), departure);
+        scheduler.note_replay_departure(DetTid::from_raw(6), departure);
+        let first = scheduler.replay_departure.clone().unwrap();
+        assert_eq!((first.event, first.dtid, first.slice), (None, 5, Some(3)));
+        assert_eq!(
+            (first.rcbs, first.recorded_rcbs, first.passed),
+            (1_081, Some(40), 1)
+        );
+        assert_eq!(scheduler.replay_departures, 2);
+
+        // Naming one does not mark the new record: it still records what
+        // this run did.
+        let (mut scheduler, spinner) = replaying_and_recording_spinner(true);
+        scheduler.recorded_event_count = 7;
+        scheduler.note_replay_departure(spinner, departure);
+        assert_eq!(scheduler.replay_departure.as_ref().unwrap().event, Some(7));
+        let written = scheduler.preemption_writer.take().unwrap().into_string();
+        let record: crate::preemptions::PreemptionRecord = serde_json::from_str(&written).unwrap();
+        assert_eq!(record.replay_departed_at(), None);
+
+        // A change point left out of it does mark it, and is named as a
+        // departure.
+        let (mut scheduler, spinner) = replaying_and_recording_spinner(true);
+        scheduler.recorded_event_count = 9;
+        spinner_changepoint(&mut scheduler, spinner, DEFAULT_PRIORITY + 1, 500);
+        spinner_changepoint(&mut scheduler, spinner, DEFAULT_PRIORITY + 2, 500);
+        let named = scheduler.replay_departure.clone().unwrap();
+        assert_eq!(
+            (named.event, named.kind, named.slice),
+            (
+                Some(9),
+                detcore_model::summary::ReplayDepartureKind::Departure,
+                None
+            )
+        );
+        let written = scheduler.preemption_writer.take().unwrap().into_string();
+        let record: crate::preemptions::PreemptionRecord = serde_json::from_str(&written).unwrap();
+        assert_eq!(record.replay_departed_at(), Some(9));
+    }
+
+    /// A preemption replay never runs with strict schedule boundaries: the
+    /// pair is refused before the scheduler exists, so a replay that leaves
+    /// its record never drops a boundary observation (S1 files nothing at a
+    /// stale change point).
+    #[test]
+    fn strict_schedule_boundaries_refuse_a_preemption_replay() {
+        let cfg = Config {
+            strict_schedule_boundaries: true,
+            sequentialize_threads: true,
+            record_preemptions: true,
+            replay_preemptions_from: Some(PathBuf::from("history.json")),
+            ..Config::default()
+        };
+        assert_eq!(
+            validate_strict_boundary_config(&cfg),
+            Err("--strict-schedule-boundaries cannot be combined with --replay-preemptions-from")
+        );
+    }
+
     fn replaying_and_recording_spinner(replays: bool) -> (Scheduler, DetTid) {
         let cfg = Config {
             chaos: true,

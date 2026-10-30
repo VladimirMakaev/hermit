@@ -195,10 +195,6 @@ pub struct PostCrashSummary {
     pub recorded_not_taken: usize,
 }
 
-fn is_zero_u64(count: &u64) -> bool {
-    *count == 0
-}
-
 fn is_zero(count: &usize) -> bool {
     *count == 0
 }
@@ -246,6 +242,54 @@ impl fmt::Display for PostCrashSummary {
         }
         Ok(())
     }
+}
+
+/// How a preemption replay was found past a recorded slice end.
+#[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayDepartureKind {
+    /// The thread's own timer overshot at that stop: it was stopped late (a
+    /// skid), however far past.
+    Skid,
+    /// Anything else: the replay's thread left its record.
+    Departure,
+}
+
+/// Where a preemption replay first left its record, and how.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+pub struct ReplayDepartureSummary {
+    /// The global schedule event it was reported at: the thread's next
+    /// resource request after it left its record, which for a departure found
+    /// at a slice's end is the change point it files there. It is how many
+    /// global events the run had recorded, the index of the same event in the
+    /// record's and the new record's `global` arrays. `None` unless the replay
+    /// records a new preemption file (`--record-preemptions-to`), the only
+    /// place those events are counted.
+    pub event: Option<u64>,
+    /// The scheduler turn it was reported at, as for `event`.
+    pub turn: u64,
+    /// The thread that left it.
+    pub dtid: i32,
+    /// The thread's slice number at the departure; `None` where it was found
+    /// at a change point rather than a slice's start.
+    pub slice: Option<u64>,
+    /// Skid or departure.
+    pub kind: ReplayDepartureKind,
+    /// The recorded slice end's retired conditional branches, when the
+    /// record has them.
+    pub recorded_rcbs: Option<u64>,
+    /// The thread's retired conditional branches there.
+    pub rcbs: u64,
+    /// The recorded slice end's time, in virtual nanoseconds.
+    pub recorded_ns: u64,
+    /// The thread's time there, in virtual nanoseconds.
+    pub ns: u64,
+    /// How many recorded slice ends the thread had passed.
+    pub passed: u64,
+}
+
+fn is_zero_u64(count: &u64) -> bool {
+    *count == 0
 }
 
 /// Statistics that summarize a hermit run.
@@ -487,6 +531,24 @@ pub struct RunSummary {
     /// were none, and from summaries written before it existed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub desync_notes: Vec<DesyncNote>,
+
+    /// Under a preemption replay, where it first left its record, if it did.
+    /// Not part of the human-readable summary, whose INFO view `--verify`
+    /// compares.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay_departure: Option<ReplayDepartureSummary>,
+    /// Under a preemption replay, how many times it was found off its record,
+    /// skids and departures alike (the refusal's `count=` counts only the
+    /// kind it names).
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub replay_departures: u64,
+    /// The guest's own exit status, where Hermit's exit status is a refusal
+    /// instead (a preemption replay that left its record): the raw wait
+    /// status. Filled by `hermit run` with `--summary-json` (ptrace and the
+    /// other in-process backends), not by `--verify`, whose receipt carries
+    /// each run's own outcome.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_exit: Option<i32>,
 }
 
 /// The seeds a schedule replay adopted from its recording: each is `Some`
@@ -798,6 +860,9 @@ impl RunSummary {
             seed_reproducible: _,
             watch,
             desync_notes: _,
+            replay_departure: _,
+            replay_departures: _,
+            guest_exit: _,
         } = self;
         if let Some(bound) = run_timeout_secs {
             writeln!(

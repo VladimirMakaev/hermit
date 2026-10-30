@@ -2662,6 +2662,71 @@ impl std::fmt::Display for SkidOvershootError {
 
 impl std::error::Error for SkidOvershootError {}
 
+/// A preemption replay left its record (`detcore::replay_departure`): its
+/// thread was found past a recorded slice end without its own timer having
+/// overshot that far, or with its time disagreeing. Hermit refuses to present
+/// the run as a replay of its record, whatever the skid-overshoot policy; the
+/// guest's own exit status is kept, for `--summary-json`
+/// (`RunSummary::guest_exit`).
+///
+/// A type rather than a message match, for the same reason as
+/// [`SkidOvershootError`]: it crosses the container error boundary
+/// ([`error::FailureKind::ReplayDeparture`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayDepartureError {
+    count: u64,
+}
+
+impl ReplayDepartureError {
+    pub fn new(count: u64) -> Self {
+        assert!(
+            count > 0,
+            "a replay-departure refusal requires a positive count"
+        );
+        Self { count }
+    }
+
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+}
+
+impl std::fmt::Display for ReplayDepartureError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "observed {} {} report(s); refusing the result because the preemption replay left \
+             the record it replays, so it is not a replay of that record",
+            self.count,
+            detcore::replay_departure::REPLAY_DEPARTED_MARKER
+        )
+    }
+}
+
+impl std::error::Error for ReplayDepartureError {}
+
+/// Writes the guest's own exit status into a written `--summary-json`, where
+/// Hermit's exit status is a refusal instead. Best effort: a summary that
+/// cannot be read or written keeps the refusal, with a warning.
+fn record_guest_exit_in_summary(summary_json: &Option<PathBuf>, status: ExitStatus) {
+    let Some(path) = summary_json else {
+        return;
+    };
+    let result = (|| -> Result<(), Error> {
+        let mut summary: detcore_model::summary::RunSummary =
+            serde_json::from_slice(&std::fs::read(path)?)?;
+        summary.guest_exit = Some(status.into_raw());
+        std::fs::write(path, serde_json::to_string_pretty(&summary)? + "\n")?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        tracing::warn!(
+            "could not record the guest's exit status in {}: {error:#}",
+            path.display()
+        );
+    }
+}
+
 /// What a run does with its result when its precise PMU timers reported a
 /// skid overshoot: a preemption point that took effect past the branch count
 /// it was programmed for, because the overflow interrupt was handled late.
@@ -2761,6 +2826,9 @@ fn write_stderr_after_run(message: &str) {
 
 impl SkidOvershootReport {
     fn begin(enabled: bool) -> Self {
+        // A previous invocation in this process must not qualify this one.
+        // Departures are Detcore's own count, whatever the timer.
+        let _ = detcore::replay_departure::take_count();
         if enabled {
             // A previous invocation in this process must not qualify this one.
             let _ = SkidOvershoots::take();
@@ -2776,12 +2844,58 @@ impl SkidOvershootReport {
         }
     }
 
+    /// A replay departure this run reported, which outranks a skid: both
+    /// refuse, and a departure names the replay leaving its record rather
+    /// than the timer, under either policy. Taking it also drops this run's
+    /// skid reports.
+    fn departure(&self) -> Option<ReplayDepartureError> {
+        let departures = detcore::replay_departure::take_count();
+        (departures > 0).then(|| {
+            if self.enabled {
+                let _ = SkidOvershoots::take();
+            }
+            ReplayDepartureError::new(departures)
+        })
+    }
+
     fn finish<T>(self, result: Result<T, Error>, policy: SkidOvershootPolicy) -> Result<T, Error> {
+        if let Some(departure) = self.departure() {
+            return match result {
+                Ok(_) => Err(Error::new(departure)),
+                Err(error) => Err(error.context(departure)),
+            };
+        }
         self.take().apply(result, policy)
     }
 
-    /// Returns the reports, as a refusal counts them.
+    /// [`Self::finish`] for a run that produced the guest's exit status: when a
+    /// refusal replaces it, the status goes into `--summary-json`
+    /// (`RunSummary::guest_exit`), so it is not lost.
+    fn finish_status(
+        self,
+        result: Result<ExitStatus, Error>,
+        policy: SkidOvershootPolicy,
+        summary_json: &Option<PathBuf>,
+    ) -> Result<ExitStatus, Error> {
+        let status = result.as_ref().ok().copied();
+        let finished = self.finish(result, policy);
+        if let (Some(status), Err(_)) = (status, &finished) {
+            record_guest_exit_in_summary(summary_json, status);
+        }
+        finished
+    }
+
+    /// Returns the reports, as a refusal counts them. A departure refuses
+    /// here too, ahead of any skid, as in `finish`: `--verify` reports through
+    /// this path, and must not compare a replay that left its record as if it
+    /// were one.
     fn finish_with_count<T>(self, result: Result<T, Error>) -> Result<(T, u64), Error> {
+        if let Some(departure) = self.departure() {
+            return match result {
+                Ok(_) => Err(Error::new(departure)),
+                Err(error) => Err(error.context(departure)),
+            };
+        }
         let count = self.take().counts.reports;
         match result {
             Ok(value) => Ok((value, count)),
@@ -4835,7 +4949,7 @@ pub fn run_with_backend_timeout(
                 Some(control),
             )
             .await;
-            report.finish(result, skid_overshoots)
+            report.finish_status(result, skid_overshoots, &summary_path)
         });
     }
     let skid_overshoot_report = SkidOvershootReport::begin(backend.uses_ptrace_pmu_timers());
@@ -4851,7 +4965,7 @@ pub fn run_with_backend_timeout(
         backend,
         timeout,
     );
-    skid_overshoot_report.finish(result, skid_overshoots)
+    skid_overshoot_report.finish_status(result, skid_overshoots, print_summary_to_json_file)
 }
 
 // TODO-HUMAN-REVIEW(PR-749): Review LiteInst backend configuration normalization.
@@ -8775,6 +8889,28 @@ mod tests {
             Some(2),
             "a refusal counts the reports"
         );
+    }
+
+    /// A departure refuses through the `--verify` path as well, ahead of a
+    /// skid counted in the same run, and leaves neither count behind.
+    #[test]
+    fn a_replay_departure_refuses_through_the_verify_path() {
+        let _lock = SKID_OVERSHOOT_TEST_LOCK.lock().unwrap();
+        let _ = reverie::take_skid_overshoot_count();
+        let _ = detcore::replay_departure::take_count();
+
+        let report = SkidOvershootReport::begin(true);
+        reverie::record_skid_overshoot();
+        detcore::replay_departure::record();
+        let error = report.finish_with_count(Ok::<_, Error>(7)).unwrap_err();
+        assert_eq!(
+            error
+                .downcast_ref::<ReplayDepartureError>()
+                .map(ReplayDepartureError::count),
+            Some(1)
+        );
+        assert_eq!(reverie::take_skid_overshoot_count(), 0);
+        assert_eq!(detcore::replay_departure::take_count(), 0);
     }
 
     #[test]
