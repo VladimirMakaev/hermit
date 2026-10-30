@@ -3565,6 +3565,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the_uncapped_slices_mark_is_written_only_when_set, an_uncapped_records_backstop_outlasts_its_latest_event and an_uncapped_replay_ends_slices_at_its_backstop_while_the_record_lasts: 2698.
     // And the four robust-list record units and two SIGKILL record-keeping
     // units for robust-futex owner death by SIGKILL: 2701, listed.
+    // And syscalls::misc::tests::set_ptracer_reaches_the_kernel: 2683.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5011,6 +5012,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // signal_child_exit_and_join_edges_name_their_events: 627.
     // And a_schedule_replay_keeps_the_long_slices_of_a_preemption_replay: 638.
     // And run_rejects_a_missing_mount_target_outside_tmp_by_name: 623.
+    // And prctl_set_ptracer_answers_as_the_host_kernel_does: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5647,6 +5649,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two synchronization edge tests, not excluded: 546.
     // And the same uncapped-slices replay test: 557.
     // And the same missing --mount target test, not excluded: 542.
+    // And prctl_set_ptracer_answers_as_the_host_kernel_does: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6218,6 +6221,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
     // And the same three uncapped-slices units: 2698.
     // And the same six SIGKILL robust-list units: 2701, listed.
+    // And syscalls::misc::tests::set_ptracer_reaches_the_kernel: 2683.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
