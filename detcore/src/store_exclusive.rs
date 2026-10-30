@@ -80,25 +80,30 @@ mod decode {
     /// this many instructions before it.
     pub(crate) const PAIR_WINDOW: u64 = 16;
 
-    /// `MRS <Xt>, <system register>` with the system register fixed and only
-    /// `Rt` (bits 4:0) free.
-    const MRS_MASK: u32 = !0x1F;
-    /// The virtual counter, read from EL0: `MRS Xt, CNTVCT_EL0` and its
-    /// self-synchronized form `CNTVCTSS_EL0`. Linux lets every task read it
+    /// Whether `insn` reads the generic timer from EL0 on this host: `MRS
+    /// Xt, CNTVCT_EL0`, its self-synchronized form `CNTVCTSS_EL0` where the
+    /// host has FEAT_ECV, or `CNTFRQ_EL0`. Linux lets every task read them
     /// directly (or, on CPUs with a counter erratum, traps and emulates the
     /// read in the kernel), so the guest gets the host's count with no stop
-    /// Hermit sees and nothing Detcore can virtualize. It is this
-    /// architecture's `RDTSC`, without `PR_SET_TSC` to trap it.
+    /// Hermit sees: this architecture's `RDTSC`, without `PR_SET_TSC` to trap
+    /// it. Hermit replaces them with traps it answers
+    /// (`crate::aarch64_lse::counter`), the frequency too, since the count it
+    /// answers is in virtual nanoseconds.
     ///
-    /// Not counted: `CNTPCT_EL0`, `CNTPCTSS_EL0` and the timer registers
-    /// (`CNTV_TVAL_EL0` and the like), whose EL0 access Linux disables, so a
-    /// read faults with `SIGILL`, which is visible and deterministic; and
-    /// `CNTFRQ_EL0`, a constant frequency rather than a time.
-    const COUNTER_READS: [u32; 2] = [0xD53B_E040, 0xD53B_E0C0];
-
-    /// Whether `insn` reads the virtual counter from EL0.
+    /// Not counted: `CNTVCTSS_EL0` on a host without FEAT_ECV, where it is
+    /// undefined; `CNTPCT_EL0`, `CNTPCTSS_EL0` and the timer registers
+    /// (`CNTV_TVAL_EL0` and the like), whose EL0 access Linux disables. Each
+    /// of those faults with `SIGILL`, which is visible and deterministic.
     pub(crate) fn is_counter_read(insn: u32) -> bool {
-        COUNTER_READS.contains(&(insn & MRS_MASK))
+        use crate::aarch64_lse::counter::CounterRegister;
+        static HOST: std::sync::OnceLock<crate::aarch64_lse::counter::CounterHost> =
+            std::sync::OnceLock::new();
+        crate::aarch64_lse::counter::decode_read(insn).is_some_and(|(register, _)| {
+            register != CounterRegister::Cntvctss
+                || HOST
+                    .get_or_init(crate::aarch64_lse::counter::host)
+                    .self_synchronized
+        })
     }
 
     /// What one pass over a code range finds: the exclusive pairs, whose
@@ -114,6 +119,10 @@ mod decode {
         pair_loads: Vec<u64>,
         /// The file offset of each counter read.
         reads: Vec<u64>,
+        /// The file offset and word of each counter trap
+        /// (`crate::aarch64_lse::counter`): a read a rewritten file already
+        /// replaced.
+        traps: Vec<(u64, u32)>,
     }
 
     impl CodeScan {
@@ -138,6 +147,9 @@ mod decode {
                     }
                 }
                 _ if is_counter_read(insn) => self.reads.push(self.base + 4 * self.index),
+                _ if crate::aarch64_lse::counter::decode_trap(insn).is_some() => {
+                    self.traps.push((self.base + 4 * self.index, insn))
+                }
                 _ => {}
             }
             self.index += 1;
@@ -169,6 +181,7 @@ mod decode {
             super::model::FileLoops {
                 pair_loads: self.pair_loads,
                 counter_reads: self.reads,
+                counter_traps: self.traps,
             }
         }
     }
@@ -335,6 +348,19 @@ mod model {
         /// EL0 generic-timer counter reads: time the guest sees that virtual
         /// time does not control.
         pub counter_reads: u64,
+        /// Of those, and of the reads a rewritten file already replaced,
+        /// the ones Detcore answers: replaced by a trap in the guest's memory
+        /// or in the mapped file (`crate::aarch64_lse::counter`).
+        #[serde(default)]
+        pub counter_traps: u64,
+    }
+
+    impl Found {
+        /// The counter reads left to the host: neither trapped in memory nor
+        /// replaced in the file.
+        pub fn counter_reads_left(&self) -> u64 {
+            self.counter_reads.saturating_sub(self.counter_traps)
+        }
     }
 
     /// What a scan of one mapping found, with the mapping. It crosses to the
@@ -774,6 +800,8 @@ mod model {
         pub(crate) pair_loads: Vec<u64>,
         /// The file offset of each counter read.
         pub(crate) counter_reads: Vec<u64>,
+        /// The file offset and word of each counter trap the file holds.
+        pub(crate) counter_traps: Vec<(u64, u32)>,
     }
 
     impl FileLoops {
@@ -791,7 +819,18 @@ mod model {
             Found {
                 pairs: inside(&self.pair_loads),
                 counter_reads: inside(&self.counter_reads),
+                counter_traps: 0,
             }
+        }
+
+        /// The counter traps the file range `[start, end)` holds, by file
+        /// offset.
+        pub(crate) fn traps_in(&self, start: u64, end: u64) -> Vec<(u64, u32)> {
+            self.counter_traps
+                .iter()
+                .filter(|(offset, _)| start <= *offset && *offset < end)
+                .copied()
+                .collect()
         }
     }
 
@@ -1014,9 +1053,17 @@ mod model {
             self.per_path(|(found, _)| found.pairs)
         }
 
-        /// The EL0 counter reads of each guest path that has any.
+        /// The EL0 counter reads Detcore does not answer, of each guest path
+        /// that has any: neither trapped in the guest's memory nor replaced
+        /// in its file.
         pub(crate) fn counter_reads_per_path(&self) -> BTreeMap<String, u64> {
-            self.per_path(|(found, _)| found.counter_reads)
+            self.per_path(|(found, _)| found.counter_reads_left())
+        }
+
+        /// The EL0 counter reads Detcore answers through traps, of each guest
+        /// path that has any.
+        pub(crate) fn counter_traps_per_path(&self) -> BTreeMap<String, u64> {
+            self.per_path(|(found, _)| found.counter_traps)
         }
 
         /// The in-memory rewrite of each guest path it touched: the sums over
@@ -1099,6 +1146,7 @@ pub(crate) use runtime::*;
 
 #[cfg(target_arch = "aarch64")]
 mod runtime {
+    use std::collections::BTreeMap;
     use std::collections::BTreeSet;
     use std::ffi::CString;
     use std::fs::File;
@@ -1164,6 +1212,8 @@ mod runtime {
     use crate::Detcore;
     use crate::RecordOrReplay;
     use crate::aarch64_lse::elf::FilePlan;
+    use crate::aarch64_lse::elf::PatchKind;
+    use crate::aarch64_lse::elf::PlanOptions;
     use crate::procmaps::MMapPath;
     use crate::procmaps::MemoryMap;
     use crate::types::MmId;
@@ -1176,6 +1226,29 @@ mod runtime {
         cfg.backend.host_task_reads_reach_guest_threads
             && !cfg.backend.tool_shares_guest_descriptor_table
             && !cfg.recordreplay_modes
+    }
+
+    /// Whether this run replaces the guest's EL0 counter reads with traps
+    /// in its memory, as each executable file is mapped, and answers them
+    /// with virtual time: wherever time is virtual, the in-memory rewrite can
+    /// read the guest (`reads_guest_tasks`), and its threads run one at a
+    /// time, so that no other thread runs while a word is written. It is
+    /// this architecture's `RDTSC` trap, which x86 has whenever time is
+    /// virtual.
+    pub(crate) fn traps_counter_reads_in_memory(cfg: &Config) -> bool {
+        cfg.virtualize_time && cfg.sequentialize_threads && reads_guest_tasks(cfg)
+    }
+
+    /// The counter trap word at guest address `pc` in the address space of
+    /// `guest`, if one is registered there ([`ScannedRanges`]): written by
+    /// this run's rewrite, or found in a mapped rewritten file.
+    pub(crate) fn counter_trap_at<G, T>(guest: &G, pc: u64) -> Option<u32>
+    where
+        G: Guest<Detcore<T>>,
+        T: RecordOrReplay,
+    {
+        let metadata = guest.thread_state().memory_metadata.lock().unwrap();
+        metadata.exclusive_scan.counter_traps.get(&pc).copied()
     }
 
     /// Whether this run records or replays preemptions.
@@ -1234,12 +1307,15 @@ mod runtime {
     /// host-dependent, this hands the guest a host time Detcore never sees.
     fn warn_counter_reads(path: &str, reads: u64) {
         warn!(
-            "[store-exclusive] {path} reads the generic timer's virtual counter from EL0 ({}). \
-             Those reads make no stop Hermit sees, so Detcore cannot virtualize them: a guest \
-             whose control flow depends on one is not deterministic, and a recorded schedule \
-             may not replay. Reading the counter directly is this architecture's RDTSC, and \
-             Linux has no per-process switch to trap it.",
-            counted(reads, "CNTVCT_EL0 or CNTVCTSS_EL0 read")
+            "[store-exclusive] {path} reads the generic timer from EL0 ({} not replaced by \
+             traps). Those reads make no stop Hermit sees, so Detcore cannot virtualize them: a \
+             guest whose control flow depends on one is not deterministic, and a recorded \
+             schedule may not replay. Reading the counter directly is this architecture's \
+             RDTSC, and Linux has no per-process switch to trap it; Hermit replaces the reads \
+             with traps where it can (in memory, with threads sequentialized and time \
+             virtual, on a file it can prove is the mapped one), and debug logs say why it \
+             could not here.",
+            counted(reads, "CNTVCT_EL0, CNTVCTSS_EL0 or CNTFRQ_EL0 read")
         );
     }
 
@@ -1270,6 +1346,8 @@ mod runtime {
         /// Whether this run has said what rewriting in memory means for the
         /// guest.
         noted_rewrite: bool,
+        /// Whether this run has said that its counter reads are trapped.
+        noted_counter_traps: bool,
     }
 
     impl RunTally {
@@ -1295,10 +1373,21 @@ mod runtime {
                     live,
                 } => {
                     for mapping in mappings {
-                        if mapping.found.counter_reads != 0
+                        if mapping.found.counter_reads_left() != 0
                             && self.warned_counter_reads.insert(mapping.path.clone())
                         {
-                            warn_counter_reads(&mapping.path, mapping.found.counter_reads);
+                            warn_counter_reads(&mapping.path, mapping.found.counter_reads_left());
+                        }
+                        if mapping.found.counter_traps != 0 && !self.noted_counter_traps {
+                            self.noted_counter_traps = true;
+                            info!(
+                                "[store-exclusive] the guest's EL0 generic-timer reads are \
+                                 replaced by traps (UDF), which Detcore answers with virtual \
+                                 time: CNTVCT_EL0 and CNTVCTSS_EL0 read virtual nanoseconds and \
+                                 CNTFRQ_EL0 reads {} Hz. A guest that reads its own code sees the \
+                                 traps. The summary lists every image with trapped reads.",
+                                crate::aarch64_lse::counter::VIRTUAL_COUNTER_FREQUENCY
+                            );
                         }
                         if mapping.rewrite.rewritten != 0 && !self.noted_rewrite {
                             self.noted_rewrite = true;
@@ -1353,6 +1442,7 @@ mod runtime {
             summary.exclusive_pairs = self.pairs.pairs_per_path();
             summary.exclusive_rewrite_cache_peak = PLANS.lock().unwrap().peak() as u64;
             summary.counter_reads = self.pairs.counter_reads_per_path();
+            summary.counter_reads_trapped = self.pairs.counter_traps_per_path();
             summary.exclusive_rewrites = self
                 .pairs
                 .rewrites_per_path()
@@ -1852,6 +1942,13 @@ mod runtime {
         /// or a piece of a split) is scanned whatever range triggered the
         /// scan.
         reported: BTreeSet<LiveMapping>,
+        /// The counter traps (`crate::aarch64_lse::counter`) this address
+        /// space holds, by guest address, with each one's word: written by
+        /// the in-memory rewrite, or found in a mapped file (a rewritten
+        /// copy). Only a SIGILL at one of these, with that word still in
+        /// memory, is answered as a counter read ([`counter_trap_at`]). A
+        /// fork's copy keeps them, as the child's pages are the parent's.
+        counter_traps: BTreeMap<u64, u32>,
     }
 
     impl ScannedRanges {
@@ -2030,7 +2127,15 @@ mod runtime {
         len: u64,
     }
 
-    fn scan_mapping(tid: Pid, path: &Path, map: &MemoryMap, key: FileRange) -> Option<Found> {
+    /// What a mapping's file holds in the mapped range: the counts, and the
+    /// counter traps by file offset, which a rewritten copy (an overlay)
+    /// holds where its original read the counter.
+    fn scan_mapping(
+        tid: Pid,
+        path: &Path,
+        map: &MemoryMap,
+        key: FileRange,
+    ) -> Option<(Found, Vec<(u64, u32)>)> {
         // The object the mapping maps, as the rewrite plans it. Nothing is
         // cached: the scan reads the file's code each time, so no identity
         // can carry one file's loops to another.
@@ -2045,7 +2150,11 @@ mod runtime {
                     "the file changed while it was scanned",
                 ));
             }
-            Ok(loops.found_in(key.offset, key.offset.saturating_add(key.len)))
+            let end = key.offset.saturating_add(key.len);
+            Ok((
+                loops.found_in(key.offset, end),
+                loops.traps_in(key.offset, end),
+            ))
         })();
         result
             .map_err(|error: std::io::Error| {
@@ -2192,7 +2301,14 @@ mod runtime {
             return Ok(plan);
         }
         let plan = Arc::new(
-            crate::aarch64_lse::elf::plan_bytes(&bytes).map_err(|error| error.to_string())?,
+            crate::aarch64_lse::elf::plan_bytes_with(
+                &bytes,
+                PlanOptions {
+                    loops: true,
+                    counters: Some(crate::aarch64_lse::counter::host()),
+                },
+            )
+            .map_err(|error| error.to_string())?,
         );
         let charge = plan_charge(&plan);
         PLANS.lock().unwrap().insert(bytes, plan.clone(), charge);
@@ -2212,13 +2328,40 @@ mod runtime {
         }
     }
 
-    /// Rewrite the canonical exclusive loops of one executable file mapping
-    /// in the guest's memory. `pairs` is what the scan found in it.
+    /// What the in-memory rewrite of one mapping covers.
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    struct RewriteKinds {
+        /// Exclusive loops (`--rewrite-exclusives` in memory).
+        loops: bool,
+        /// EL0 counter reads (`traps_counter_reads_in_memory`).
+        counters: bool,
+    }
+
+    /// What the in-memory rewrite of one mapping did.
+    #[derive(Clone, Debug, Default, PartialEq, Eq)]
+    struct MappingRewrite {
+        /// The exclusive loops: empty unless loops were asked for.
+        loops: Rewrite,
+        /// Loops that start in the mapping and run past its end, left whole.
+        crossing: u64,
+        /// The counter reads: empty unless counters were asked for.
+        counters: Rewrite,
+        /// The guest address and word of every counter trap the mapping now
+        /// holds, written by this rewrite or found already written.
+        traps: Vec<(u64, u32)>,
+    }
+
+    /// Rewrite what `kinds` asks for in one executable file mapping in the
+    /// guest's memory: its canonical exclusive loops and its EL0 counter
+    /// reads. `found` is what the scan found in it.
     ///
-    /// A sequence is written only where the guest's memory still holds the
-    /// file's bytes, only where no instruction of it can have run (`new` says
-    /// so for its address range: made by this exec or this `mmap`), and only
-    /// within one page. Memory that already holds the replacement counts as
+    /// A loop's sequence is written only where the guest's memory still
+    /// holds the file's bytes, only where no instruction of it can have run
+    /// (`new` says so for its address range: made by this exec or this
+    /// `mmap`), and only within one page. A counter read is one instruction
+    /// replaced by one instruction, which no thread can be stopped inside, so
+    /// it is written wherever memory holds the file's `MRS`, also in text
+    /// that may have run. Memory that already holds the replacement counts as
     /// rewritten; anything else (relocated text, a debugger's breakpoint, a
     /// runtime that rewrote itself, text a page drop put back, or old code
     /// that may be running) is left.
@@ -2236,26 +2379,55 @@ mod runtime {
         path: &Path,
         key: FileRange,
         map: &MemoryMap,
-        pairs: u64,
+        found: Found,
+        kinds: RewriteKinds,
         new: &dyn Fn(u64, u64) -> bool,
-    ) -> (Rewrite, u64) {
-        let all_left = Rewrite {
-            left: pairs,
-            ..Rewrite::default()
+    ) -> MappingRewrite {
+        let pairs = found.pairs;
+        let all = |loops: Rewrite, counters: Rewrite| MappingRewrite {
+            loops: if kinds.loops {
+                loops
+            } else {
+                Rewrite::default()
+            },
+            counters: if kinds.counters {
+                counters
+            } else {
+                Rewrite::default()
+            },
+            ..MappingRewrite::default()
         };
-        // A failure before the plan is placed counts at least one, even in a
-        // mapping whose scan paired nothing: it may hold a split sequence.
-        let all_failed = Rewrite {
-            failed: pairs.max(1),
-            ..Rewrite::default()
-        };
+        let all_left = all(
+            Rewrite {
+                left: pairs,
+                ..Rewrite::default()
+            },
+            Rewrite {
+                left: found.counter_reads,
+                ..Rewrite::default()
+            },
+        );
+        // A failure before the plan is placed counts at least one loop, even
+        // in a mapping whose scan paired nothing: it may hold a split
+        // sequence. Counter reads are single words, never split.
+        let all_failed = all(
+            Rewrite {
+                failed: pairs.max(1),
+                ..Rewrite::default()
+            },
+            Rewrite {
+                failed: found.counter_reads,
+                ..Rewrite::default()
+            },
+        );
         if map.perms.contains(MMPermissions::SHARED) || map.perms.contains(MMPermissions::WRITE) {
             debug!(
-                "[store-exclusive] {} at {:#x} is shared or writable; its exclusive loops are left",
+                "[store-exclusive] {} at {:#x} is shared or writable; its exclusive loops and \
+                 counter reads are left",
                 path.display(),
                 map.address.0
             );
-            return (all_left, 0);
+            return all_left;
         }
         let plan = match plan_for(tid, path, map, key) {
             Ok(plan) => plan,
@@ -2264,11 +2436,11 @@ mod runtime {
                     "[store-exclusive] cannot read {} to plan its rewrite: {error}",
                     path.display()
                 );
-                return (all_failed, 0);
+                return all_failed;
             }
         };
         let Some(plan) = plan.as_ref() else {
-            return (all_left, 0);
+            return all_left;
         };
         let memory = match OpenOptions::new()
             .read(true)
@@ -2282,16 +2454,17 @@ mod runtime {
                     tid.as_raw(),
                     path.display()
                 );
-                return (all_failed, 0);
+                return all_failed;
             }
         };
-        let mut rewrite = Rewrite::default();
+        let mut outcome = MappingRewrite::default();
         let page = page_size();
-        // Sequences that start here and run into the next mapping: left
-        // whole. The scan counted each pair in the mapping that holds its
-        // load, so they are among the `pairs` of this one or the next.
-        let mut crossing = 0;
         for patch in &plan.patches {
+            let counter = match patch.kind {
+                PatchKind::Loop if kinds.loops => false,
+                PatchKind::CounterRead if kinds.counters => true,
+                _ => continue,
+            };
             let address = match place(
                 patch.offset,
                 patch.original.len() as u64,
@@ -2300,8 +2473,13 @@ mod runtime {
                 key.len,
             ) {
                 Placement::Outside => continue,
+                // Sequences that start here and run into the next mapping:
+                // left whole. The scan counted each pair in the mapping that
+                // holds its load, so they are among the `pairs` of this one
+                // or the next. A counter read is one aligned word, which a
+                // page-aligned mapping never splits.
                 Placement::CrossesEnd => {
-                    crossing += 1;
+                    outcome.crossing += u64::from(!counter);
                     continue;
                 }
                 Placement::At(address) => address,
@@ -2313,55 +2491,82 @@ mod runtime {
                 );
                 continue;
             }
+            let tally = if counter {
+                &mut outcome.counters
+            } else {
+                &mut outcome.loops
+            };
             let mut current = vec![0u8; patch.original.len()];
             if let Err(error) = memory.read(address, &mut current) {
                 debug!("[store-exclusive] cannot read the guest's code at {address:#x}: {error}");
-                rewrite.failed += 1;
+                tally.failed += 1;
                 continue;
             }
             let end = address + patch.original.len() as u64;
-            match step(
+            // No thread can be stopped inside one instruction, so a counter
+            // read is new wherever memory still holds it.
+            let rewritten = match step(
                 &current,
                 &patch.original,
                 &patch.rewritten,
-                new(address, end),
+                counter || new(address, end),
             ) {
-                Step::Done => {
-                    rewrite.rewritten += 1;
-                }
+                Step::Done => true,
                 Step::Leave => {
                     debug!(
                         "[store-exclusive] the guest's code at {address:#x} is not the file's, \
                          or may already have run; left"
                     );
+                    false
                 }
                 Step::Write => {
                     match write_sequence(&memory, address, &patch.original, &patch.rewritten) {
-                        Written::Rewritten => {
-                            rewrite.rewritten += 1;
-                        }
+                        Written::Rewritten => true,
                         Written::Failed(why) => {
                             debug!(
                                 "[store-exclusive] the guest's code at {address:#x} was not \
                                  rewritten: {why}"
                             );
-                            rewrite.failed += 1;
+                            tally.failed += 1;
+                            false
                         }
                         Written::Broken(why) => panic!(
                             "the in-memory rewrite of {} left the guest's code at {address:#x} \
-                             holding neither its loop nor the replacement: {why}",
+                             holding neither its original nor the replacement: {why}",
                             path.display()
                         ),
                     }
+                }
+            };
+            if rewritten {
+                tally.rewritten += 1;
+                if counter {
+                    let word = u32::from_le_bytes(
+                        patch.rewritten[..4]
+                            .try_into()
+                            .expect("a counter patch is one word"),
+                    );
+                    outcome.traps.push((address, word));
                 }
             }
         }
         // Every pair the scan found that was neither rewritten nor failed is
         // left: refused by the rewriter, not the file's bytes in memory, or
         // old code that may be running; and so is each sequence split across
-        // this mapping's end.
-        rewrite.left = left_in_mapping(pairs, rewrite.rewritten, rewrite.failed);
-        (rewrite, crossing)
+        // this mapping's end. Likewise every counter read neither trapped nor
+        // failed.
+        if kinds.loops {
+            outcome.loops.left =
+                left_in_mapping(pairs, outcome.loops.rewritten, outcome.loops.failed);
+        }
+        if kinds.counters {
+            outcome.counters.left = left_in_mapping(
+                found.counter_reads,
+                outcome.counters.rewritten,
+                outcome.counters.failed,
+            );
+        }
+        outcome
     }
 
     /// Open `path` as the guest names it: resolved inside the guest's root
@@ -2424,6 +2629,7 @@ mod runtime {
             let found = section.into_loops();
             loops.pair_loads.extend(found.pair_loads);
             loops.counter_reads.extend(found.counter_reads);
+            loops.counter_traps.extend(found.counter_traps);
         }
         Ok(loops)
     }
@@ -2560,6 +2766,13 @@ mod runtime {
             (space, reported)
         };
         let mut mappings = Vec::new();
+        // The counter traps of each mapping scanned, by guest address range,
+        // which replace what the registry held for that range.
+        let mut traps: Vec<(Range, Vec<(u64, u32)>)> = Vec::new();
+        let kinds = RewriteKinds {
+            loops: guest.config().rewrite_exclusives_in_memory,
+            counters: traps_counter_reads_in_memory(guest.config()),
+        };
         for map in &maps {
             let MMapPath::Path(path) = &map.pathname else {
                 continue;
@@ -2588,7 +2801,7 @@ mod runtime {
             let shown = path.display().to_string();
             let in_memory = guest.config().rewrite_exclusives_in_memory;
             match scan_mapping(guest.tid(), path, map, key) {
-                Some(found) => {
+                Some((mut found, file_traps)) => {
                     if found != Found::default() {
                         // Only what was found: a mapping with pairs alone
                         // keeps the line it always had.
@@ -2610,16 +2823,59 @@ mod runtime {
                     // Every executable mapping is planned, even one whose scan
                     // paired nothing: a loop split across two mappings pairs
                     // in neither, and is counted as left where it starts.
-                    let (rewrite, split) = if in_memory {
+                    // Counter reads are planned only in a mapping that holds
+                    // some: the plan reads the whole file, which a run that
+                    // rewrites no loops need not do for every library.
+                    let kinds = RewriteKinds {
+                        counters: kinds.counters && found.counter_reads != 0,
+                        ..kinds
+                    };
+                    let outcome = if kinds.loops || kinds.counters {
                         // Whether no instruction of `[start, end)` can have
                         // run. Decided per sequence: the kernel may merge a
                         // new mapping with an older neighbour into one entry.
                         let new =
                             |start: u64, end: u64| sequence_is_new(trigger, range, (start, end));
-                        rewrite_mapping(guest.tid(), path, key, map, found.pairs, &new)
+                        rewrite_mapping(guest.tid(), path, key, map, found, kinds, &new)
                     } else {
-                        (Rewrite::default(), 0)
+                        MappingRewrite::default()
                     };
+                    let (rewrite, split) = (outcome.loops, outcome.crossing);
+                    // The traps Detcore answers here: those this rewrite wrote
+                    // or found in memory, and those the mapped file holds (a
+                    // rewritten copy mounted over the original).
+                    let mut mapped_traps = outcome.traps;
+                    mapped_traps.extend(
+                        file_traps
+                            .iter()
+                            .map(|(offset, word)| (start + (offset - key.offset), *word)),
+                    );
+                    found.counter_traps = outcome.counters.rewritten + file_traps.len() as u64;
+                    if !outcome.counters.is_empty() {
+                        info!(
+                            "[detcore, dtid {}] trapped {} of the {} in memory in {} (offset \
+                             {:#x}): {} left as the file has them, {} could not be written",
+                            dettid,
+                            outcome.counters.rewritten,
+                            counted(found.counter_reads, "EL0 generic-timer counter read"),
+                            shown,
+                            key.offset,
+                            outcome.counters.left,
+                            outcome.counters.failed
+                        );
+                    }
+                    if !file_traps.is_empty() {
+                        info!(
+                            "[detcore, dtid {}] {} already replaced by traps in executable \
+                             mapping {} (offset {:#x}, {:#x} bytes)",
+                            dettid,
+                            counted(file_traps.len() as u64, "EL0 generic-timer counter read"),
+                            shown,
+                            key.offset,
+                            key.len
+                        );
+                    }
+                    traps.push(((start, end), mapped_traps));
                     if !rewrite.is_empty() {
                         // Named only when there are any, so the line is
                         // otherwise the one it always was.
@@ -2658,6 +2914,8 @@ mod runtime {
                          executable mapping {} (offset {:#x}, {:#x} bytes)",
                         dettid, shown, key.offset, key.len
                     );
+                    // Nothing proves a trap here is one this run wrote.
+                    traps.push(((start, end), Vec::new()));
                     // Fail closed: a run that asked for the rewrite is told
                     // about a mapping it could not even read, whose loops, if
                     // it has any, still retry.
@@ -2676,6 +2934,20 @@ mod runtime {
                     }
                 }
             }
+        }
+        {
+            let thread = guest.thread_state();
+            let mut metadata = thread.memory_metadata.lock().unwrap();
+            let registry = &mut metadata.exclusive_scan.counter_traps;
+            for ((from, to), found) in traps {
+                registry.retain(|address, _| !(from <= *address && *address < to));
+                registry.extend(found);
+            }
+            // A trap outside every executable file mapping is gone.
+            registry.retain(|address, _| {
+                live.iter()
+                    .any(|seen| seen.address <= *address && *address < seen.address + seen.len)
+            });
         }
         send(
             guest,
@@ -2745,7 +3017,8 @@ mod runtime {
             call,
             result,
             page_size(),
-            guest.config().rewrite_exclusives_in_memory,
+            guest.config().rewrite_exclusives_in_memory
+                || traps_counter_reads_in_memory(guest.config()),
             &mut metadata.exclusive_scan,
         )
     }
@@ -3069,7 +3342,35 @@ mod runtime {
             /// `/proc/<this process>/mem`, with every sequence new or none.
             fn rewrite(&self, path: &Path, new: bool) -> (Rewrite, u64) {
                 let (map, key) = self.listed();
-                rewrite_mapping(this_process(), path, key, &map, 1, &|_, _| new)
+                let found = Found {
+                    pairs: 1,
+                    ..Found::default()
+                };
+                let kinds = RewriteKinds {
+                    loops: true,
+                    counters: false,
+                };
+                let outcome =
+                    rewrite_mapping(this_process(), path, key, &map, found, kinds, &|_, _| new);
+                assert_eq!(outcome.counters, Rewrite::default());
+                assert_eq!(outcome.traps, vec![]);
+                (outcome.loops, outcome.crossing)
+            }
+
+            /// [`rewrite_mapping`] of this mapping's counter reads only, of
+            /// which the scan found `reads`, with no sequence new.
+            fn rewrite_counters(&self, path: &Path, reads: u64) -> MappingRewrite {
+                let (map, key) = self.listed();
+                let found = Found {
+                    pairs: 1,
+                    counter_reads: reads,
+                    counter_traps: 0,
+                };
+                let kinds = RewriteKinds {
+                    loops: false,
+                    counters: true,
+                };
+                rewrite_mapping(this_process(), path, key, &map, found, kinds, &|_, _| false)
             }
         }
 
@@ -3132,6 +3433,72 @@ mod runtime {
 
         /// A name that leads to another file than the mapped one plans
         /// nothing: the mapping is counted as failed and keeps its loop.
+        /// Counter reads are trapped in memory one word each, also in text
+        /// that may have run, and only them: the loop beside them stays, as
+        /// a counters-only rewrite leaves loops alone. A second pass finds
+        /// the traps already written.
+        #[test]
+        fn counter_reads_are_trapped_in_memory_word_by_word() {
+            if skipped(true) {
+                return;
+            }
+            // mrs x9, cntvct_el0; <ONE_LOOP>; mrs xzr, cntfrq_el0
+            let mut words = vec![0xd53b_e049];
+            words.extend_from_slice(&ONE_LOOP);
+            words.push(0xd53b_e01f);
+            let (_dir, path, image) = image_file(&words);
+            let mapping = Mapping::new(&path, libc::MAP_PRIVATE);
+            let outcome = mapping.rewrite_counters(&path, 2);
+            assert_eq!(
+                outcome.counters,
+                Rewrite {
+                    rewritten: 2,
+                    left: 0,
+                    failed: 0,
+                }
+            );
+            assert_eq!(outcome.loops, Rewrite::default());
+            let traps: Vec<u32> = outcome.traps.iter().map(|(_, word)| *word).collect();
+            assert_eq!(traps, vec![0x0000_c709, 0x0000_c75f]);
+            assert_eq!(
+                outcome.traps.iter().map(|(at, _)| *at).collect::<Vec<_>>(),
+                vec![mapping.address + 0x100, mapping.address + 0x11c]
+            );
+            assert_eq!(mapping.bytes(0x100, 4), 0x0000_c709u32.to_le_bytes());
+            assert_eq!(mapping.bytes(0x11c, 4), 0x0000_c75fu32.to_le_bytes());
+            // Everything else is the file's, the loop included.
+            assert_eq!(mapping.bytes(0x104, 0x18), image[0x104..0x11c].to_vec());
+            assert_eq!(
+                std::fs::read(&path).unwrap(),
+                image,
+                "the file is untouched"
+            );
+            let again = mapping.rewrite_counters(&path, 2);
+            assert_eq!(again.counters.rewritten, 2);
+            assert_eq!(again.traps, outcome.traps);
+        }
+
+        /// A shared mapping's counter reads are left, as its loops are.
+        #[test]
+        fn a_shared_mapping_keeps_its_counter_reads() {
+            if skipped(false) {
+                return;
+            }
+            let (_dir, path, image) = image_file(&[0xd53b_e049, 0xd65f_03c0]);
+            let mapping = Mapping::new(&path, libc::MAP_SHARED);
+            let outcome = mapping.rewrite_counters(&path, 1);
+            assert_eq!(
+                outcome.counters,
+                Rewrite {
+                    rewritten: 0,
+                    left: 1,
+                    failed: 0,
+                }
+            );
+            assert_eq!(outcome.traps, vec![]);
+            assert_eq!(mapping.bytes(0x100, 8), image[0x100..0x108].to_vec());
+        }
+
         #[test]
         fn a_mapping_whose_name_now_leads_elsewhere_is_not_written() {
             if skipped(true) {
@@ -3739,6 +4106,7 @@ mod tests {
             found: Found {
                 pairs,
                 counter_reads: 0,
+                counter_traps: 0,
             },
             rewrite: Rewrite::default(),
         }
@@ -3938,6 +4306,7 @@ mod tests {
         use crate::aarch64_lse::elf::FilePlan;
         let mut patches = Vec::with_capacity(10);
         patches.push(FilePatch {
+            kind: crate::aarch64_lse::elf::PatchKind::Loop,
             offset: 0,
             original: Vec::with_capacity(64),
             rewritten: vec![0; 4],
@@ -3992,23 +4361,26 @@ mod tests {
         assert!(merge_overlaps(Vec::new()).is_empty());
     }
 
-    /// The virtual counter, read from EL0: `MRS Xt, CNTVCT_EL0` and
-    /// `CNTVCTSS_EL0`, with every `Rt`. Encodings from GNU as.
+    /// The generic timer, read from EL0: `MRS Xt, CNTVCT_EL0`, `CNTFRQ_EL0`
+    /// and, on a host with FEAT_ECV, `CNTVCTSS_EL0`, with every `Rt`.
+    /// Encodings from GNU as.
     #[test]
-    fn counts_the_virtual_counter_reads_an_image_can_make() {
-        for encoding in [0xd53b_e040u32, 0xd53b_e0c0] {
+    fn counts_the_counter_reads_an_image_can_make() {
+        for encoding in [0xd53b_e040u32, 0xd53b_e000] {
             for rt in 0..32 {
                 assert!(is_counter_read(encoding | rt), "{:#010x}", encoding | rt);
             }
         }
+        let ecv = crate::aarch64_lse::counter::host().self_synchronized;
+        for rt in 0..32 {
+            assert_eq!(is_counter_read(0xd53b_e0c0 | rt), ecv, "{rt}");
+        }
         // Not counted: `CNTPCT_EL0` and `CNTPCTSS_EL0`, which fault at EL0 on
-        // Linux; `CNTFRQ_EL0`, a constant; `CNTV_TVAL_EL0`, a timer register
-        // that also faults; `CNTKCTL_EL1`, EL1 state; a `NOP` and a
-        // load-exclusive.
+        // Linux; `CNTV_TVAL_EL0`, a timer register that also faults;
+        // `CNTKCTL_EL1`, EL1 state; a `NOP` and a load-exclusive.
         for other in [
             0xd53b_e020u32,
             0xd53b_e0a0,
-            0xd53b_e000,
             0xd53b_e300,
             0xd538_e104,
             0xd503_201f,
@@ -4037,6 +4409,7 @@ mod tests {
             found: Found {
                 pairs: 0,
                 counter_reads: 1,
+                counter_traps: 0,
             },
             rewrite: Rewrite::default(),
         };

@@ -7204,8 +7204,10 @@ impl<T> ThreadState<T> {
     /// instruction ends the slice only at the PMU maximum, as a branch would.
     /// With no PMU maximum it is the only way out of a busy-wait on the TSC,
     /// and it still ends the expired target. Replay of recorded preemptions or
-    /// schedules keeps its recorded boundaries.
-    #[cfg(target_arch = "x86_64")]
+    /// schedules keeps its recorded boundaries. On aarch64 the trapped
+    /// instructions are the guest's generic-timer reads, which Hermit
+    /// replaces with traps (`Detcore::emulate_counter_trap`).
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     pub(crate) fn instruction_trap_ends_timeslice(&self, cfg: &Config) -> bool {
         let replaying = self.preemption_points.is_some() || self.follows_replayed_schedule(cfg);
         match self.max_timeslice_end {
@@ -10630,8 +10632,9 @@ mod timeslice_tests {
         assert!(state.timeslice_expired());
     }
 
-    // x86_64 only: instruction traps (CPUID, RDTSC) exist only there.
-    #[cfg(target_arch = "x86_64")]
+    // Instruction traps: CPUID and RDTSC on x86_64, the generic-timer reads
+    // Hermit replaces with traps on aarch64.
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
     fn instruction_trap_ends_an_expired_target_only_at_the_pmu_maximum() {
         let config = Config {
@@ -10653,8 +10656,9 @@ mod timeslice_tests {
         assert!(state.instruction_trap_ends_timeslice(&config));
     }
 
-    // x86_64 only: instruction traps (CPUID, RDTSC) exist only there.
-    #[cfg(target_arch = "x86_64")]
+    // Instruction traps: CPUID and RDTSC on x86_64, the generic-timer reads
+    // Hermit replaces with traps on aarch64.
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
     fn instruction_trap_ends_an_expired_target_by_default() {
         let config = Config {
@@ -10671,8 +10675,9 @@ mod timeslice_tests {
         assert!(state.instruction_trap_ends_timeslice(&config));
     }
 
-    // x86_64 only: instruction traps (CPUID, RDTSC) exist only there.
-    #[cfg(target_arch = "x86_64")]
+    // Instruction traps: CPUID and RDTSC on x86_64, the generic-timer reads
+    // Hermit replaces with traps on aarch64.
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
     fn instruction_trap_ends_an_expired_target_without_a_pmu_maximum() {
         // With PMU preemption disabled nothing else can break a busy-wait on
@@ -10694,8 +10699,9 @@ mod timeslice_tests {
         assert!(state.instruction_trap_ends_timeslice(&config));
     }
 
-    // x86_64 only: instruction traps (CPUID, RDTSC) exist only there.
-    #[cfg(target_arch = "x86_64")]
+    // Instruction traps: CPUID and RDTSC on x86_64, the generic-timer reads
+    // Hermit replaces with traps on aarch64.
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     #[test]
     fn instruction_trap_keeps_replayed_and_untargeted_boundaries() {
         // Without a target the slice end is the PMU maximum itself, and a

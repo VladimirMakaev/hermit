@@ -446,15 +446,23 @@ pub struct RunSummary {
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub exclusive_pairs: BTreeMap<String, u64>,
 
-    /// aarch64: the reads of the generic timer's virtual counter from EL0
-    /// (`MRS Xt, CNTVCT_EL0` or `CNTVCTSS_EL0`) in the guest's executable
-    /// file mappings, by guest path, for the files that have any. Such a
-    /// read makes no stop Hermit sees, so Detcore cannot virtualize it and a
-    /// guest whose control flow depends on one is not deterministic. A
-    /// function of the files' bytes, so it is in the INFO view. Empty
-    /// elsewhere.
+    /// aarch64: the reads of the generic timer from EL0 (`MRS Xt,
+    /// CNTVCT_EL0`, `CNTVCTSS_EL0` or `CNTFRQ_EL0`) in the guest's executable
+    /// file mappings that were not replaced by traps, by guest path, for the
+    /// files that have any. Such a read makes no stop Hermit sees, so Detcore
+    /// cannot virtualize it and a guest whose control flow depends on one is
+    /// not deterministic. A function of the files' bytes and the run's
+    /// configuration, so it is in the INFO view. Empty elsewhere.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub counter_reads: BTreeMap<String, u64>,
+
+    /// aarch64: the EL0 generic-timer reads replaced by traps that Detcore
+    /// answers with virtual time, by guest path, for the files that have
+    /// any: in the guest's memory, or in a rewritten copy of the file. A
+    /// function of the files' bytes and the run's configuration, so it is in
+    /// the INFO view. Empty elsewhere.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub counter_reads_trapped: BTreeMap<String, u64>,
 
     /// aarch64, `--rewrite-exclusives` in a run without a mount namespace:
     /// what rewriting the exclusive loops in the guest's memory did to each
@@ -907,6 +915,7 @@ impl RunSummary {
             host_id_tasks,
             exclusive_pairs,
             counter_reads,
+            counter_reads_trapped,
             exclusive_rewrites,
             exclusive_rewrite_cache_peak,
             store_exclusives,
@@ -1005,6 +1014,17 @@ impl RunSummary {
                 counter_reads.len()
             )?;
             for (path, reads) in counter_reads {
+                writeln!(f, "  {path}: {reads}")?;
+            }
+        }
+        if !counter_reads_trapped.is_empty() {
+            writeln!(
+                f,
+                "EL0 generic-timer counter reads replaced by traps that Detcore answers, in \
+                 executable mappings of {} file(s):",
+                counter_reads_trapped.len()
+            )?;
+            for (path, reads) in counter_reads_trapped {
                 writeln!(f, "  {path}: {reads}")?;
             }
         }

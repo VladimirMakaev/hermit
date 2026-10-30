@@ -30,6 +30,8 @@
 use reverie::Errno;
 use reverie::Guest;
 use reverie::Pid;
+#[cfg(target_arch = "aarch64")]
+use reverie::Stack;
 use reverie::syscalls::Addr;
 use reverie::syscalls::AddrMut;
 use reverie::syscalls::MemoryAccess;
@@ -203,6 +205,109 @@ where
         );
         drop_copy(guest);
     }
+}
+
+/// What putting back a signal's state after a trap Detcore emulated found.
+#[cfg(target_arch = "aarch64")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ForcedTrapRepair {
+    /// The signal was neither blocked nor ignored, so forcing it changed
+    /// nothing.
+    Unchanged,
+    /// Linux had reset it to the default action and unblocked it; the
+    /// guest's action and mask are back.
+    Restored,
+    /// The copy is unknown, so whether Linux changed anything is too.
+    Unknown,
+}
+
+/// What forcing a signal changed, from the thread's copy before it: the
+/// action to write back (the guest's, where Linux reset it to `SIG_DFL`)
+/// and whether to block the signal again. `None` when it changed nothing:
+/// Linux resets the action and unblocks the signal only when it was
+/// ignored or blocked (`force_sig_info_to_task`, kernel/signal.c), and a
+/// default action it resets is the same action.
+#[cfg(any(test, target_arch = "aarch64"))]
+fn forced_trap_effects(blocked: bool, action: Action) -> Option<(Option<Action>, bool)> {
+    if !blocked && !action.is_ignored() {
+        return None;
+    }
+    Some((
+        (action.handler != SIG_DFL_HANDLER).then_some(action),
+        blocked,
+    ))
+}
+
+/// `SIG_DFL`.
+#[cfg(any(test, target_arch = "aarch64"))]
+const SIG_DFL_HANDLER: u64 = 0;
+
+/// Put back what a synchronous fault Detcore emulates and suppresses
+/// changed: forcing `signal` (`force_sig_fault`, through
+/// `force_sig_info_to_task`, kernel/signal.c) resets its action to `SIG_DFL`
+/// for the whole group and unblocks it in the faulting thread when it was
+/// ignored or blocked, before the ptrace stop that reports it. A guest that
+/// executed the trap Hermit put in place of its instruction never asked
+/// for that, so the action and the mask this thread's copy holds are
+/// written back with injected `rt_sigaction` and `rt_sigprocmask`, which
+/// the copy does not record (it already holds those values). Nothing is
+/// injected when the signal was neither ignored nor blocked. Only aarch64
+/// emulates a trap that Linux forces this way (`Detcore::emulate_counter_trap`).
+#[cfg(target_arch = "aarch64")]
+pub(crate) async fn restore_after_forced_trap<G, T>(
+    guest: &mut G,
+    signal: i32,
+) -> Result<ForcedTrapRepair, Errno>
+where
+    G: Guest<Detcore<T>>,
+    T: RecordOrReplay,
+{
+    let Some(shadow) = guest.thread_state().signal_shadow.as_ref() else {
+        return Ok(ForcedTrapRepair::Unknown);
+    };
+    let blocked = shadow.thread.blocked & sigbit(signal) != 0;
+    let action = match shadow.dispositions.lock().unwrap().as_ref() {
+        Some(dispositions) => dispositions.action(signal)?,
+        None => return Ok(ForcedTrapRepair::Unknown),
+    };
+    let Some((restore, blocked)) = forced_trap_effects(blocked, action) else {
+        return Ok(ForcedTrapRepair::Unchanged);
+    };
+    if let Some(action) = restore {
+        let mut stack = guest.stack().await;
+        let cell = stack.push(KernelSigaction {
+            handler: action.handler,
+            flags: action.flags,
+            restorer: action.restorer,
+            mask: action.mask,
+        });
+        let _guard = stack.commit().map_err(|_| Errno::EFAULT)?;
+        guest
+            .inject(
+                reverie::syscalls::RtSigaction::new()
+                    .with_signum(signal)
+                    .with_action(Some(cell.cast()))
+                    .with_old_action(None)
+                    .with_sigsetsize(super::threads::KERNEL_SIGSET_SIZE),
+            )
+            .await?;
+    }
+    if blocked {
+        let mut stack = guest.stack().await;
+        let mask: KernelSigset = sigbit(signal);
+        let cell = stack.push(mask);
+        let _guard = stack.commit().map_err(|_| Errno::EFAULT)?;
+        guest
+            .inject(
+                reverie::syscalls::RtSigprocmask::new()
+                    .with_how(libc::SIG_BLOCK)
+                    .with_set(Some(cell.cast()))
+                    .with_oldset(None)
+                    .with_sigsetsize(super::threads::KERNEL_SIGSET_SIZE),
+            )
+            .await?;
+    }
+    Ok(ForcedTrapRepair::Restored)
 }
 
 /// Drops this thread's copy: threads it creates start without one, and the
@@ -2073,6 +2178,35 @@ where
 
 #[cfg(test)]
 mod tests {
+    /// A forced trap changed a signal's state only where it was ignored or
+    /// blocked, and then the guest's own action (unless the default) and
+    /// mask are written back.
+    #[test]
+    fn a_forced_trap_is_undone_only_where_it_changed_something() {
+        use super::forced_trap_effects;
+        let action = |handler: u64| crate::signal_state::Action {
+            handler,
+            flags: 0x0400_0000,
+            restorer: 0x1234,
+            mask: 1 << 3,
+        };
+        // Default and unblocked, or caught and unblocked: nothing changed.
+        assert_eq!(forced_trap_effects(false, action(0)), None);
+        assert_eq!(forced_trap_effects(false, action(0x40_0000)), None);
+        // Ignored: the action is reset, the mask was not touched.
+        assert_eq!(
+            forced_trap_effects(false, action(1)),
+            Some((Some(action(1)), false))
+        );
+        // Blocked and caught: both.
+        assert_eq!(
+            forced_trap_effects(true, action(0x40_0000)),
+            Some((Some(action(0x40_0000)), true))
+        );
+        // Blocked with the default action: only the mask.
+        assert_eq!(forced_trap_effects(true, action(0)), Some((None, true)));
+    }
+
     use std::cell::Cell;
     use std::rc::Rc;
 

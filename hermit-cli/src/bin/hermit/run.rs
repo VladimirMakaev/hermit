@@ -1093,6 +1093,9 @@ struct PreprocessOverlay {
     /// reach the guest only once the container has mounted the copy, so they
     /// are reported as applied from inside it, and as planned before.
     rewritten: Option<usize>,
+    /// For an exclusive-loop overlay, the EL0 generic-timer reads its copy
+    /// replaced by traps Detcore answers, reported with `rewritten`.
+    counter_traps: usize,
 }
 
 /// The line `--rewrite-exclusives` prints for one file it rewrote into the
@@ -1103,14 +1106,27 @@ fn exclusive_rewrite_planned_line(
     guest_path: &Path,
     report: &hermit::aarch64_lse::elf::FileReport,
 ) -> String {
-    let mount = if report.patched_total() == 0 {
+    let mount = if report.patched_total() + report.counter_patched_total() == 0 {
         "nothing to rewrite, so no copy is mounted"
     } else {
         "applied when the container mounts the copy"
     };
+    // Named only when the file reads the counter, so the line is otherwise
+    // the one it always was.
+    let counters = if report.counter_reads == 0 {
+        String::new()
+    } else {
+        format!(
+            "counter_reads={}; counter_traps_planned={} {:?}; counter_reads_left={:?}; ",
+            report.counter_reads,
+            report.counter_patched_total(),
+            report.counter_patched,
+            report.counter_left,
+        )
+    };
     format!(
         ":: Exclusive-loop rewrite: {}: exclusive_instructions={}; planned={} {:?}; \
-         left_alone={} {:?}; skipped_segments={:?}; {mount}",
+         left_alone={} {:?}; skipped_segments={:?}; {counters}{mount}",
         guest_path.display(),
         report.exclusive_instructions,
         report.patched_total(),
@@ -1128,9 +1144,14 @@ fn exclusive_rewrite_applied_lines(overlays: &[PreprocessOverlay]) -> Vec<String
         .iter()
         .filter_map(|overlay| {
             overlay.rewritten.map(|rewritten| {
+                let traps = if overlay.counter_traps == 0 {
+                    String::new()
+                } else {
+                    format!(", counter_reads_trapped={}", overlay.counter_traps)
+                };
                 format!(
-                    ":: Exclusive-loop rewrite applied: {}: rewritten={rewritten}, mounted over \
-                     the original",
+                    ":: Exclusive-loop rewrite applied: {}: rewritten={rewritten}{traps}, \
+                     mounted over the original",
                     overlay.target.display()
                 )
             })
@@ -1653,6 +1674,10 @@ pub struct RunOpts {
     /// to carry such an overlay, so the loops of every executable file the
     /// guest maps are rewritten in its memory instead, as each is mapped; see
     /// `--rewrite-exclusives-mode`.
+    ///
+    /// With virtual time the overlay also replaces the guest's EL0 reads of
+    /// the generic timer (`CNTVCT_EL0`, `CNTFRQ_EL0`) with traps Detcore
+    /// answers, as Hermit does in memory by default (docs/AARCH64_COUNTER_TRAPS.md).
     #[clap(long)]
     pub(crate) rewrite_exclusives: bool,
 
@@ -3305,12 +3330,14 @@ fn an_exclusive_rewrite_overlay_reports_rewritten_only_once_mounted() {
             source: PathBuf::from("/cache/guest"),
             target: PathBuf::from("/bin/guest"),
             rewritten: Some(9),
+            counter_traps: 0,
         },
         // e9patch's overlay rewrites no exclusive loop.
         PreprocessOverlay {
             source: PathBuf::from("/cache/patched-echo"),
             target: PathBuf::from("/bin/echo"),
             rewritten: None,
+            counter_traps: 0,
         },
     ];
     assert_eq!(
@@ -4122,6 +4149,7 @@ fn e9patch_preserves_executable_identity_and_uses_ptrace_runtime() {
         source: PathBuf::from("/cache/patched-echo"),
         target: PathBuf::from("/bin/echo"),
         rewritten: None,
+        counter_traps: 0,
     });
     let command = ro.guest_command().unwrap();
     assert_eq!(command.get_program(), "/bin/echo");
@@ -14368,7 +14396,19 @@ impl RunOpts {
             // cache entry that differs -- an older rewriter's, or anyone
             // else's -- is replaced rather than mounted.
             let mut rewritten = input.clone();
-            let report = hermit::aarch64_lse::elf::rewrite_bytes(&mut rewritten)?;
+            // The guest's EL0 counter reads become traps Detcore answers with
+            // virtual time, whenever time is virtual: the overlay carries
+            // them for the files it covers, as the in-memory rewrite does for
+            // the others.
+            let options = hermit::aarch64_lse::elf::PlanOptions {
+                loops: true,
+                counters: self
+                    .det_opts
+                    .det_config
+                    .virtualize_time
+                    .then(hermit::aarch64_lse::counter::host),
+            };
+            let report = hermit::aarch64_lse::elf::rewrite_bytes_with(&mut rewritten, options)?;
             if report.is_some() && fs::read(&output).ok().as_deref() != Some(&rewritten) {
                 hermit::aarch64_lse::elf::write_rewritten(&output, &rewritten, &host_path)?;
             }
@@ -14386,12 +14426,13 @@ impl RunOpts {
             for (addr, why) in &report.refused_examples {
                 tracing::info!("exclusive loop left alone at {addr:#x}: {why}");
             }
-            if report.patched_total() != 0 {
+            if report.patched_total() + report.counter_patched_total() != 0 {
                 self.validate_e9patch_source_visibility(&output)?;
                 self.exclusive_rewrite_overlays.push(PreprocessOverlay {
                     source: output,
                     target: guest_path,
                     rewritten: Some(report.patched_total()),
+                    counter_traps: report.counter_patched_total(),
                 });
             }
         }
@@ -14435,6 +14476,7 @@ impl RunOpts {
             self.validate_e9patch_mount_targets()?;
             self.validate_e9patch_source_visibility(&prepared.binary)?;
             self.e9patch_overlay = Some(PreprocessOverlay {
+                counter_traps: 0,
                 source: prepared.binary,
                 target: overlay_target,
                 rewritten: None,

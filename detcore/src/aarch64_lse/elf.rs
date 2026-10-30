@@ -32,6 +32,10 @@
 //! the loader's licence to change those bytes at load time, which would
 //! overwrite part of a rewritten sequence with something computed for the
 //! original one.
+//!
+//! The same sections, and the same refusals of writable text and relocated
+//! words, carry the counter-read traps of [`counter`] when a plan asks for
+//! them ([`PlanOptions::counters`]).
 
 use std::collections::BTreeMap;
 
@@ -40,6 +44,8 @@ use goblin::elf::header;
 use goblin::elf::program_header;
 use goblin::elf::section_header;
 
+use super::counter;
+use super::counter::CounterHost;
 use super::rewrite;
 use super::rewrite::Idiom;
 use super::rewrite::Refusal;
@@ -57,6 +63,14 @@ pub struct FileReport {
     pub refused_examples: Vec<(u64, String)>,
     /// Executable sections skipped entirely, with the reason.
     pub skipped_segments: Vec<String>,
+    /// EL0 generic-timer reads (`MRS` of `CNTVCT_EL0`, `CNTVCTSS_EL0` or
+    /// `CNTFRQ_EL0`) found in executable sections, when the plan asked for
+    /// counter traps.
+    pub counter_reads: usize,
+    /// The counter reads replaced by traps, by register.
+    pub counter_patched: BTreeMap<&'static str, usize>,
+    /// The counter reads left, by reason.
+    pub counter_left: BTreeMap<&'static str, usize>,
 }
 
 impl FileReport {
@@ -75,6 +89,38 @@ impl FileReport {
     pub fn complete(&self) -> bool {
         self.refused_total() == 0 && self.skipped_segments.is_empty()
     }
+
+    /// The counter reads replaced by traps.
+    pub fn counter_patched_total(&self) -> usize {
+        self.counter_patched.values().sum()
+    }
+}
+
+/// What a plan covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PlanOptions {
+    /// Rewrite exclusive loops to LSE atomics.
+    pub loops: bool,
+    /// Replace EL0 counter reads with traps (`counter`), for a host that
+    /// executes what this says; `None` leaves them.
+    pub counters: Option<CounterHost>,
+}
+
+impl PlanOptions {
+    /// Exclusive loops only.
+    pub const LOOPS: PlanOptions = PlanOptions {
+        loops: true,
+        counters: None,
+    };
+}
+
+/// What a patch replaces.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PatchKind {
+    /// An exclusive loop, by an LSE atomic sequence of the same length.
+    Loop,
+    /// One EL0 counter read, by its trap.
+    CounterRead,
 }
 
 fn idiom_name(idiom: Idiom) -> &'static str {
@@ -112,6 +158,8 @@ fn refusal_detail(reason: &Refusal) -> String {
 /// after. Same length, so applying it moves nothing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePatch {
+    /// What it replaces.
+    pub kind: PatchKind,
     /// File offset of the sequence's first instruction.
     pub offset: u64,
     /// The sequence as the file holds it.
@@ -136,7 +184,15 @@ pub struct FilePlan {
 /// error: a caller that was handed the wrong file should say so and run the
 /// original.
 pub fn rewrite_bytes(bytes: &mut [u8]) -> Result<Option<FileReport>, goblin::error::Error> {
-    let Some(plan) = plan_bytes(bytes)? else {
+    rewrite_bytes_with(bytes, PlanOptions::LOOPS)
+}
+
+/// [`rewrite_bytes`] for what `options` covers.
+pub fn rewrite_bytes_with(
+    bytes: &mut [u8],
+    options: PlanOptions,
+) -> Result<Option<FileReport>, goblin::error::Error> {
+    let Some(plan) = plan_bytes_with(bytes, options)? else {
         return Ok(None);
     };
     for patch in &plan.patches {
@@ -152,6 +208,14 @@ pub fn rewrite_bytes(bytes: &mut [u8]) -> Result<Option<FileReport>, goblin::err
 /// process's mapped pages) gets exactly the bytes a rewritten file would
 /// hold.
 pub fn plan_bytes(bytes: &[u8]) -> Result<Option<FilePlan>, goblin::error::Error> {
+    plan_bytes_with(bytes, PlanOptions::LOOPS)
+}
+
+/// [`plan_bytes`] for what `options` covers.
+pub fn plan_bytes_with(
+    bytes: &[u8],
+    options: PlanOptions,
+) -> Result<Option<FilePlan>, goblin::error::Error> {
     // A guest that is not an ELF image at all -- a `#!` script, say -- is not
     // an error: it simply has nothing to rewrite. A file that starts like an
     // ELF and then does not parse IS an error, because something is wrong
@@ -262,6 +326,9 @@ pub fn plan_bytes(bytes: &[u8]) -> Result<Option<FilePlan>, goblin::error::Error
         .collect();
     let mut report = FileReport::default();
     let mut patches = Vec::new();
+    // Each executable section's counter plan: its file offset, its address
+    // and the plan, settled once every section is seen.
+    let mut counter_plans: Vec<(usize, u64, counter::CounterPlan)> = Vec::new();
     if relr_unreadable {
         report
             .skipped_segments
@@ -283,12 +350,6 @@ pub fn plan_bytes(bytes: &[u8]) -> Result<Option<FilePlan>, goblin::error::Error
             ));
             continue;
         }
-        if writable {
-            report.skipped_segments.push(format!(
-                "executable section at {vaddr:#x} is in a writable mapping"
-            ));
-            continue;
-        }
         let count = (end - start) / 4;
         let words: Vec<u32> = (0..count)
             .map(|i| {
@@ -296,6 +357,27 @@ pub fn plan_bytes(bytes: &[u8]) -> Result<Option<FilePlan>, goblin::error::Error
                 u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
             })
             .collect();
+        if let Some(host) = options.counters {
+            let mut counters = counter::plan(&words, vaddr, host);
+            if writable {
+                let sites = std::mem::take(&mut counters.sites);
+                counters.left.extend(
+                    sites
+                        .into_iter()
+                        .map(|site| (site.addr, site.register, counter::CounterLeft::WritableText)),
+                );
+            }
+            counter_plans.push((start, vaddr, counters));
+        }
+        if writable {
+            report.skipped_segments.push(format!(
+                "executable section at {vaddr:#x} is in a writable mapping"
+            ));
+            continue;
+        }
+        if !options.loops {
+            continue;
+        }
         let mut plan = rewrite::plan_with_external_targets(&words, vaddr, &external_targets);
         // A relocation inside a sequence means the loader will write those
         // bytes itself, for the instruction that used to be there.
@@ -339,13 +421,75 @@ pub fn plan_bytes(bytes: &[u8]) -> Result<Option<FilePlan>, goblin::error::Error
                 words.iter().flat_map(|word| word.to_le_bytes()).collect()
             };
             patches.push(FilePatch {
+                kind: PatchKind::Loop,
                 offset: (start + 4 * index) as u64,
                 original: to_bytes(&words[index..index + site.words.len()]),
                 rewritten: to_bytes(&site.words),
             });
         }
     }
+    settle_counter_plans(counter_plans, &relocated, &mut report, &mut patches);
     Ok(Some(FilePlan { report, patches }))
+}
+
+/// Turn the sections' counter plans into patches and counts. A reserved
+/// immediate anywhere in the image's code keeps every counter read of the
+/// image, so that each trap word a rewritten image holds is one this rewrite
+/// wrote; a word a relocation covers is left too.
+fn settle_counter_plans(
+    plans: Vec<(usize, u64, counter::CounterPlan)>,
+    relocated: &[(u64, u64)],
+    report: &mut FileReport,
+    patches: &mut Vec<FilePatch>,
+) {
+    let reserved = plans.iter().any(|(_, _, plan)| plan.reserved != 0);
+    // A loop's sequence holds only decoded register instructions, never an
+    // `MRS`, so no counter read lies inside one; checked all the same, so a
+    // word is never patched twice.
+    let loops: Vec<(u64, u64)> = patches
+        .iter()
+        .map(|patch| (patch.offset, patch.offset + patch.original.len() as u64))
+        .collect();
+    for (start, vaddr, plan) in plans {
+        report.counter_reads += plan.reads();
+        for (_, _, why) in &plan.left {
+            *report.counter_left.entry(why.name()).or_default() += 1;
+        }
+        for site in plan.sites {
+            let offset = start as u64 + (site.addr - vaddr);
+            assert!(
+                !loops
+                    .iter()
+                    .any(|(from, to)| *from < offset + 4 && offset < *to),
+                "a counter read at file offset {offset:#x} inside a rewritten loop"
+            );
+            let why = if reserved {
+                Some(counter::CounterLeft::ReservedWordPresent)
+            } else if relocated
+                .iter()
+                .any(|(from, to)| *from < site.addr + 4 && site.addr < *to)
+            {
+                Some(counter::CounterLeft::Relocated)
+            } else {
+                None
+            };
+            if let Some(why) = why {
+                *report.counter_left.entry(why.name()).or_default() += 1;
+                continue;
+            }
+            *report
+                .counter_patched
+                .entry(site.register.name())
+                .or_default() += 1;
+            let original = counter::CounterRegister::mrs_base(site.register) | u32::from(site.rt);
+            patches.push(FilePatch {
+                kind: PatchKind::CounterRead,
+                offset,
+                original: original.to_le_bytes().to_vec(),
+                rewritten: site.word.to_le_bytes().to_vec(),
+            });
+        }
+    }
 }
 
 /// The byte ranges a packed relative relocation section covers.
@@ -479,6 +623,111 @@ mod tests {
         let mut applied = image;
         applied[0x104..0x104 + patch.rewritten.len()].copy_from_slice(&patch.rewritten);
         assert_eq!(applied, rewritten);
+    }
+
+    /// Counter reads become their traps when a plan asks for them, beside
+    /// the loops, and are left alone (and uncounted) when it does not.
+    #[test]
+    fn counter_reads_become_traps_only_when_asked() {
+        // mrs x9, cntvct_el0; <the loop above>; mrs x2, cntfrq_el0; ret
+        let words = [
+            0xd53b_e049,
+            0x885f_fc08,
+            0x1100_0508,
+            0x8809_fc08,
+            0x35ff_ffa9,
+            0xd53b_e002,
+            0xd65f_03c0,
+        ];
+        let image = elf_with_text(&words);
+        let loops_only = plan_bytes(&image).unwrap().unwrap();
+        assert_eq!(loops_only.report.counter_reads, 0);
+        assert!(
+            loops_only
+                .patches
+                .iter()
+                .all(|patch| patch.kind == PatchKind::Loop)
+        );
+
+        let options = PlanOptions {
+            loops: true,
+            counters: Some(CounterHost::default()),
+        };
+        let plan = plan_bytes_with(&image, options).unwrap().unwrap();
+        assert_eq!(plan.report.counter_reads, 2);
+        assert_eq!(plan.report.counter_patched_total(), 2);
+        assert_eq!(plan.report.patched_total(), 1, "the loop as before");
+        let counters: Vec<(u64, Vec<u8>, Vec<u8>)> = plan
+            .patches
+            .iter()
+            .filter(|patch| patch.kind == PatchKind::CounterRead)
+            .map(|patch| {
+                (
+                    patch.offset,
+                    patch.original.clone(),
+                    patch.rewritten.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            counters,
+            vec![
+                (
+                    0x100,
+                    0xd53b_e049u32.to_le_bytes().to_vec(),
+                    0x0000_c709u32.to_le_bytes().to_vec()
+                ),
+                (
+                    0x114,
+                    0xd53b_e002u32.to_le_bytes().to_vec(),
+                    0x0000_c742u32.to_le_bytes().to_vec()
+                ),
+            ]
+        );
+
+        // Counters alone: the loop stays.
+        let counters_only = PlanOptions {
+            loops: false,
+            ..options
+        };
+        let plan = plan_bytes_with(&image, counters_only).unwrap().unwrap();
+        assert_eq!(plan.report.patched_total(), 0);
+        assert_eq!(plan.patches.len(), 2);
+
+        // The rewritten file holds the traps where the reads were and nothing
+        // else changed.
+        let mut rewritten = image.clone();
+        rewrite_bytes_with(&mut rewritten, options)
+            .unwrap()
+            .unwrap();
+        let differ: Vec<usize> = (0..image.len())
+            .filter(|i| image[*i] != rewritten[*i])
+            .collect();
+        assert!(
+            differ.iter().all(|i| (0x100..0x118).contains(i)),
+            "{differ:x?}"
+        );
+        assert_eq!(&rewritten[0x100..0x104], &0x0000_c709u32.to_le_bytes());
+        assert_eq!(&rewritten[0x114..0x118], &0x0000_c742u32.to_le_bytes());
+    }
+
+    /// An image whose code already holds a reserved immediate keeps every
+    /// counter read, so a trap word in a rewritten image is always ours.
+    #[test]
+    fn an_image_with_a_reserved_immediate_keeps_its_counter_reads() {
+        // mrs x9, cntvct_el0; ret; udf #0xc701
+        let image = elf_with_text(&[0xd53b_e049, 0xd65f_03c0, 0x0000_c701]);
+        let options = PlanOptions {
+            loops: true,
+            counters: Some(CounterHost::default()),
+        };
+        let plan = plan_bytes_with(&image, options).unwrap().unwrap();
+        assert_eq!(plan.patches, vec![]);
+        assert_eq!(plan.report.counter_reads, 1);
+        assert_eq!(
+            plan.report.counter_left.get("reserved-udf-present"),
+            Some(&1)
+        );
     }
 
     /// A relocation section's entries must be seen, including the packed

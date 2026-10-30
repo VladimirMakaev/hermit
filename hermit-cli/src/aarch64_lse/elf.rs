@@ -34,15 +34,16 @@ pub fn write_rewritten(output: &Path, bytes: &[u8], source: &Path) -> anyhow::Re
     Ok(())
 }
 
-/// Read `input`, rewrite it, and write the result to `output` with `input`'s
-/// permissions.
+/// Read `input`, rewrite what `options` covers, and write the result to
+/// `output` with `input`'s permissions.
 pub fn rewrite_file(
     input: impl AsRef<Path>,
     output: impl AsRef<Path>,
+    options: PlanOptions,
 ) -> anyhow::Result<Option<FileReport>> {
     let input = input.as_ref();
     let mut bytes = std::fs::read(input)?;
-    let report = match rewrite_bytes(&mut bytes)? {
+    let report = match rewrite_bytes_with(&mut bytes, options)? {
         Some(report) => report,
         None => return Ok(None),
     };

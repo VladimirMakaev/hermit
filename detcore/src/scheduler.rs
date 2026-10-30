@@ -20672,6 +20672,7 @@ impl Scheduler {
                 // store-exclusive sequences (aarch64).
                 exclusive_pairs: Default::default(),
                 counter_reads: Default::default(),
+                counter_reads_trapped: Default::default(),
                 exclusive_rewrites: Default::default(),
                 exclusive_rewrite_cache_peak: 0,
                 store_exclusives: None,

@@ -443,7 +443,7 @@ use crate::syscall_classification::is_unsupported_async_ipc_syscall;
 use crate::syscall_classification::is_zero_copy_pipe_syscall;
 use crate::syscalls::helpers::with_guest_rip;
 use crate::syscalls::helpers::with_guest_time;
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 use crate::syscalls::time::guest_clock_time;
 use crate::tool_global::resource_request;
 use crate::tool_global::trace_schedevent;
@@ -839,9 +839,10 @@ enum TurnScope {
 enum CheckIn {
     /// A syscall, signal, timer, exec or thread start: any expired slice ends.
     Event,
-    /// A trapped `rdtsc` or `cpuid` in the middle of user code: see
-    /// [`ThreadState::instruction_trap_ends_timeslice`]. Only x86 traps them.
-    #[cfg(target_arch = "x86_64")]
+    /// A trapped `rdtsc` or `cpuid` (x86), or a trapped read of the generic
+    /// timer (aarch64, `Detcore::emulate_counter_trap`), in the middle of
+    /// user code: see [`ThreadState::instruction_trap_ends_timeslice`].
+    #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
     InstructionTrap,
 }
 
@@ -893,6 +894,149 @@ pub fn virtual_cpuid_digest(cfg: &Config) -> [u8; 32] {
 /// (`ThreadState::returned_from_sigreturn`).
 pub fn observes_sigreturns(cfg: &Config) -> bool {
     syscalls::signal_shadow::observes_sigreturns(cfg)
+}
+
+#[cfg(target_arch = "aarch64")]
+impl<T: RecordOrReplay> Detcore<T> {
+    /// Answer a SIGILL raised by a counter trap: the `UDF` that Hermit put in
+    /// place of an EL0 read of the generic timer (`aarch64_lse::counter`),
+    /// in a guest image or in the guest's memory. Returns false, changing
+    /// nothing, for any other SIGILL: one at an address no rewrite of this
+    /// run registered ([`store_exclusive::counter_trap_at`]), or where the
+    /// guest's memory no longer holds the trap.
+    ///
+    /// The read is this architecture's `RDTSC`, and is answered as
+    /// [`Tool::handle_rdtsc_event`] answers that: an instruction trap for the
+    /// scheduler (it may end an expired slice as a trapped `rdtsc` does), a
+    /// virtual-instruction charge on the thread's clock, the `rdtsc` event in
+    /// a traced schedule, and the guest clock's time, read before the event
+    /// is traced. `CNTVCT_EL0` and `CNTVCTSS_EL0` read that time in
+    /// nanoseconds, which `CNTFRQ_EL0` then reports as a 1 GHz count
+    /// ([`aarch64_lse::counter::VIRTUAL_COUNTER_FREQUENCY`]), so a guest
+    /// converting the count gets `clock_gettime`'s time, on any host. With
+    /// time not virtualized the host's own registers are read.
+    ///
+    /// The value goes to the instruction's destination (none for `XZR`),
+    /// the PC steps past the trap, and what forcing SIGILL changed is put
+    /// back ([`syscalls::signal_shadow::restore_after_forced_trap`]). No
+    /// other register, flag or memory changes, as the original `MRS` changes
+    /// none.
+    async fn emulate_counter_trap<G: Guest<Self>>(&self, guest: &mut G) -> Result<bool, Errno> {
+        use crate::aarch64_lse::counter;
+        let mut regs = guest.regs().await;
+        let pc = regs.pc;
+        let Some(word) = store_exclusive::counter_trap_at(guest, pc) else {
+            return Ok(false);
+        };
+        let Some(at) = reverie::syscalls::Addr::<u32>::from_raw(pc as usize) else {
+            return Ok(false);
+        };
+        if guest.memory().read_value(at).ok() != Some(word) {
+            return Ok(false);
+        }
+        let Some((register, rt)) = counter::decode_trap(word) else {
+            return Ok(false);
+        };
+        trace!(
+            "counter trap: {} into x{} at {:#x}",
+            register.name(),
+            rt,
+            pc
+        );
+        // A trapped instruction stops the guest in user code (A5 step 3.2).
+        guest.thread_state_mut().delivery_interruption = Some(reverie::Interruption::NotInSyscall);
+        if self.cfg.backend.virtualizes_guest_sigalrm && guest.thread_state().sigalrm_handled {
+            self.sync_sigalrm_eligibility(guest).await;
+        }
+        let boundary_entry = slice_boundary::callbacks::Callback::Rdtsc;
+        let boundary_token = self
+            .pre_handler_hook_observed(guest, false, CheckIn::InstructionTrap, Some(boundary_entry))
+            .await;
+        let value = if guest.config().virtualize_time {
+            let dettid = guest.thread_state().dettid;
+            guest.thread_state_mut().thread_logical_time.add_rdtsc();
+            crate::ordered_info!(
+                "[dtid {}] inbound {} read, new logical time: {:?}",
+                dettid,
+                register.name(),
+                guest.thread_state().thread_logical_time
+            );
+            // Read before the event is traced, as `handle_rdtsc_event` does.
+            let now = guest_clock_time(guest).await;
+            if self.cfg.observes_schedevents() {
+                let ev = with_guest_time(
+                    guest,
+                    SchedEvent {
+                        dettid,
+                        op: Op::Rdtsc,
+                        count: 1,
+                        start_rip: None,
+                        end_rip: None,
+                        end_time: None,
+                        stopless: false,
+                        strex_fails: Default::default(),
+                    },
+                );
+                trace_schedevent(guest, ev, true).await;
+            }
+            counter::virtual_value(register, now.as_nanos())
+        } else {
+            host_counter(register)
+        };
+        match syscalls::signal_shadow::restore_after_forced_trap(guest, libc::SIGILL).await? {
+            syscalls::signal_shadow::ForcedTrapRepair::Unknown => {
+                static WARNED: std::sync::Once = std::sync::Once::new();
+                WARNED.call_once(|| {
+                    warn!(
+                        "[dtid {}] a counter trap could not tell whether SIGILL was blocked or \
+                         ignored (the signal-state copy is unknown): if it was, Linux reset its \
+                         action to the default and unblocked it when the trap was taken",
+                        guest.thread_state().dettid
+                    )
+                });
+            }
+            syscalls::signal_shadow::ForcedTrapRepair::Unchanged
+            | syscalls::signal_shadow::ForcedTrapRepair::Restored => {}
+        }
+        complete_counter_read(&mut regs, rt, value);
+        guest.set_regs(regs).await.map_err(|error| {
+            warn!("writing a counter trap's result at {pc:#x} failed: {error}");
+            Errno::EIO
+        })?;
+        self.post_handler_hook_observed(guest, CheckIn::InstructionTrap, boundary_token)
+            .await;
+        Ok(true)
+    }
+}
+
+/// Finish a trapped `MRS X<rt>, <counter>` in `regs`: `value` goes to the
+/// destination, none for `XZR` (31), and the PC steps past the one
+/// instruction. Nothing else changes, as the `MRS` changes nothing else.
+#[cfg(target_arch = "aarch64")]
+fn complete_counter_read(regs: &mut libc::user_regs_struct, rt: u8, value: u64) {
+    if let Some(destination) = regs.regs.get_mut(usize::from(rt)) {
+        *destination = value;
+    }
+    regs.pc += 4;
+}
+
+/// The host's own value of a generic-timer register, for a counter trap in
+/// a run whose time is not virtual: the counter is system-wide, so the
+/// tracer's read is the guest's.
+#[cfg(target_arch = "aarch64")]
+fn host_counter(register: aarch64_lse::counter::CounterRegister) -> u64 {
+    let value: u64;
+    match register {
+        aarch64_lse::counter::CounterRegister::Cntfrq => {
+            // SAFETY: reads a register Linux lets EL0 read; no memory access.
+            unsafe { std::arch::asm!("mrs {}, cntfrq_el0", out(reg) value) }
+        }
+        _ => {
+            // SAFETY: as above; `isb` orders the read after what came before.
+            unsafe { std::arch::asm!("isb", "mrs {}, cntvct_el0", out(reg) value) }
+        }
+    }
+    value
 }
 
 impl<T: RecordOrReplay> Detcore<T> {
@@ -2827,7 +2971,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         };
         let ends = match boundary {
             CheckIn::Event => thread_state.timeslice_expired(),
-            #[cfg(target_arch = "x86_64")]
+            #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
             CheckIn::InstructionTrap => thread_state.instruction_trap_ends_timeslice(&self.cfg),
         };
         if !ends {
@@ -3047,7 +3191,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         thread.end_of_timeslice.is_some()
             && match boundary {
                 CheckIn::Event => thread.timeslice_expired(),
-                #[cfg(target_arch = "x86_64")]
+                #[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
                 CheckIn::InstructionTrap => thread.instruction_trap_ends_timeslice(&self.cfg),
             }
     }
@@ -4757,6 +4901,12 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
         signal: Signal,
     ) -> Result<Option<Signal>, Errno> {
         self.catch_up_lone_slice_ends(guest).await;
+        // A trap Hermit put in place of a generic-timer read is answered and
+        // suppressed: the guest executed a counter read, not a fault.
+        #[cfg(target_arch = "aarch64")]
+        if signal == Signal::SIGILL && self.emulate_counter_trap(guest).await? {
+            return Ok(None);
+        }
         let delivered = self
             .handle_inbound_signal(guest, SigWrapper::from(signal))
             .await?;
@@ -9446,6 +9596,39 @@ mod finished_syscall_display_tests {
         );
         for result in [Ok(0), Err(Errno::EBADF.into())] {
             assert_no_struct_rendered(&finish_line(&call, result));
+        }
+    }
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod counter_trap_tests {
+    use super::complete_counter_read;
+
+    /// A trapped read writes its destination alone, none for `XZR`, and
+    /// steps the PC past the one instruction.
+    #[test]
+    fn a_trapped_read_writes_only_its_destination() {
+        // SAFETY: `user_regs_struct` holds only integers.
+        let mut before: libc::user_regs_struct = unsafe { std::mem::zeroed() };
+        for (i, reg) in before.regs.iter_mut().enumerate() {
+            *reg = 0x1000 + i as u64;
+        }
+        before.sp = 0x7fff_0000;
+        before.pc = 0x40_0100;
+        before.pstate = 0x6000_0000;
+        for rt in 0..=31u8 {
+            let mut regs = before;
+            complete_counter_read(&mut regs, rt, 0xdead_beef);
+            assert_eq!(regs.pc, before.pc + 4, "x{rt}");
+            assert_eq!((regs.sp, regs.pstate), (before.sp, before.pstate), "x{rt}");
+            for i in 0..31 {
+                let expected = if i == usize::from(rt) {
+                    0xdead_beef
+                } else {
+                    before.regs[i]
+                };
+                assert_eq!(regs.regs[i], expected, "x{i} after a read into x{rt}");
+            }
         }
     }
 }

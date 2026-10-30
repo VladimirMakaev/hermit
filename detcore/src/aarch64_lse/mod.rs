@@ -18,12 +18,14 @@
 //! branches for the same work.
 //!
 //! [`insn`] holds the decoder and the encoders; [`rewrite`] holds the idioms
-//! and the in-place replacement; [`elf`] applies them to the executable
-//! sections of an ELF file's bytes. All three are pure functions of their
+//! and the in-place replacement; [`counter`] replaces the guest's direct
+//! reads of the generic timer with traps Detcore answers; [`elf`] applies
+//! them to the executable sections of an ELF file's bytes. All three are pure functions of their
 //! input and compile on every architecture, so their tests run everywhere.
 //! `hermit-cli` writes rewritten files with them; Detcore applies the same
 //! rewrite to a guest's mapped pages.
 
+pub mod counter;
 pub mod elf;
 pub mod insn;
 pub mod rewrite;

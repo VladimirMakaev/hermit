@@ -27,13 +27,14 @@
 //! writes.
 
 pub mod elf;
+pub use detcore::aarch64_lse::counter;
 pub use detcore::aarch64_lse::insn;
 pub use detcore::aarch64_lse::rewrite;
 
 /// Bumped whenever the rewrite's output for the same input can change. It is
 /// part of the cache key, so a cached artifact from an older rewriter is
 /// never reused.
-pub const REWRITE_FORMAT_VERSION: u32 = 2;
+pub const REWRITE_FORMAT_VERSION: u32 = 3;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
