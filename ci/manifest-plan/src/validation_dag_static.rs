@@ -2163,7 +2163,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_realized_pair_passes_over_a_creator_and_a_thread_start,
     // a_creator_is_passed_over_only_when_it_only_finishes_creating_another_thread,
     // phase6_takes_stack2_where_the_plan_says}: 1492.
-    ("test.hermit_unit", 1492),
+    // And the port onto PR 4857's racing accesses:
+    // analyze::phases::tests::the_racing_accesses_section_is_fed_where_the_positions_stop_matching
+    // and analyze::race_report::tests::a_replay_whose_events_moved_is_compared_as_it_ran: 1494.
+    ("test.hermit_unit", 1494),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6764,7 +6767,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seven trial-log-level tests: 1475.
     // And the same five report-stack tests: 1480.
     // And the same six stack2 thread-choice tests: 1486.
-    ("test.hermit_unit_on_host", 1486),
+    // And the same two port tests: 1488.
+    ("test.hermit_unit_on_host", 1488),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
