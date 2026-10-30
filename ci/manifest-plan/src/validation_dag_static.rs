@@ -1894,6 +1894,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And schedule_search::tests::schedules_without_a_reordering_end_with_no_single_swap: 1194.
     // And rundata::tests::a_recorded_target_run_replays_a_workspace_copy_within_an_explicit_bound: 1194.
     // And phases::tests::a_target_exit_code_is_the_one_hermit_run_exits_with: 1194.
+    // And the confirmation of a boundary trial the bound stopped:
+    // phases::tests::{a_trial_a_bound_stopped_does_not_decide_the_boundary,
+    // a_confirmed_trial_keeps_the_boundary,
+    // a_refuted_boundary_resumes_above_the_last_finished_miss,
+    // an_empty_prefix_that_meets_the_target_given_longer_ends_the_search} and
+    // rundata::tests::a_confirmation_lengthens_the_trial_bound: 1133.
+    // And phases::tests::a_boundary_trial_still_stopped_is_reported_as_a_hang,
+    // the_longest_finished_prefix_below_the_boundary_is_named and
+    // a_confirmation_raises_the_bound_and_keeps_it_once_finished: 1201.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5782,6 +5791,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same schedule-search test: 1188.
     // And the same run1-preemptions test: 1188.
     // And the same exit-code test: 1188.
+    // And the same five boundary-confirmation tests: 1133.
+    // And the same three prefix-hang tests: 1195.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
