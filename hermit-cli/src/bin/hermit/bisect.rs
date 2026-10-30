@@ -196,6 +196,7 @@ impl BisectOpts {
         analyzer.adopt_expired_wait_charge(Some(&self.bad))?;
         // Every replay registers queued sleeps as the failing schedule did.
         analyzer.adopt_sleep_registration(Some(&self.bad))?;
+        analyzer.adopt_recorded_timeslice(&[("--good", &self.good), ("--bad", &self.bad)])?;
         analyzer.refuse_recordings_under_another_pipe_wake_latency(&[
             ("--good", &self.good),
             ("--bad", &self.bad),
