@@ -2131,6 +2131,21 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And analyze's analyze_replays_a_run_argument_record_from_the_epoch_it_was_recorded_under: 1172.
     // And the lib's preemption_admission::tests::a_validated_stacktrace_log_file_is_refused_by_its_own_name: 1173.
     // And the four timeout_survivors report units: 1125.
+    // And analyze's verdict and precondition exits: verdict::tests::{a_verdict_is_written_in_snake_case,
+    // the_search_ends_that_no_swap_separates_are_a_precondition},
+    // schedule_search::tests::the_searches_ends_are_typed,
+    // phases::tests::{an_empty_prefix_that_meets_the_target_is_a_verdict,
+    // a_verdict_is_reported_and_ends_analyze_successfully,
+    // a_first_run_that_misses_ends_the_analysis_or_searches,
+    // bisection_ends_are_answered_by_their_kind,
+    // analyze_own_bisection_points_endpoint_misses_at_replay,
+    // a_selfcheck_difference_is_replay_not_reproducing,
+    // a_success_exit_code_that_means_something_else_is_refused} and
+    // tests::analyze_conclusions_have_their_own_exit_codes_and_class_lines: 1220.
+    // And analyze::verdict::tests::
+    // a_verdict_under_timing_settings_says_what_the_trial_showed and
+    // analyze::phases::tests::a_trial_under_another_setting_drops_the_option and
+    // the_alternative_timing_trial_decides_the_cause_by_how_it_ends: 1223.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6766,6 +6781,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same run-argument epoch unit: 1166.
     // And the same stacktrace-log-file unit: 1167.
     // And the same four timeout_survivors report units: 1119.
+    // And the same eleven verdict and precondition tests: 1214.
+    // And the same three timing-semantics verdict tests: 1217.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
