@@ -1232,6 +1232,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And event_stream::tests::finishing_a_stream_reports_the_error_of_its_last_write
     // and recorder::finish_tests::a_thread_stream_that_cannot_be_written_in_full_refuses_replay:
     // 1882, listed.
+    // a_reused_thread_id_starts_its_own_clock_and_keeps_the_old_work: 1881.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3449,6 +3450,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // reversal sorts in bounded memory: 2684, listed.
     // And the_format_is_the_presence_of_the_top_level_marker (a schedule's
     // format is read without a JSON tree of it): 2685, listed.
+    // And tool_global's reused-thread-ID clock units
+    // a_child_on_a_reused_id_starts_its_own_clock,
+    // an_early_start_on_a_reused_id_waits_for_its_registration,
+    // an_early_start_on_an_id_whose_holder_never_ran_keeps_its_clock,
+    // a_child_on_the_id_of_a_child_that_ran_and_exited_starts_its_own_clock
+    // and a_vfork_child_on_a_reused_id_starts_its_own_clock: 2687, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6025,6 +6032,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two in-flight-exit scheduler tests as test.detcore_unit: 2684.
     // The same two bubble-sort tests: 2684, listed.
     // And the same schedule-format probe test: 2685, listed.
+    // And the same five reused-thread-ID clock units: 2687, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6682,6 +6690,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // listed.
     // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1867.
     // And the same two stream-finish tests: 1868, listed.
+    // And the same reused-thread-ID detcore-model test: 1867.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
