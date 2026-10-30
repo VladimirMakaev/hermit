@@ -3761,6 +3761,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And tool_global's
     // a_replay_departure_beside_a_request_is_named_as_it_arrives: 2713,
     // listed.
+    // And procfs a_lookup_below_an_absent_cpu_or_node_finds_its_prefix,
+    // for lookups of absent CPUs and nodes: 2683, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5260,6 +5262,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (tests/c/branch_free_race.c, x86_64 only): 646.
     // And no_namespace_bisect_replays_the_schedules_it_writes: 648 + 1 = 649.
     // And no_namespace_minimize_replays_its_candidate_records: 649 + 1 = 650.
+    // absent_cpus_and_nodes_are_not_found_and_rseq_is_refused: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5917,6 +5920,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset tests, not excluded: 565.
     // And the same --no-namespace bisect test, not excluded: 567 + 1 = 568.
     // And the same --minimize test, not excluded: 568 + 1 = 569.
+    // And the same absent CPU and node lookup regression, not excluded: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6517,6 +6521,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same fifteen post-crash units: 2710, listed.
     // And the same six replay-departure units: 2712, listed.
     // And the same departure-beside-a-request unit: 2713, listed.
+    // And the same absent CPU and node prefix unit: 2683, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
