@@ -1315,7 +1315,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         let rip = guest.regs().await.rip;
         let Some(block) = restart_block.and_then(|block| block.resumed_at(rip)) else {
             trace!(
-                "[detcore, dtid {}] restart_syscall at {:#x} restarts no wait Detcore emulated ({:?})",
+                "[detcore, dtid {}] restart_syscall at {:#x} restarts no wait Detcore kept a record for ({:?})",
                 dettid, rip, restart_block
             );
             return self
@@ -1348,6 +1348,11 @@ impl<T: RecordOrReplay> Detcore<T> {
                     .deadline
                     .expect("a claimed nanosleep keeps its absolute deadline");
                 self.resume_nanosleep(guest, call, deadline).await
+            }
+            // A wait Detcore ran in the kernel as the guest made it resumes in
+            // the kernel, from the restart block that wait left.
+            syscalls::helpers::RestartCall::InKernel(sysno) => {
+                syscalls::helpers::resume_kernel_wait(guest, call, sysno).await
             }
         }
     }
@@ -6634,7 +6639,8 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
                 self.passthrough(guest, call).await
             }
             SyscallClassification::PassThrough => self.passthrough(guest, call).await,
-            // The kernel's restart of a wait Detcore emulates resumes it; any other
+            // The kernel's restart of a wait Detcore emulates, or ran in the
+            // kernel as the guest made it, resumes it; any other
             // `restart_syscall` keeps the unsupported-syscall policy below.
             // AUTONOMOUS-BOT-IMPLEMENTED
             SyscallClassification::Unsupported if call.number() == Sysno::restart_syscall => {
