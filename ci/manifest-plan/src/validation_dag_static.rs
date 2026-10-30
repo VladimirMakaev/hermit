@@ -3494,6 +3494,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // every guest task is: the sanitizer helper, a process, a thread, clone3,
     // a longer clone_args, a vfork on the caller's stack, a pidfd, and the
     // sizes and faults Linux refuses): 172.
+    // And kernel_run_poll_waits_time_out_through_ignored_signals: 165.
     ("test.detcore_misc", 182),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
@@ -4765,6 +4766,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And implicit_binds_take_the_same_ports_on_every_run: 623, listed.
     // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 623.
     // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 638.
+    // And kernel_run_poll_waits_are_not_ended_by_ignored_signals: 639.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5370,6 +5372,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // LiteInst guest: 542, listed.
     // And kernel_run_sleeps_and_futex_waits_restart_as_on_linux: 542.
     // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 557.
+    // And kernel_run_poll_waits_are_not_ended_by_ignored_signals: 558.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5452,6 +5455,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three unfollowed-pairing tests: 181.
     // And the same chroot connection test: 182.
     // And the same eight untraced_clone tests: 172.
+    // And kernel_run_poll_waits_time_out_through_ignored_signals: 165.
     ("test.detcore_misc_on_host", 182),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
