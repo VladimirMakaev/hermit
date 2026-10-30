@@ -536,6 +536,13 @@ pub struct AnalyzeOpts {
     /// set it to drive the searches without a guest.
     #[clap(skip)]
     pub trial_runner: TrialRunner,
+
+    /// The uncapped-slices mark the trials' schedules carry
+    /// (`PreemptionRecord::uncapped_slices`): set from the schedules they are
+    /// made from when those carry it, so that a trial's schedule replay
+    /// keeps their long slices (`Self::stamp_trial_record`).
+    #[clap(skip)]
+    pub trial_schedules_uncapped: std::cell::Cell<Option<u64>>,
 }
 
 /// `--continuation-timeslice`.
