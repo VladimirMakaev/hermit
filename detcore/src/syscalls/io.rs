@@ -44,6 +44,7 @@ use crate::resources::Permission;
 use crate::resources::ResourceID;
 use crate::resources::Resources;
 use crate::scheduler::runqueue::FIRST_PRIORITY;
+use crate::syscalls::files::SocketRole;
 use crate::syscalls::helpers::KernelSignalWait;
 use crate::syscalls::helpers::NonblockableSyscall;
 use crate::syscalls::helpers::PublishedWaitMask;
@@ -3544,6 +3545,10 @@ impl<T: RecordOrReplay> Detcore<T> {
                     .with_detfd(fd, |detfd| detfd.set_loopback_peer(loopback_peer));
             }
         }
+        if matches!(result, Ok(0)) {
+            self.classify_socket_peer(guest, fd, SocketRole::Connected)
+                .await;
+        }
 
         result
     }
@@ -3618,7 +3623,8 @@ impl<T: RecordOrReplay> Detcore<T> {
             if in_turn {
                 // One message, of `result` bytes.
                 let sent = sent_rights(guest, &headers, |_| usize::try_from(result).unwrap_or(0));
-                self.queue_sent_rights(guest, call.fd(), stream, sent).await;
+                self.queue_sent_rights(guest, call.fd(), stream, sent)
+                    .await?;
             } else {
                 self.lose_peer_lockstep(guest, call.fd());
             }
@@ -3880,7 +3886,7 @@ impl<T: RecordOrReplay> Detcore<T> {
                         .map_or(0, |length: u32| length as usize)
                 });
                 self.queue_sent_rights(guest, call.sockfd(), stream, sent)
-                    .await;
+                    .await?;
             } else {
                 self.lose_peer_lockstep(guest, call.sockfd());
             }
@@ -3946,7 +3952,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         };
         let recorded = self
             .record_received_descriptors(guest, &delivered, in_turn, cloexec, from)
-            .await;
+            .await?;
         // Where the tool discovers received descriptors, recvmsg's refresh
         // covers every descriptor delivered, as before; elsewhere only those
         // this receipt recorded.
@@ -3978,13 +3984,19 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// recorded, `Detcore::record_received_descriptors`) is left out, so its
     /// locks are hidden once no modelled table names the description (a
     /// named residual).
+    ///
+    /// Not under record and replay: they render no procfs files
+    /// (`Detcore::renders_procfs`), so the ledger feeds nothing the guest
+    /// reads, and the refresh reads each descriptor's fdinfo live, which in
+    /// replay is a stand-in eventfd's wherever the recording held a file this
+    /// process held nowhere else.
     async fn refresh_received_locks<G: Guest<Self>>(
         &self,
         guest: &mut G,
         fds: &[RawFd],
         call: super::files::LockCall,
     ) -> Result<(), Error> {
-        if self.cfg.virtualize_time {
+        if self.cfg.virtualize_time && !self.cfg.recordreplay_modes {
             for &fd in fds {
                 self.refresh_description_locks(guest, fd, call).await?;
             }
@@ -4353,7 +4365,7 @@ impl<T: RecordOrReplay> Detcore<T> {
         };
         let recorded = self
             .record_received_descriptors(guest, &delivered, in_turn, cloexec, from)
-            .await;
+            .await?;
         // Only the descriptors this receipt recorded.
         self.refresh_received_locks(guest, &recorded, super::files::LockCall::Recvmmsg)
             .await?;
