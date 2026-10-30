@@ -15,6 +15,7 @@ mod memory;
 mod minimize;
 mod phases;
 mod race_report;
+mod race_watch;
 mod races;
 mod rundata;
 mod stop;

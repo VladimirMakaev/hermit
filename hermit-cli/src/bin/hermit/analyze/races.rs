@@ -99,6 +99,8 @@ use reverie::syscalls::Sysno;
 use serde::Deserialize;
 use serde::Serialize;
 
+use crate::analyze::race_watch::WatchStage;
+use crate::analyze::race_watch::render_watch_stage;
 use crate::analyze::types::ExitStatusConstraint;
 
 /// What the target and baseline continuations are compared over.
@@ -511,6 +513,10 @@ pub struct RacingAccesses {
     /// in the analysis workspace.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trace_files: Vec<String>,
+    /// For `none_found`: what the replays with hardware watchpoints on chosen
+    /// guest bytes saw ([`race_watch`](super::race_watch)).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch: Option<WatchStage>,
 }
 
 /// At most this many other flipped pairs are listed.
@@ -542,6 +548,7 @@ impl RacingAccesses {
             truncated: false,
             notes: Vec::new(),
             trace_files: Vec::new(),
+            watch: None,
         }
     }
 
@@ -1446,7 +1453,7 @@ fn replay_channels(
 
 /// Whether an edge chain leads from `from` to `to`, using edges between them
 /// only (the window lemma) and program order.
-fn happens_before(edges: &[HbEdge], from: EventRef, to: EventRef) -> HbVerdict {
+pub fn happens_before(edges: &[HbEdge], from: EventRef, to: EventRef) -> HbVerdict {
     let unordered = HbVerdict {
         ordered: false,
         edges: Vec::new(),
@@ -1496,6 +1503,13 @@ fn happens_before(edges: &[HbEdge], from: EventRef, to: EventRef) -> HbVerdict {
         }
         _ => unordered,
     }
+}
+
+/// The edges [`happens_before`] walks for `trace`: the recorded ones that run
+/// forward and those derived from its syscall results, sorted by `from`
+/// event.
+pub fn trace_edges(trace: &AccessTrace) -> Vec<HbEdge> {
+    Run::new(trace).edges
 }
 
 /// The two traces, aligned, and the window.
@@ -3581,6 +3595,9 @@ pub fn render_racing_accesses(r: &RacingAccesses) -> String {
         lines.extend(candidate_lines(r));
     }
     lines.extend(r.notes.iter().cloned());
+    if let Some(watch) = &r.watch {
+        lines.extend(render_watch_stage(watch));
+    }
     lines.join("\n")
 }
 
@@ -3916,7 +3933,7 @@ fn edge_kind_text(kind: HbEdgeKind) -> &'static str {
     }
 }
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use detcore_model::access_trace::CursorOp;
     use detcore_model::access_trace::EdgeRecord;
     use detcore_model::access_trace::FutexOp;
@@ -4104,7 +4121,7 @@ mod tests {
 
     /// Thread 7 opens fd 6 before the window; with the deciding event,
     /// thread 9 closes it before thread 7 reads it.
-    fn close_then_read() -> (AccessTrace, AccessTrace) {
+    pub(crate) fn close_then_read() -> (AccessTrace, AccessTrace) {
         let mine = Some(file(7, 1));
         let open = call(
             90,
