@@ -4783,6 +4783,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And kernel_run_poll_waits_are_not_ended_by_ignored_signals: 639.
     // And a_default_fatal_signal_ends_a_process_whose_other_threads_wait_on_a_futex:
     // 623, listed.
+    // And a_schedule_replay_reads_a_trapped_rdtsc_before_switching_away: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5390,6 +5391,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And kernel_run_epoll_waits_are_not_ended_by_ignored_signals: 557.
     // And kernel_run_poll_waits_are_not_ended_by_ignored_signals: 558.
     // And the same fatal-signal futex-waiters test, not excluded: 542, listed.
+    // And a_schedule_replay_reads_a_trapped_rdtsc_before_switching_away, which
+    // is not among them: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
