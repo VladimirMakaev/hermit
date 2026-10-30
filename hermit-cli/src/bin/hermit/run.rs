@@ -1385,6 +1385,14 @@ pub struct RunOpts {
     #[clap(skip)]
     epoch_captured_from_host: bool,
 
+    /// Whether this `--no-namespace` run's guest ID base was drawn from the
+    /// host (`resolve_guest_ids`): `free-window` for a base taken from the
+    /// windows free on this host. A base given by `--pid-base` or required by
+    /// `--strict` is not; nor are the host's own IDs, which no rerun can
+    /// reproduce (the summary and the preemption record say `Host`).
+    #[clap(skip)]
+    guest_ids_drawn_from_host: Option<&'static str>,
+
     /// Whether neither `--epoch` nor `HERMIT_EPOCH` supplied the epoch, whether
     /// or not virtual time then sampled the host clock for it.
     #[clap(skip)]
@@ -1572,6 +1580,11 @@ pub struct RunOpts {
     /// guests. Host process, filesystem, and network state are shared, reducing determinism.
     /// Schedule and preemption replay require stable namespace PIDs and are not supported.
     ///
+    /// Where Hermit may choose process IDs (as root, with CAP_CHECKPOINT_RESTORE or
+    /// CAP_SYS_ADMIN over the host's PID namespace), the guest's IDs do not come from the host:
+    /// see `--pid-base`. Otherwise the guest gets the host's next free IDs, which differ from run
+    /// to run, and Hermit warns.
+    ///
     /// The guest's mount table (/proc/self/mountinfo, /proc/mounts) is not the host's: it
     /// lists the mounts holding the guest's working directory and the host /tmp, their
     /// ancestors, and the base mountpoints (/, /proc, /dev, /sys, /run and a few below them).
@@ -1596,6 +1609,55 @@ pub struct RunOpts {
         ]
     )]
     no_namespace: bool,
+
+    /// With `--no-namespace`, the process ID of the guest's first process. Every later process
+    /// or thread the guest creates gets the next ID, in the guest's own order of creation, and no
+    /// ID is given out twice, so the guest's process and thread IDs depend only on this base and
+    /// the guest itself, as a PID namespace's would. The kernel hands out exactly these IDs
+    /// (`clone3` with `set_tid`), so they are what the guest's own calls, `/proc` and futex owner
+    /// words show. Hermit must be allowed to choose IDs: root, or CAP_CHECKPOINT_RESTORE or
+    /// CAP_SYS_ADMIN over the host's PID namespace; so must the guest's tasks, so a guest that
+    /// gives those capabilities up gets host IDs from then on.
+    ///
+    /// The ID space is cut into aligned windows of 1024 IDs (256 where `pid_max` is above 65536),
+    /// and a run reserves the window or windows its IDs start in for as long as it runs, so two
+    /// Hermit runs on one host do not start in the same IDs (IDs past those windows are not
+    /// reserved; see below). The reservation is an abstract Unix socket
+    /// named after the PID namespace and the window, so it covers runs that share a network
+    /// namespace; a run in another one can still take the same window, and the later run then
+    /// ends with status 122, naming the ID, when its first process cannot have it.
+    ///
+    /// Given explicitly (and under `--strict`, whose base is half of `pid_max` unless given), the
+    /// base is a requirement: before the run, Hermit checks that no host task holds one of the
+    /// window's IDs from it, that no other run holds its windows, and that it may choose IDs, and
+    /// refuses the run otherwise. During the run, a task that cannot have its ID (taken by a host
+    /// task meanwhile; a call Hermit cannot issue with a chosen ID, such as one under a seccomp
+    /// filter of the guest's own or in a PID namespace of the guest's) ends the run. Both refusals
+    /// exit with status 122 and name the cause.
+    ///
+    /// Without this option, the run takes the first window no host task holds and no other run
+    /// has reserved, starting just behind the kernel's PID allocation cursor (so that host
+    /// processes reach it last) and going down, then from the top, and reports the base it took.
+    /// Such a run tolerates host IDs: a task that cannot have its chosen ID gets a host ID with a
+    /// warning, and the run's summary and preemption record say its IDs are not deterministic.
+    /// With no window left, the guest gets host IDs and Hermit warns. A guest that creates more
+    /// tasks than a window holds goes on into the next window. Needs the ptrace backend with
+    /// sequentialized threads.
+    ///
+    /// Only the window or windows the IDs start in are checked and reserved. IDs are never given
+    /// out twice in a run, so every task the guest ever creates (each process and thread,
+    /// including those that exited) takes the next one, and a guest that creates more tasks than
+    /// those windows hold goes on into IDs that nobody checked or reserved, where a host task or
+    /// another run may already be. Its outcome then depends on the host, though never silently:
+    /// a task that cannot have its ID ends a run with an explicit base, or gets a host ID with a
+    /// warning and marks the run's record.
+    ///
+    /// For tooling: the same IDs come back in every run from the same base, and a window is free
+    /// for the next run as soon as one ends, so a process ID remembered from one run may name a
+    /// later run's guest. Check a remembered process's identity (a pidfd, its start time or its
+    /// command line) before signalling it.
+    #[clap(long, value_name = "pid", requires = "no_namespace")]
+    pid_base: Option<i32>,
 
     /// Run in a minimally invasive syscall-interception mode. Combine with `hermit --log=info` to
     /// print intercepted syscalls.
@@ -2329,6 +2391,9 @@ impl fmt::Display for RunOpts {
         if self.no_namespace {
             write!(f, " --no-namespace")?;
         }
+        if let Some(base) = self.pid_base {
+            write!(f, " --pid-base={base}")?;
+        }
         if self.summary {
             write!(f, " --summary")?;
         }
@@ -3043,6 +3108,69 @@ impl RunOpts {
         options.pending_network_manifest = None;
         format!("{options:#?}")
     }
+}
+
+/// Whether a `--no-namespace` run's guest IDs `ids` have a base drawn from the
+/// host: `free-window` for a base taken from the windows free on this host,
+/// unless `--pid-base` or `--strict` `required` it. `None` for host IDs, which
+/// no rerun can reproduce, and in a PID namespace.
+fn guest_ids_drawn_from_host(
+    no_namespace: bool,
+    ids: detcore_model::pid::GuestIds,
+    required: bool,
+) -> Option<&'static str> {
+    use detcore_model::pid::GuestIds;
+    match ids {
+        GuestIds::Chosen { .. } if no_namespace && !required => Some("free-window"),
+        _ => None,
+    }
+}
+
+#[test]
+fn a_base_the_host_decided_is_host_drawn() {
+    use detcore_model::pid::GuestIds;
+    let chosen = GuestIds::Chosen {
+        base: 7168,
+        refuse_host_ids: false,
+    };
+    assert_eq!(
+        guest_ids_drawn_from_host(true, chosen, false),
+        Some("free-window")
+    );
+    assert_eq!(guest_ids_drawn_from_host(true, chosen, true), None);
+    assert_eq!(guest_ids_drawn_from_host(true, GuestIds::Host, false), None);
+    assert_eq!(
+        guest_ids_drawn_from_host(false, GuestIds::Namespace, false),
+        None
+    );
+}
+
+/// A base Hermit chose for a `--no-namespace` run is saved as if given by
+/// `--pid-base`, so the saved run takes the same IDs.
+#[test]
+fn saved_config_records_the_guest_id_base_hermit_chose() {
+    let argv = [
+        "hermit",
+        "run",
+        "--no-namespace",
+        "--save-config=unused.yaml",
+        "/bin/true",
+    ];
+    let matches = <crate::Args as clap::CommandFactory>::command()
+        .try_get_matches_from(argv)
+        .unwrap();
+    let mut args = crate::args_from_matches_with_clock(&matches, SystemTime::now).unwrap();
+    let crate::Subcommand::Run(ro) = &mut args.command else {
+        panic!("{argv:?} is not a `run` command");
+    };
+    assert_eq!(ro.saved_run_config().unwrap().run.get("pid-base"), None);
+    // What `resolve_guest_ids` leaves behind for a default base.
+    ro.det_opts.det_config.guest_ids = detcore_model::pid::GuestIds::Chosen {
+        base: 7168,
+        refuse_host_ids: false,
+    };
+    let saved = ro.saved_run_config().unwrap();
+    assert_eq!(saved.run["pid-base"], 7168, "{saved:?}");
 }
 
 /// `--save-config` writes the seed `--seed-from` chose in its place, so the
@@ -8349,6 +8477,36 @@ impl RunOpts {
         Ok(())
     }
 
+    /// Refuse a replay whose guest would be numbered otherwise than the run
+    /// its record came from (`detcore::preemptions::guest_ids_mismatch`): a
+    /// record of a `--no-namespace` run names its threads by IDs that a
+    /// replay in a PID namespace does not give them. A replay runs in a PID
+    /// namespace: `--no-namespace` does not take either replay option.
+    fn refuse_replay_under_other_guest_ids(&self) -> Result<(), Error> {
+        if self.namespace_only || self.no_namespace {
+            return Ok(());
+        }
+        let config = &self.det_opts.det_config;
+        for (option, path) in [
+            ("--replay-preemptions-from", &config.replay_preemptions_from),
+            ("--replay-schedule-from", &config.replay_schedule_from),
+        ] {
+            let Some(path) = path else {
+                continue;
+            };
+            let recorded =
+                detcore::preemptions::read_recorded_guest_ids(path).map_err(Error::msg)?;
+            if let Some(refusal) = detcore::preemptions::guest_ids_mismatch(
+                &format!("{option} {}", path.display()),
+                recorded,
+                detcore::GuestIds::Namespace,
+            ) {
+                return Err(Error::new(PolicyRefusal).context(refusal));
+            }
+        }
+        Ok(())
+    }
+
     /// Point this run at an OCI image rootfs, as `--image` does.
     ///
     /// Used by `hermit oci run`, which resolves the user's reference to the
@@ -9187,6 +9345,7 @@ impl RunOpts {
         self.refuse_replay_under_another_cap_preemption_charge()?;
         self.refuse_replay_under_another_sleep_registration()?;
         self.refuse_replay_under_another_timed_wait_spread()?;
+        self.refuse_replay_under_other_guest_ids()?;
         if !self.namespace_only
             && (self.verify_verbose
                 || global
@@ -9198,6 +9357,10 @@ impl RunOpts {
                 self.preemption_summary()
             ))?;
         }
+        // How the guest's process IDs are numbered is an implicit input too: a
+        // base chosen from the free windows is saved and reported with the
+        // others, and a refusal here comes before stdin is read.
+        self.resolve_guest_ids()?;
         // Once every implicit input it records is resolved, and before the
         // guest starts, so a run that fails or hangs still leaves it.
         self.write_saved_config()?;
@@ -9561,6 +9724,19 @@ impl RunOpts {
             anyhow::bail!(
                 "--image chroots the guest into a materialized OCI rootfs, which requires mount \
                  and PID namespaces; it is incompatible with --no-namespace"
+            );
+        }
+        if self.pid_base.is_some() && self.runtime_backend() != Backend::Ptrace {
+            anyhow::bail!(
+                "--pid-base needs the ptrace backend, which creates the guest's tasks with the \
+                 chosen IDs; backend `{}` cannot",
+                backend.as_str()
+            );
+        }
+        if self.pid_base.is_some() && (self.no_sequentialize_threads || self.strace_only) {
+            anyhow::bail!(
+                "--pid-base needs sequentialized threads: without them, the order the guest's \
+                 tasks are created in, and so their IDs, is the host's"
             );
         }
         if self.image.is_some() && backend != Backend::Ptrace {
@@ -11277,6 +11453,42 @@ impl RunOpts {
         Ok(value)
     }
 
+    /// Decide how the guest's process IDs are numbered (`guest_ids::resolve`).
+    /// Detcore reports it, at INFO level and in the run summary. Only the ptrace
+    /// backend can create a guest's tasks with chosen IDs; another backend
+    /// without a PID namespace gives its guest host IDs.
+    fn resolve_guest_ids(&mut self) -> Result<(), Error> {
+        let backend = self.runtime_backend();
+        let (ids, warning) =
+            if backend == Backend::Ptrace && self.det_opts.det_config.sequentialize_threads {
+                super::guest_ids::resolve(self.no_namespace, self.pid_base, self.strict)?
+            } else if self.no_namespace
+                && matches!(
+                    backend,
+                    Backend::Ptrace | Backend::Liteinst | Backend::InGuestTrap | Backend::Sabre
+                )
+            {
+                // The guest's tasks are host tasks numbered by the host: unless
+                // threads are sequentialized, the order IDs would be chosen in is
+                // the host's too. KVM and DBT number the guest themselves.
+                (detcore_model::pid::GuestIds::Host, None)
+            } else {
+                (detcore_model::pid::GuestIds::Namespace, None)
+            };
+        if let Some(warning) = warning {
+            // Not `eprintln!`, which panics when stderr's reader has gone.
+            use std::io::Write as _;
+            let _ = writeln!(std::io::stderr(), "{warning}");
+        }
+        self.guest_ids_drawn_from_host = guest_ids_drawn_from_host(
+            self.no_namespace,
+            ids,
+            self.pid_base.is_some() || self.strict,
+        );
+        self.det_opts.det_config.guest_ids = ids;
+        Ok(())
+    }
+
     fn warn_no_namespace(&self) {
         if self.no_namespace {
             // Not `eprintln!`, which panics when stderr's reader has gone
@@ -12704,6 +12916,10 @@ impl RunOpts {
         let program = self.e9patch_program.as_ref().unwrap_or(&self.program);
         let mut command = Command::new(program);
         command.args(&self.args);
+        // The guest's first process has the base ID; Detcore numbers the rest.
+        if let Some(base) = self.det_opts.det_config.guest_ids.base() {
+            command.pid(reverie::process::Pid::from_raw(base));
+        }
         if self.e9patch_program.is_some() {
             command.arg0(&self.program);
         }
@@ -12893,6 +13109,7 @@ impl RunOpts {
     /// reproduces the run rather than resolving them again.
     pub(crate) fn saved_run_config(&self) -> Result<crate::run_config::RunConfig, Error> {
         use crate::run_config::EPOCH_KEY;
+        use crate::run_config::PID_BASE_KEY;
         use crate::run_config::SEED_FROM_KEY;
         use crate::run_config::SEED_KEY;
 
@@ -12910,6 +13127,14 @@ impl RunOpts {
         if let Some(seed) = self.seed_from_resolved {
             config.run.remove(SEED_FROM_KEY);
             config.run.insert(SEED_KEY.to_owned(), seed.into());
+        }
+        // A base Hermit chose for this run (from a free window) is saved as if
+        // given, so the saved run takes the same IDs or is refused, instead of
+        // choosing another base.
+        if self.pid_base.is_none()
+            && let Some(base) = self.det_opts.det_config.guest_ids.base()
+        {
+            config.run.insert(PID_BASE_KEY.to_owned(), base.into());
         }
         Ok(config)
     }
@@ -12946,6 +13171,14 @@ impl RunOpts {
             drawn.insert(
                 crate::run_config::SEED_KEY.to_owned(),
                 "SystemRandom".to_owned(),
+            );
+        }
+        // A `--no-namespace` guest's IDs, when the host decided them: a base
+        // taken from the windows free on this host, or the host's own IDs.
+        if let Some(source) = self.guest_ids_drawn_from_host {
+            drawn.insert(
+                crate::run_config::PID_BASE_KEY.to_owned(),
+                source.to_owned(),
             );
         }
         drawn
@@ -13018,6 +13251,7 @@ impl RunOpts {
             [EPOCH_KEY] => "its epoch",
             [SEED_KEY] => "its seed",
             [manifest::MAX_TIMESLICE_KEY] => "its preemption timer setting",
+            [crate::run_config::PID_BASE_KEY] => "its guest process ID base",
             _ => "settings",
         };
         match recording {
@@ -13039,6 +13273,12 @@ impl RunOpts {
                         EPOCH_KEY => format!("--epoch={}", self.epoch_rfc3339()),
                         SEED_KEY => format!("--seed={}", self.seed_from_resolved.unwrap_or(0)),
                         manifest::MAX_TIMESLICE_KEY => "--max-timeslice=disabled".to_owned(),
+                        crate::run_config::PID_BASE_KEY => {
+                            match self.det_opts.det_config.guest_ids.base() {
+                                Some(base) => format!("--pid-base={base}"),
+                                None => String::new(),
+                            }
+                        }
                         other => format!("--{other}"),
                     })
                     .collect::<Vec<_>>()

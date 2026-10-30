@@ -2092,6 +2092,12 @@ impl<T: RecordOrReplay> Detcore<T> {
             return Err(refused);
         }
 
+        // The child's ID, when Detcore chooses the IDs: taken here, in this
+        // turn, before the vfork parent below gives the turn up.
+        let clone_plan = self
+            .plan_clone_id(guest, &Syscall::from(clone_family))
+            .await?;
+
         let ts = guest.thread_state_mut();
         assert_eq!(ts.clone_flags, None);
         assert!(ts.pending_vfork.is_none());
@@ -2154,13 +2160,37 @@ impl<T: RecordOrReplay> Detcore<T> {
         }
 
         let sysno = Syscall::from(clone_family).number();
-        let (maybe_res, untraced_refusal) =
-            match inject_traced_clone(guest, clone_family, flags).await {
-                CloneInjection::Ran(result) => (result, None),
+        let (maybe_res, untraced_refusal) = match clone_plan {
+            // A call Detcore issues itself goes through `inject_clone_planned`: a chosen ID
+            // (clone3 with set_tid, from a copy of the call's clone_args without
+            // CLONE_UNTRACED), a call the kernel refuses, and a vfork whose host ID is
+            // reported while its parent waits.
+            plan @ (super::chosen_ids::ClonePlan::Chosen(_)
+            | super::chosen_ids::ClonePlan::KernelRefuses
+            | super::chosen_ids::ClonePlan::KernelRefusesUntraced) => (
+                self.inject_clone_planned(guest, Syscall::from(clone_family), plan, is_vfork)
+                    .await,
+                None,
+            ),
+            plan @ super::chosen_ids::ClonePlan::AsMade { .. } if is_vfork => (
+                self.inject_clone_planned(guest, Syscall::from(clone_family), plan, is_vfork)
+                    .await,
+                None,
+            ),
+            plan => match inject_traced_clone(guest, clone_family, flags).await {
+                CloneInjection::Ran(result) => {
+                    if let (super::chosen_ids::ClonePlan::AsMade { reason }, Ok(child)) =
+                        (&plan, &result)
+                    {
+                        self.gave_host_id(guest, *child, reason).await;
+                    }
+                    (result, None)
+                }
                 // No call ran. ENOMEM is what the guest gets with
                 // --allow-unsupported-syscalls: a clone Linux could not complete.
                 CloneInjection::Refused(reason) => (Err(Errno::ENOMEM), Some(reason)),
-            };
+            },
+        };
         // Ask before anything else is injected: the next injection replaces
         // the backend's record.
         let refusal = if maybe_res.is_err() && untraced_refusal.is_none() {
@@ -4422,34 +4452,57 @@ impl<T: RecordOrReplay> Detcore<T> {
         clone: &syscalls::Clone3,
     ) -> Option<Result<i64, Error>> {
         // Refuse only a call the kernel would accept as far as `set_tid` goes:
-        // any other shape goes to the kernel, whose own error stands, so a
-        // refusal never replaces an E2BIG, EINVAL, EFAULT or EPERM Linux
-        // would give for these arguments. `struct clone_args` gained `set_tid`
-        // (offset 64) and `set_tid_size` (offset 72) with its second version,
-        // 80 bytes.
+        // any other shape goes to the kernel, whose own error stands. The
+        // exceptions are deliberate, on the conservative side: a struct or
+        // array Detcore cannot read although the kernel may is refused before
+        // the kernel's later checks are known (EFAULT under
+        // --allow-unsupported-syscalls), and so is CLONE_NEWTIME on a kernel
+        // before 6.3, which refuses it with EINVAL. `struct clone_args`
+        // carries `set_tid` at offset 64 and `set_tid_size` at offset 72.
+        // The kernel zero-extends a shorter struct, so one of 73 bytes or
+        // more can name a set_tid; a shorter one names none or is EINVAL.
+        const SET_TID_SIZE_OFFSET: usize = 72;
         // The kernel's limit on PID namespace nesting (MAX_PID_NS_LEVEL).
         const MAX_SET_TID: u64 = 32;
         let size = clone.size();
         let page = usize::try_from(unsafe { libc::sysconf(libc::_SC_PAGESIZE) }).ok()?;
-        if size < CLONE_ARGS_SIZE_VER1 || size > page {
+        if size <= SET_TID_SIZE_OFFSET || size > page {
             return None;
         }
         // The kernel copies all `size` bytes first: a fault there is its
         // EFAULT. A nonzero tail beyond the fields this code knows is not
         // read as a reason to let the call through, since a newer kernel may
         // accept it.
-        let mut raw = vec![0u8; size];
+        // Read as copy_from_user reads it, with the guest's own access
+        // (`chosen_ids::read_clone_args`). A struct every kernel refuses
+        // (proved to fault included) goes to the kernel. One Detcore cannot
+        // read although the kernel may (a page mapped writable, not readable,
+        // or a mapped page 0) cannot be checked, so it is refused below.
         let memory = guest.memory();
-        memory
-            .read_exact(Addr::<u8>::from_raw(clone.args()?.as_raw())?, &mut raw)
-            .ok()?;
+        let mut raw = match super::chosen_ids::read_clone_args(&memory, guest.tid().as_raw(), clone)
+        {
+            super::chosen_ids::Clone3Read::Bytes(bytes) => bytes,
+            super::chosen_ids::Clone3Read::Refused => return None,
+            super::chosen_ids::Clone3Read::Unreadable { .. } => {
+                return Some(
+                    self.refuse_unchecked_set_tid(
+                        guest,
+                        "clone3's struct clone_args cannot be read with the guest's own access",
+                    )
+                    .await,
+                );
+            }
+        };
+        // Zero-extended, as the kernel extends a shorter struct.
+        if raw.len() < super::chosen_ids::CLONE_ARGS_SIZE_VER2 {
+            raw.resize(super::chosen_ids::CLONE_ARGS_SIZE_VER2, 0);
+        }
         let field = |offset: usize| u64::from_ne_bytes(raw[offset..offset + 8].try_into().unwrap());
         let flags = field(0);
         let exit_signal = field(32);
         let set_tid = field(64);
         let set_tid_size = field(72);
-        // An exit signal must be a signal number, with nothing in CSIGNAL.
-        if exit_signal > 64 || flags & 0xff != 0 {
+        if !clone3_signal_fields_valid(flags, exit_signal) {
             return None;
         }
         if set_tid_size == 0 || set_tid_size > MAX_SET_TID {
@@ -4458,13 +4511,35 @@ impl<T: RecordOrReplay> Detcore<T> {
         // The kernel copies the whole array next (EFAULT) and takes no entry
         // below 1 (EINVAL).
         let mut tids = vec![0 as libc::pid_t; set_tid_size as usize];
-        memory
-            .read_values(Addr::<libc::pid_t>::from_raw(set_tid as usize)?, &mut tids)
-            .ok()?;
+        if !super::chosen_ids::within_user_memory(
+            set_tid as usize,
+            tids.len() * std::mem::size_of::<libc::pid_t>(),
+        ) {
+            return None;
+        }
+        if set_tid == 0 {
+            // Linux: EINVAL, before reading anything.
+            return None;
+        }
+        // A fault the kernel must take too is its EFAULT. Otherwise an array
+        // Detcore cannot read (a page mapped writable, not readable) may
+        // still be read by the kernel: it is refused below, once the checks
+        // that need no entry have passed, since its ids cannot be checked.
+        let read =
+            super::chosen_ids::read_pid_array(&memory, set_tid as usize, &mut tids).is_some();
+        if !read
+            && super::chosen_ids::range_faults(
+                guest.tid().as_raw(),
+                set_tid as usize,
+                tids.len() * std::mem::size_of::<libc::pid_t>(),
+            )
+        {
+            return None;
+        }
         // With CLONE_NEWPID the first entry is the pid in the new namespace,
         // which must be 1 since that namespace has no init yet (EINVAL).
         let newpid = flags & libc::CLONE_NEWPID as u64 != 0;
-        if tids.iter().any(|tid| *tid < 1) || (newpid && tids[0] != 1) {
+        if read && (tids.iter().any(|tid| *tid < 1) || (newpid && tids[0] != 1)) {
             return None;
         }
         // Choosing a pid takes CAP_SYS_ADMIN or CAP_CHECKPOINT_RESTORE over
@@ -4507,6 +4582,15 @@ impl<T: RecordOrReplay> Detcore<T> {
         if set_tid_size <= u64::from(newpid) {
             return None;
         }
+        if !read {
+            return Some(
+                self.refuse_unchecked_set_tid(
+                    guest,
+                    "clone3 set_tid's array cannot be read with the guest's own access",
+                )
+                .await,
+            );
+        }
         let tid = tids[usize::from(newpid)];
         if !crate::tool_global::thread_id_refused(guest, DetTid::from_raw(tid)).await {
             return None;
@@ -4533,6 +4617,33 @@ impl<T: RecordOrReplay> Detcore<T> {
             )
             .await,
         )
+    }
+
+    /// Refuse a `clone3` whose `set_tid` Detcore cannot check against the
+    /// run's earlier tasks, because `what` cannot be read with the guest's own
+    /// access while the kernel may read it: the conservative side, since a
+    /// reused id would merge two tasks' state in Detcore. With
+    /// `--allow-unsupported-syscalls` the call fails with `EFAULT`.
+    async fn refuse_unchecked_set_tid<G: Guest<Self>>(
+        &self,
+        guest: &mut G,
+        what: &str,
+    ) -> Result<i64, Error> {
+        let message = format!(
+            "hermit: {what}, so Detcore cannot check its set_tid against the run's earlier tasks \
+             (https://github.com/rrnewton/hermit/issues/4370)"
+        );
+        tracing::error!(
+            "[detcore, dtid {}] {}",
+            guest.thread_state().dettid,
+            message
+        );
+        if guest.config().panic_on_unsupported_syscalls {
+            use std::io::Write as _;
+            let _ = writeln!(crate::util::RetryingStderr, "{message}");
+        }
+        self.refuse_unserviceable_operation(guest, reverie::syscalls::Sysno::clone3, Errno::EFAULT)
+            .await
     }
 
     /// Refuse by name a call from a nested PID namespace whose pids Detcore
@@ -6022,8 +6133,15 @@ pub(crate) fn user_ptr_max() -> usize {
             ret >= 0
         };
         // Binary search over 4-aligned addresses: 0 is accepted, and an address
-        // with the top bit set never is.
-        let (mut ok, mut bad) = (0usize, 1usize << 63);
+        // past the largest user address space never is. The bound stays below
+        // any tag bits (arm64's top byte, x86's bits 57 to 62), so the search
+        // stays monotone even if Hermit itself ran with tagging enabled.
+        let bad_start = if cfg!(target_arch = "aarch64") {
+            1usize << 55
+        } else {
+            1usize << 57
+        };
+        let (mut ok, mut bad) = (0usize, bad_start);
         while bad - ok > 4 {
             let mid = (ok + (bad - ok) / 2) & !3;
             if accepted(mid) { ok = mid } else { bad = mid }
@@ -8824,10 +8942,40 @@ fn clone3_field<M: MemoryAccess>(
     if clone.size() < CLONE_ARGS_SIZE_VER0 || offset + 8 > clone.size() {
         return None;
     }
-    let base = clone.args()?.as_raw();
-    memory
-        .read_value(Addr::<u64>::from_raw(base + offset)?)
-        .ok()
+    let field = clone.args()?.as_raw().checked_add(offset)?;
+    // Past user memory there is nothing to read, and a read's address
+    // arithmetic near the top of the address space would overflow.
+    if !super::chosen_ids::within_user_memory(field, std::mem::size_of::<u64>()) {
+        return None;
+    }
+    memory.read_value(Addr::<u64>::from_raw(field)?).ok()
+}
+
+/// Whether a `clone3`'s exit signal and the low byte of its flags pass the
+/// kernel's checks: the exit signal is a signal number, and the flags hold
+/// nothing in `CSIGNAL` but `CLONE_NEWTIME`, which `clone3` accepts from
+/// Linux 6.3 (`clone3_args_valid`). On an older kernel, which refuses
+/// `CLONE_NEWTIME` with EINVAL, a refusal after this is the conservative
+/// side.
+fn clone3_signal_fields_valid(flags: u64, exit_signal: u64) -> bool {
+    const CSIGNAL: u64 = 0xff;
+    const CLONE_NEWTIME: u64 = 0x80;
+    exit_signal <= 64 && flags & CSIGNAL & !CLONE_NEWTIME == 0
+}
+
+#[cfg(test)]
+mod clone3_signal_fields_tests {
+    /// CLONE_NEWTIME is the one CSIGNAL bit clone3 accepts in its flags;
+    /// every other one, or an exit signal above 64, is the kernel's EINVAL.
+    #[test]
+    fn clone3_accepts_only_clone_newtime_among_the_csignal_bits() {
+        assert!(super::clone3_signal_fields_valid(0x80, 17));
+        assert!(super::clone3_signal_fields_valid(0, 64));
+        for bit in 0..7 {
+            assert!(!super::clone3_signal_fields_valid(1 << bit, 17), "{bit}");
+        }
+        assert!(!super::clone3_signal_fields_valid(0, 65));
+    }
 }
 
 /// Where a `CLONE_PIDFD` clone writes the new process's pidfd (`clone`'s

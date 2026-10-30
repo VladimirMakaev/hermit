@@ -4848,7 +4848,8 @@ impl Scheduler {
                         spread,
                         seed: Some(cfg.sched_seed()),
                     }
-                }));
+                }))
+                .with_guest_ids(cfg.guest_ids);
             if boundaries {
                 writer
                     .with_slice_boundaries()
@@ -19338,6 +19339,8 @@ impl Scheduler {
                 virtual_timeout_ns,
                 // GlobalState marks a run its deadline stopped.
                 run_timeout_secs: None,
+                guest_ids: None,
+                host_id_tasks: 0,
             },
             info_reprio_descrip,
         ))

@@ -1233,6 +1233,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and recorder::finish_tests::a_thread_stream_that_cannot_be_written_in_full_refuses_replay:
     // 1882, listed.
     // a_reused_thread_id_starts_its_own_clock_and_keeps_the_old_work: 1881.
+    // And detcore-model's config::tests::the_guest_numbering_never_enters_the_legacy_form
+    // (--no-namespace chosen guest IDs): 1881, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2072,6 +2074,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_trial_writes_what_it_replays_only_into_the_workspace (a trial never
     // writes into a --replay-schedule-from or --replay-preemptions-from file of
     // the run arguments): 1122, listed.
+    // And guest_ids' six --pid-base resolution units: 1160 + 6 = 1166, listed.
+    // And guest_ids' a_pid_max_under_two_windows_leaves_no_default_window and
+    // run's a_base_the_host_decided_is_host_drawn and
+    // saved_config_records_the_guest_id_base_hermit_chose: 1166 + 3 = 1169, listed.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3456,6 +3462,24 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // an_early_start_on_an_id_whose_holder_never_ran_keeps_its_clock,
     // a_child_on_the_id_of_a_child_that_ran_and_exited_starts_its_own_clock
     // and a_vfork_child_on_a_reused_id_starts_its_own_clock: 2687, listed.
+    // And syscalls::chosen_ids' eight clone3-form units and preemptions'
+    // the_guest_numbering_round_trips_and_is_compared: 2695 + 9 = 2704, listed.
+    // And chosen_ids' an_untraced_clone_is_not_given_a_chosen_id: 2705, listed.
+    // And chosen_ids' a_restarted_clone_keeps_its_id_only_for_the_same_call,
+    // a_new_pid_namespace_is_one_set_tid_cannot_number_for_hermit and
+    // eperm_and_resource_errors_are_attributed_to_their_cause: 2705 + 3 = 2708, listed.
+    // And chosen_ids' a_guest_set_tid_the_kernel_refuses_goes_to_the_kernel and
+    // a_pid_namespace_depth_counts_from_hermits: 2708 + 2 = 2710, listed.
+    // chosen_ids' four r8-era units (the set_tid validator, the namespace probe,
+    // the untraced and error-attribution units) became four others
+    // (set_tid_failure, the array shape, the rewrite's flag, the stack pointer):
+    // unchanged.
+    // And the chosen_ids unit for a definite fault
+    // (only_a_definite_fault_is_taken_as_the_kernels_refusal): 2710 + 1 = 2711.
+    // And the clone3-read and traced-legacy-clone units
+    // (a_clone3_struct_is_refused_only_when_every_kernel_refuses_it,
+    // a_traced_legacy_clone_drops_only_clone_untraced): 2711 + 2 = 2713.
+    // And clone3_accepts_only_clone_newtime_among_the_csignal_bits: 2713 + 1 = 2714.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4866,6 +4890,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_recording_cut_between_calls_is_refused_rather_than_parked: 624.
     // And a_recording_killed_from_outside_is_refused_rather_than_parked: 625.
     // And a_recording_whose_stream_cannot_be_written_in_full_is_refused: 623.
+    // And the four --no-namespace chosen-ID tests (no_namespace_guest_ids_follow_the_base_and_creation_order,
+    // no_namespace_reports_its_guest_numbering, no_namespace_refuses_a_taken_chosen_id_only_when_asked,
+    // no_namespace_refuses_a_held_pid_base) and
+    // no_namespace_concurrent_runs_take_different_windows: 637 + 5 = 642.
+    // And no_namespace_refuses_a_chosen_id_at_pid_max_before_any_task: 642 + 1 = 643.
+    // And no_namespace_keeps_the_guests_own_clone_errors_under_a_pid_base and
+    // no_namespace_completes_a_guest_set_tid_with_the_chosen_id: 643 + 2 = 645.
+    // And no_namespace_gives_a_new_pid_namespace_child_its_chosen_id and
+    // no_namespace_refuses_before_the_task_a_call_that_cannot_carry_a_chosen_id: 645 + 2 = 647.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5484,6 +5517,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_recording_cut_between_calls_is_refused_rather_than_parked: 543.
     // And a_recording_killed_from_outside_is_refused_rather_than_parked: 544.
     // And a_recording_whose_stream_cannot_be_written_in_full_is_refused: 542.
+    // And the same five --no-namespace chosen-ID tests, not excluded: 556 + 5 = 561.
+    // And the same pid_max refusal test, not excluded: 561 + 1 = 562.
+    // And the same two clone tests, not excluded: 562 + 2 = 564.
+    // And the same two tests, not excluded: 564 + 2 = 566.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6033,6 +6070,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same two bubble-sort tests: 2684, listed.
     // And the same schedule-format probe test: 2685, listed.
     // And the same five reused-thread-ID clock units: 2687, listed.
+    // And the same nine chosen-ID units: 2695 + 9 = 2704.
+    // And the same untraced-clone unit: 2705.
+    // And the same three chosen_ids units: 2705 + 3 = 2708.
+    // And the same two chosen_ids units: 2708 + 2 = 2710.
+    // And the same definite-fault unit: 2710 + 1 = 2711.
+    // And the same two clone3-read and traced-clone units: 2711 + 2 = 2713.
+    // And the same CLONE_NEWTIME unit: 2713 + 1 = 2714.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6462,6 +6506,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-timed-wait-spread run tests: 1160.
     // The same six analyze --max-memory unit tests: 1121, listed.
     // And the same trial-input workspace test: 1116, listed.
+    // And the same six --pid-base resolution units: 1154 + 6 = 1160.
+    // And the same three units: 1160 + 3 = 1163.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6691,6 +6737,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1867.
     // And the same two stream-finish tests: 1868, listed.
     // And the same reused-thread-ID detcore-model test: 1867.
+    // And the same guest-numbering legacy-form test: 1867, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.

@@ -264,6 +264,22 @@ pub struct RunSummary {
     /// and in older summaries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_timeout_secs: Option<u64>,
+    /// How the guest's process and thread IDs were numbered, for a run
+    /// without a PID namespace of its own (`--no-namespace`): chosen from a
+    /// base, or the host's. Absent for a run its PID namespace numbered. Shown
+    /// in the full report as launch configuration, not in the INFO view.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub guest_ids: Option<crate::pid::GuestIds>,
+
+    /// How many guest tasks were created with a host ID although their IDs
+    /// were to be chosen (`guest_ids`): nonzero means the run's IDs are not
+    /// deterministic. Shown in the full report beside `guest_ids`. A vfork
+    /// is counted before its call, since its parent returns only once the
+    /// child has exec'd or exited, so one that then fails, or each attempt of
+    /// one that is restarted, is counted too: the count is of calls reported,
+    /// and can exceed the tasks created.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub host_id_tasks: u64,
 }
 
 /// The seeds a schedule replay adopted from its recording: each is `Some`
@@ -297,6 +313,10 @@ impl fmt::Display for AdoptedSeeds {
             seeds.join(", ")
         )
     }
+}
+
+fn is_zero(count: &u64) -> bool {
+    *count == 0
 }
 
 /// The full human-readable report, including recorded launch configuration.
@@ -367,6 +387,8 @@ impl RunSummary {
             guest_deadlock,
             virtual_timeout_ns,
             run_timeout_secs,
+            guest_ids,
+            host_id_tasks,
         } = self;
         if let Some(bound) = run_timeout_secs {
             writeln!(
@@ -414,6 +436,16 @@ impl RunSummary {
         }
         if include_report_metadata && let Some(adopted) = adopted_seeds {
             writeln!(f, "{adopted}")?;
+        }
+        if include_report_metadata && let Some(guest_ids) = guest_ids {
+            writeln!(f, "Guest process IDs: {guest_ids}")?;
+            if *host_id_tasks > 0 {
+                writeln!(
+                    f,
+                    "  {host_id_tasks} task(s) got a host ID instead, so this run's process IDs \
+                     are not deterministic"
+                )?;
+            }
         }
 
         if let Some(txt) = desync_descrip {
