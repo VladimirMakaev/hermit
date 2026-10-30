@@ -1849,6 +1849,17 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // process of their own): 1136, listed (1135 on main plus one).
     // And the three test_isolation units for the checks a test build makes
     // before a container clone or a recorded --skid-margin: 1139, listed.
+    // And analyze's trial-input tests: phases::tests::{the_workspace_is_created_in_the_tmp_dir,
+    // a_same_thread_critical_pair_is_flagged_and_a_cross_thread_one_is_not},
+    // rundata::tests::{trials_bind_only_a_workspace_the_private_tmp_would_hide,
+    // every_trial_hands_the_guest_the_target_seed_inputs} and
+    // schedule_search::tests::{a_failing_schedule_with_extra_events_reduces_to_the_one_swap,
+    // replays_differing_only_by_branch_skid_are_one_interleaving}: 1127.
+    // And schedule_search::tests::{replays_must_be_identical_unless_the_branch_counter_is_inexact,
+    // a_skidded_replay_is_unstable_on_an_exact_counter} and
+    // phases::tests::replays_tolerate_branch_skid_only_on_an_inexact_counter: 1130.
+    // And schedule_search::tests::the_trimmed_failing_schedule_is_selected_as_a_stable_point: 1131.
+    // And phases::tests::timed_out_trials_are_reported_on_their_own_line: 1132.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5709,6 +5720,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same fourteen pinned_cpu::tests units: 1129, listed.
     // And the same test_isolation malloc-lock test: 1130, listed.
     // And the same three test_isolation check units: 1133, listed.
+    // And the same six analyze trial-input tests: 1121.
+    // And the same 3 tests: 1124.
+    // And the same test: 1125.
+    // And the same test: 1126.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

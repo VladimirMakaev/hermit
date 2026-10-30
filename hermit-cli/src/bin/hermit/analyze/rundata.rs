@@ -366,6 +366,15 @@ impl RunData {
         // one.
         ro.det_opts.det_config.chaos = true;
 
+        // Trials may differ only in their schedule. `--seed` also seeds what the guest reads
+        // as randomness (getrandom, /dev/urandom) and syscall fuzzing, so a run2 seed or a
+        // schedule replay at the default seed would hand the guest other inputs, and no
+        // schedule could reproduce the target. Pin both to the target's seed.
+        let config = &mut ro.det_opts.det_config;
+        let target_seed = aopts.run1_seed.unwrap_or(config.seed);
+        config.rng_seed.get_or_insert(target_seed);
+        config.fuzz_seed.get_or_insert(target_seed);
+
         ro.validate_args()?;
         assert!(ro.det_opts.det_config.sequentialize_threads);
         if aopts.run1_seed.is_some() && !ro.det_opts.det_config.chaos {
@@ -381,9 +390,29 @@ impl RunData {
         Ok(ro)
     }
 
+    /// Trials write their records into the workspace from inside the
+    /// container, whose `/tmp` is private: a workspace under host `/tmp` is
+    /// bound into it. One elsewhere (`--tmp-dir`) is visible as it is, and a
+    /// bind of it would only make every trial warn that the bind has no
+    /// effect (`hermit run` honors binds under `/tmp` alone). Where the
+    /// workspace is is decided on its canonical path, so a relative path or a
+    /// symlink into `/tmp` is bound, and one under `/tmp` that leads out of it
+    /// is not.
     fn runopts_add_binds(aopts: &AnalyzeOpts, runopts: &mut RunOpts) -> anyhow::Result<()> {
-        let bind_dir: Bind = Bind::from_str(aopts.get_tmp()?.to_str().unwrap())?;
-        runopts.bind.push(bind_dir);
+        let workspace = aopts.get_tmp()?;
+        let workspace = std::fs::canonicalize(workspace)
+            .or_else(|_| std::path::absolute(workspace))
+            .map_err(|error| {
+                anyhow::anyhow!(
+                    "cannot resolve the workspace {}: {error}",
+                    workspace.display()
+                )
+            })?;
+        if workspace.starts_with("/tmp") {
+            runopts
+                .bind
+                .push(Bind::from_str(workspace.to_str().unwrap())?);
+        }
         runopts.validate_args()?;
         Ok(())
     }
@@ -1882,6 +1911,101 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn trials_bind_only_a_workspace_the_private_tmp_would_hide() {
+        let mut options = AnalyzeOpts::try_parse_from([
+            "analyze",
+            "--run1-seed=6",
+            "--",
+            "--epoch=2026-01-01T00:00:00Z",
+            "/bin/true",
+        ])
+        .unwrap();
+        let binds = |options: &AnalyzeOpts| -> Vec<String> {
+            RunData::new_baseline(options, "trial".to_owned())
+                .unwrap()
+                .runopts
+                .bind
+                .iter()
+                .map(|bind| bind.target.to_string_lossy().into_owned())
+                .collect()
+        };
+
+        options.tmp_dir = Some(PathBuf::from("/tmp/hermit_analyzeXYZ"));
+        assert_eq!(binds(&options), ["/tmp/hermit_analyzeXYZ"]);
+
+        options.tmp_dir = Some(PathBuf::from("/home/someone/analyze-ws/hermit_analyzeXYZ"));
+        assert!(binds(&options).is_empty(), "visible as it is");
+
+        // Where the workspace really is decides. A relative path to a
+        // directory under /tmp is bound, as its canonical path.
+        let under_tmp = tempfile::Builder::new()
+            .prefix("hermit_analyze_bind")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let canonical = std::fs::canonicalize(under_tmp.path()).unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        assert!(canonical.starts_with("/tmp"), "{}", canonical.display());
+        let relative = PathBuf::from("../".repeat(cwd.components().count() - 1))
+            .join(canonical.strip_prefix("/").unwrap());
+        assert!(relative.is_relative());
+        options.tmp_dir = Some(relative);
+        assert_eq!(binds(&options), [canonical.to_str().unwrap()]);
+        // A symlink under /tmp that leads out of it is not: the workspace is
+        // visible where it really is.
+        let link = canonical.join("out-of-tmp");
+        std::os::unix::fs::symlink("/", &link).unwrap();
+        options.tmp_dir = Some(link);
+        assert!(binds(&options).is_empty(), "{:?}", binds(&options));
+    }
+
+    #[test]
+    fn every_trial_hands_the_guest_the_target_seed_inputs() {
+        let mut options = AnalyzeOpts::try_parse_from([
+            "analyze",
+            "--run1-seed=6",
+            "--run2-seed=1",
+            "--",
+            "--chaos",
+            "--epoch=2026-01-01T00:00:00Z",
+            "/bin/true",
+        ])
+        .unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        options.tmp_dir = Some(workspace.path().to_path_buf());
+
+        let target = RunData::new_run1_target(&options, "target".to_owned()).unwrap();
+        let target = &target.runopts.det_opts.det_config;
+        assert_eq!(
+            (target.sched_seed(), target.rng_seed()),
+            (6, 6),
+            "the failing run as found"
+        );
+
+        // A baseline or a schedule replay changes the schedule seed only.
+        let mut baseline = RunData::new_baseline(&options, "baseline".to_owned()).unwrap();
+        baseline.runopts.det_opts.det_config.seed = 1;
+        let baseline = &baseline.runopts.det_opts.det_config;
+        assert_eq!(baseline.sched_seed(), 1);
+        assert_eq!((baseline.rng_seed(), baseline.fuzz_seed()), (6, 6));
+
+        let mut explicit = options.clone();
+        explicit.run_args = [
+            "--chaos",
+            "--rng-seed=9",
+            "--epoch=2026-01-01T00:00:00Z",
+            "/bin/true",
+        ]
+        .map(String::from)
+        .to_vec();
+        let replay = RunData::new_baseline(&explicit, "replay".to_owned()).unwrap();
+        assert_eq!(
+            replay.runopts.det_opts.det_config.rng_seed(),
+            9,
+            "an explicit --rng-seed in the run arguments is kept"
+        );
     }
 
     #[test]
