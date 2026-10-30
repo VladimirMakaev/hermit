@@ -2213,6 +2213,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and analyze::phases::tests::analyze_replays_records_with_the_guest_random_seed_they_were_recorded_under
     // and analyze::phases::tests::analyze_trials_of_a_seeded_target_take_its_guest_random_seed
     // (https://github.com/rrnewton/hermit/issues/4868): 1163.
+    // And --chaos-seeded-timeslice's fallback units,
+    // chaos_timeslice::tests::the_fallback_is_at_least_one_rcb and
+    // run::preemption_tests::seeded_replays_and_baseline_keep_a_minimum_above_the_default:
+    // 1162, listed (1160 on main plus two).
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6970,6 +6974,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same eight reservation units: 1137.
     // And the same two: 1165 + 2 = 1167.
     // And the same three trial-guest-random-seed units: 1157.
+    // And the same two --chaos-seeded-timeslice fallback units: 1156, listed
+    // (1154 on main plus two).
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
