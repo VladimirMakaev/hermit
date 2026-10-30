@@ -3558,6 +3558,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_requeue_edge_waits_for_the_moved_waiters_return and
     // a_clear_child_tid_wake_is_a_join_edge: 2714, listed.
     // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
+    // And the_uncapped_slices_mark_is_written_only_when_set, an_uncapped_records_backstop_outlasts_its_latest_event and an_uncapped_replay_ends_slices_at_its_backstop_while_the_record_lasts: 2698.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5000,6 +5001,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // access_trace_from_leaves_out_only_earlier_records: 625.
     // And access_trace's a_futex_ping_pong_yields_alternating_wake_edges and
     // signal_child_exit_and_join_edges_name_their_events: 627.
+    // And a_schedule_replay_keeps_the_long_slices_of_a_preemption_replay: 638.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5634,6 +5636,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same --die-on-desync readmission test: 562.
     // And the same three access trace tests, not excluded: 544.
     // And the same two synchronization edge tests, not excluded: 546.
+    // And the same uncapped-slices replay test: 557.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6203,6 +6206,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same seventeen access-trace tests as test.detcore_unit: 2699.
     // And the same fifteen sync-edge tests as test.detcore_unit: 2714.
     // And scheduler::test::a_prehook_context_switch_leaves_the_switching_thread_its_own_slice: 2683.
+    // And the same three uncapped-slices units: 2698.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests

@@ -4846,6 +4846,11 @@ impl AnalyzeOpts {
                 Err(error) => return Err(error),
             };
 
+        // Endpoints recorded while replaying preemptions ran slices longer
+        // than the bound, and the bisection's schedules must say so.
+        let target_out = target_endpoint_run.sched_path_out().to_owned();
+        let baseline_out = baseline_endpoint_run.sched_path_out().to_owned();
+        self.adopt_uncapped_slices(&[target_out.as_path(), baseline_out.as_path()])?;
         let baseline_sched_name = baseline_endpoint_run.sched_out_file_name();
         let target_sched_name = target_endpoint_run.sched_out_file_name();
         let target = target_endpoint_run.preempts_out().clone();

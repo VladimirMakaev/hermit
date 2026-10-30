@@ -170,6 +170,7 @@ impl BisectOpts {
             partial_report_written: false,
             resumed_progress: None,
             trial_runner: Default::default(),
+            trial_schedules_uncapped: Default::default(),
         };
         // Before the schedules are read: a refused cap or counter reads and
         // starts nothing.
@@ -199,6 +200,7 @@ impl BisectOpts {
             ("--good", &self.good),
             ("--bad", &self.bad),
         ])?;
+        analyzer.adopt_uncapped_slices(&[self.good.as_path(), self.bad.as_path()])?;
         let (mut good, mut bad) = (good, bad);
         // Analyze's trial outputs omit optional event timestamps. Put these
         // admitted search inputs in that same representation: bisection edits
