@@ -14414,7 +14414,11 @@ impl RunOpts {
         let gdbserver_port = self.bind_gdbserver_port()?;
         let (mut container, tmpfs, identity, resources) = if self.no_namespace {
             let mut container = Container::new();
-            apply_affinity(&mut container, self.pin_threads);
+            apply_affinity(
+                &mut container,
+                self.pin_threads,
+                self.det_opts.det_config.cpu_profile_source,
+            );
             (
                 container,
                 None,
@@ -15715,6 +15719,7 @@ impl RunOpts {
                 &rootfs,
                 tmpfs,
                 self.pin_threads,
+                self.det_opts.det_config.cpu_profile_source,
                 self.tmp.is_none(),
                 mounts_placeholder,
             )?;
@@ -15723,7 +15728,10 @@ impl RunOpts {
             return Ok((container, identity_sources));
         }
 
-        let mut container = namespace_container(self.pin_threads);
+        let mut container = namespace_container(
+            self.pin_threads,
+            self.det_opts.det_config.cpu_profile_source,
+        );
         self.network
             .configure(&mut container, self.analyze_networking);
 
