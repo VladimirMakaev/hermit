@@ -1261,7 +1261,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and a_stream_that_cannot_be_written_in_full_gets_no_terminal_record: 1932.
     // And four recorder::finish_tests units of how a thread ended (ends_by_default, an ending
     // from a last fatal delivery, a handled SIGSYS then a stop-less death, a later event): 1961.
-    ("test.regular_crates", 1961),
+    // PR 4753 adds hermit-record-format's readlinkat_is_recorded_and_replayed_on_every_architecture: 1929 + 1 = 1962.
+    ("test.regular_crates", 1962),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -6458,7 +6459,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1941.
     // And the same two terminal-record units: 1918.
     // And the same four recorder ending units: 1947.
-    ("test.regular_crates_on_host", 1947),
+    // PR 4753: the same one added case: 1915 + 1 = 1948.
+    ("test.regular_crates_on_host", 1948),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
