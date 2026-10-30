@@ -1229,6 +1229,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // summary::tests::a_summary_of_a_run_the_timeout_stopped_is_marked_partial:
     // 1881, listed.
     // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1881.
+    // And event_stream::tests::finishing_a_stream_reports_the_error_of_its_last_write
+    // and recorder::finish_tests::a_thread_stream_that_cannot_be_written_in_full_refuses_replay:
+    // 1882, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -4845,6 +4848,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_recording_that_ends_inside_a_blocked_call_replays: 623.
     // And a_recording_cut_between_calls_is_refused_rather_than_parked: 624.
     // And a_recording_killed_from_outside_is_refused_rather_than_parked: 625.
+    // And a_recording_whose_stream_cannot_be_written_in_full_is_refused: 623.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5462,6 +5466,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_recording_that_ends_inside_a_blocked_call_replays: 542.
     // And a_recording_cut_between_calls_is_refused_rather_than_parked: 543.
     // And a_recording_killed_from_outside_is_refused_rather_than_parked: 544.
+    // And a_recording_whose_stream_cannot_be_written_in_full_is_refused: 542.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6662,6 +6667,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same partial-summary detcore-model test, not excluded: 1867,
     // listed.
     // And event_stream::tests::a_stream_cut_at_an_event_boundary_ends_cleanly: 1867.
+    // And the same two stream-finish tests: 1868, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
