@@ -2199,6 +2199,16 @@ impl AnalyzeOpts {
             .signal_state_copy
     }
 
+    /// The post-crash bound in effect in the trials
+    /// (`Config::post_crash_timeslice_in_effect`; `None` for off).
+    pub fn trial_post_crash_timeslice(&self) -> Option<u64> {
+        RunData::get_raw_runopts(self)
+            .det_opts
+            .det_config
+            .post_crash_timeslice_in_effect()
+            .map(std::num::NonZeroU64::get)
+    }
+
     /// The trials' `--expired-wait-charge`, from their run arguments, where
     /// [`Self::adopt_expired_wait_charge`] puts it; `each` before then, the
     /// rule of the `--chaos` runs analyze makes.
@@ -2323,10 +2333,12 @@ impl AnalyzeOpts {
     /// times from that epoch.
     /// It also states whether the trials rewrite exclusive loops in the
     /// guest's memory, which a replay under the other setting refuses.
+    /// It also carries the trials' post-crash bound (`trial_post_crash_timeslice`).
     pub fn stamp_trial_record(&self, record: PreemptionRecord) -> PreemptionRecord {
         let record = record
             .with_pipe_wake_latency(self.trial_pipe_wake_latency())
             .with_signal_state_copy(Some(self.trial_signal_state_copy()))
+            .with_post_crash_timeslice(self.trial_post_crash_timeslice())
             .with_expired_wait_runs_charged_once(
                 self.trial_expired_wait_charge() == ExpiredWaitCharge::Once,
             )

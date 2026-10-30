@@ -1267,6 +1267,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (--chaos-instruction-offset): 1883.
     // And detcore-model's summary::tests::desync_notes_round_trip_through_summary_json
     // (https://github.com/rrnewton/hermit/issues/4876): 1881.
+    // config::tests::post_crash_timeslice_parses_off_default_and_bounds:
+    // And config::tests::a_post_crash_bound_is_refused_where_it_would_not_take_effect:
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3729,6 +3731,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::callback_history_scheduler_tests::summarized_desyncs_name_their_recorded_event
     // and preemptions::tests::callback_checkpoints_are_placed_at_the_event_ending_their_slice
     // (https://github.com/rrnewton/hermit/issues/4876): 2696.
+    // And post_crash's fourteen units (the crash-signal test and the state
+    // machine: off, default action, lineage exec, outside exec, handler
+    // return, recovered lineage beside another crash, a switch taking every
+    // crash armed in its process, a switch per crashing trial, a nested
+    // default-action crash, a nested caught crash, exited thread, lowest
+    // armed thread, replay transitions) and preemptions'
+    // the_post_crash_switch_round_trips_and_a_replay_takes_the_recorded_bound:
+    // 2710, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3857,6 +3867,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // property file not refused; a file the area gained after its snapshot
     // refused): 168.
     // And a file without a copy refused through an outside hard link: 169.
+    // And post_crash's ten switch tests (a crash handler that execs
+    // switches, a resolved fault and a sent fault signal do not, a handler
+    // waiting in sigsuspend switches the same way every run, a handler that
+    // unblocks before a sibling execs does not, nor a pending realtime
+    // handler, a recovered handler followed by RDTSC traps, or a recovered
+    // lineage beside another crash; each crashing trial switches; an abort
+    // inside a fault handler switches at once): 174.
     ("test.detcore_misc", 182),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
@@ -5963,6 +5980,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And kernel_run_poll_waits_time_out_through_ignored_signals: 165.
     // And the four property snapshot tests: 168.
     // And the uncopied-file alias refusal: 169.
+    // And the same ten post-crash switch tests: 174.
     ("test.detcore_misc_on_host", 182),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
@@ -6474,6 +6492,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same eight --chaos-instruction-offset units: 2730.
     // And the same published-offset unit: 2731.
     // And the same two summarized-desync position units: 2696.
+    // And the same fifteen post-crash units: 2710, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -7195,6 +7214,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same tests: 1869.
     // And the same --chaos-instruction-offset detcore-model unit: 1869.
     // And the same desync-notes round-trip unit: 1867.
+    // And the same post-crash option parse unit: 1867, listed.
+    // And the same post-crash refusal unit: 1868, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
