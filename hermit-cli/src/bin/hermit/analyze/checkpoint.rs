@@ -261,6 +261,12 @@ pub struct JournalEntry {
     pub end: RecordedEnd,
     /// How long it ran, in milliseconds, if it finished.
     pub wall_ms: Option<u64>,
+    /// Its virtual time, in virtual nanoseconds, when its summary gave it
+    /// (`virttime_elapsed`): the virtual-time bounds of the runs after an
+    /// endpoint run derive from it (`--trial-virtual-timeout`). `None` in
+    /// lines written before the field existed.
+    #[serde(default)]
+    pub virtual_elapsed_ns: Option<u64>,
     /// The size of the trial's own log file, if it wrote one.
     pub log_bytes: Option<u64>,
     /// The files it wrote that analyze reads afterwards.
@@ -737,6 +743,7 @@ mod tests {
                 sha256: "ab".repeat(32),
             }],
             recording_replays_input: None,
+            virtual_elapsed_ns: None,
         };
         let journal = Journal::open(dir.path()).unwrap();
         assert!(journal.is_on());

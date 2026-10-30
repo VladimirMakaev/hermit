@@ -27,3 +27,4 @@ pub use types::AnalyzeOpts;
 pub use types::ContinuationTimeslice;
 pub use types::ExitStatusConstraint;
 pub use types::TrialTimeout;
+pub use types::TrialVirtualTimeout;
