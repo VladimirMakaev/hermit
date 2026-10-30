@@ -21,6 +21,7 @@ use anyhow::bail;
 use colored::Colorize;
 use detcore::preemptions::PreemptionReader;
 use detcore::preemptions::PreemptionRecord;
+use detcore::preemptions::boundary_recording::Recording;
 use detcore::types::DetTid;
 use detcore::types::SchedEvent;
 use detcore::util::truncated;
@@ -1233,6 +1234,19 @@ fn continued_record(
         .schedule_prefix(len)
         .with_schedule(continued.to_vec())
         .unwrap_or_else(|| PreemptionRecord::from_sched_events(continued.to_vec()))
+}
+
+/// How many events of the search's schedule keep their callback
+/// checkpoints in a race candidate's check of the `role` run: that run's own
+/// prefix (the baseline replayed one event fewer than the target's `len`),
+/// up to `unchanged`, where the edit starts.
+fn check_prefix_len(len: usize, role: &str, unchanged: usize) -> usize {
+    let own = if role == "baseline" {
+        len.saturating_sub(1)
+    } else {
+        len
+    };
+    own.min(unchanged)
 }
 
 /// The run of `thread`'s events in `schedule` from event `from` on.
@@ -2878,23 +2892,49 @@ impl AnalyzeOpts {
         Ok((realized, path, traced))
     }
 
+    /// These options with the journal off, for a run that must never be a
+    /// search answer: a race candidate's check. The budget and the progress
+    /// stay shared, so --time-budget and --trial-budget still bound it and
+    /// its verdict goes into the progress's own section.
+    pub(super) fn unjournaled(&self) -> AnalyzeOpts {
+        AnalyzeOpts {
+            journal: Journal::default(),
+            ..self.clone()
+        }
+    }
+
     /// The report's "Racing accesses" section for a prefix decision at
     /// `decision`: `target` replayed the first `len` events of `schedule` and
     /// `baseline` one fewer, both then continuing at `continuation`. The
     /// stacks come from a replay of the target's continuation. `None` when a
-    /// side recorded no trace (`--no-racing-accesses`).
+    /// side recorded no trace (`--no-racing-accesses`). `target_met`: whether
+    /// the target replay met the target.
     fn prefix_racing_accesses(
         &self,
         decision: usize,
         (schedule, len, continuation): (&PreemptionRecord, usize, MaybeTimeslice),
         target: Option<TracedReplay>,
         baseline: Option<TracedReplay>,
+        target_met: bool,
     ) -> Option<RacingAccesses> {
         let (target, baseline) = (target?, baseline?);
         let record = continued_record(schedule, len, &target.realized);
-        let racing = self.racing_accesses(decision, target, baseline, |runname| {
-            self.prefix_trial(runname, &record, record.schedevents().len(), continuation)
-        });
+        let racing = self.racing_accesses(
+            decision,
+            target,
+            baseline,
+            target_met,
+            |runname| self.prefix_trial(runname, &record, record.schedevents().len(), continuation),
+            // A candidate's check replays a schedule of the run it checks
+            // under the callback checkpoints of that run's prefix, up to where
+            // the edit starts, then continues as the search's trials did.
+            |runname, role, edited, unchanged, replay| {
+                let edited =
+                    continued_record(schedule, check_prefix_len(len, role, unchanged), edited);
+                self.unjournaled()
+                    .prefix_trial(runname, &edited, replay, continuation)
+            },
+        );
         Some(racing)
     }
 
@@ -3159,6 +3199,7 @@ impl AnalyzeOpts {
             (&schedule, decision + 1, continuation),
             target_trace,
             baseline_trace,
+            target_met,
         );
 
         println!(
@@ -3352,11 +3393,16 @@ impl AnalyzeOpts {
             println!("{warning}");
         }
         println!("{}", header);
+        // `target_met` is the stack-trace replay's (final_target_for_stacktraces)
+        // while `target_trace` is final_target_schedule's, above: both replay the
+        // same first `decision + 1` events of `schedule` and continue at
+        // `continuation`, so they agree on whether the target is met.
         let racing_accesses = self.prefix_racing_accesses(
             decision,
             (schedule, decision + 1, continuation),
             target_trace.take(),
             baseline_trace.take(),
+            target_met,
         );
         println!("Thread {thread} at the deciding event #{decision}:");
         Self::print_stack("the deciding thread's stack", deciding);
@@ -4385,15 +4431,46 @@ impl AnalyzeOpts {
             header.push_str(&format!("Note: {change}\n"));
         }
         header.push_str(&sources);
+        let target_met = target.finished && target.met_target;
         let racing_accesses = match (target.traced.take(), baseline.traced.take()) {
             (Some(target), Some(baseline)) => {
                 let realized = target.realized_path.clone();
-                Some(
-                    self.racing_accesses(critical_event_index - 1, target, baseline, |runname| {
+                let baseline_realized = baseline.realized_path.clone();
+                Some(self.racing_accesses(
+                    critical_event_index - 1,
+                    target,
+                    baseline,
+                    target_met,
+                    |runname| {
                         Ok(RunData::new_baseline(self, runname.to_string())?
-                            .with_schedule_replay_from(realized))
-                    }),
-                )
+                            .with_schedule_replay_from(realized.clone()))
+                    },
+                    // A candidate's check replays a schedule of the run it
+                    // checks under the callback checkpoints of that run's
+                    // recording, up to where the edit starts, then continues
+                    // without chaos at the trials' timeslice.
+                    |runname, role, edited, unchanged, replay| {
+                        let path = if role == "baseline" {
+                            &baseline_realized
+                        } else {
+                            &realized
+                        };
+                        let edited = Recording::read(path)
+                            .and_then(|recording| recording.into_legacy("a race candidate's check"))
+                            .map_err(|error| anyhow::anyhow!("{error:#}"))?
+                            .schedule_prefix(unchanged)
+                            .with_schedule(edited.to_vec())
+                            .unwrap_or_else(|| {
+                                PreemptionRecord::from_sched_events(edited.to_vec())
+                            });
+                        self.unjournaled().prefix_trial(
+                            runname,
+                            &edited,
+                            replay,
+                            self.trial_max_timeslice(),
+                        )
+                    },
+                ))
             }
             _ => None,
         };
@@ -5447,6 +5524,17 @@ mod tests {
     /// end, so its slices end where the recording's did; a checkpoint past
     /// the prefix is dropped, and so is the one at its end while an event
     /// follows: that slice end is the next event's decision.
+    /// A check of the baseline keeps the checkpoints of the baseline's own
+    /// prefix, one event shorter than the target's, and neither keeps any
+    /// past where the edit starts.
+    #[test]
+    fn a_check_keeps_the_checkpoints_of_its_own_runs_prefix() {
+        assert_eq!(check_prefix_len(10, "target", 20), 10);
+        assert_eq!(check_prefix_len(10, "baseline", 20), 9);
+        assert_eq!(check_prefix_len(10, "target", 4), 4);
+        assert_eq!(check_prefix_len(10, "baseline", 4), 4);
+    }
+
     #[test]
     fn a_prefix_trial_keeps_the_target_checkpoints_within_its_prefix() {
         let parent = tempfile::tempdir().unwrap();

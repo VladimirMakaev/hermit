@@ -2172,6 +2172,26 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 1105, listed.
     // And run::watch_is_refused_where_it_could_not_arm_or_report (--watch):
     // 1115.
+    // tests::analyze_conclusions_have_their_own_exit_codes_and_class_lines: 1336.
+    // frontier: 1343, recomputed by cargo nextest list over the frontier stack.
+    // And race_report::tests::{
+    // the_first_thread_difference_is_where_realized_schedules_part,
+    // a_replay_that_left_its_schedule_is_compared_as_it_ran}: 1345.
+    // And eight race-candidate check tests,
+    // race_report::tests::{
+    // a_reversal_moves_only_the_pair_and_refuses_a_third_thread,
+    // a_check_edits_the_target_or_else_the_baseline,
+    // a_replay_that_leaves_the_edit_is_not_realized_whatever_its_outcome,
+    // exactly_one_deciding_candidate_is_found_by_intervention,
+    // a_check_counts_only_when_its_control_ends_as_the_run_did,
+    // a_missing_empty_or_partial_realized_schedule_gives_none,
+    // a_check_replays_its_control_first_and_counts_only_when_it_reproduces} and
+    // analyze::phases::tests::a_check_keeps_the_checkpoints_of_its_own_runs_prefix: 1353.
+    // And two tests of the race-candidate checks' resume,
+    // analyze::checkpoint::tests::candidate_checks_are_kept_for_a_resume and
+    // analyze::race_report::tests::a_recorded_check_stands_on_resume: 1355.
+    // And analyze::races::tests::a_changed_course_is_ordered_by_its_baseline_counterpart: 1356.
+    // And analyze::races::tests::candidates_none_of_which_decides_say_what_that_means: 1357.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6864,6 +6884,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // moved from hermit-cli into Detcore and grew there: 1172, listed.
     // And the same unit tests as test.hermit_unit: 1115.
     // And the same --watch refusal test: 1118.
+    // frontier: 1325, recomputed by cargo nextest list over the frontier stack.
+    // And the same eleven verdict and precondition tests (#4752): 1336.
+    // frontier: 1343, recomputed by cargo nextest list over the frontier stack.
+    // And the same two realized-replay report tests: 1345.
+    // And the same eight race-candidate check tests: 1353.
+    // And the same two resume tests: 1355.
+    // And the same changed-course order test: 1356.
+    // And the same undecided-candidates test: 1357.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

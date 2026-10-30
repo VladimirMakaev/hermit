@@ -24,6 +24,7 @@
 //! outcomes and its seed, so the resumed analysis makes exactly the
 //! decisions the first one made, and goes on from where it stopped.
 
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fs::File;
 use std::fs::OpenOptions;
@@ -38,6 +39,8 @@ use std::sync::Mutex;
 use anyhow::Context as _;
 use serde::Deserialize;
 use serde::Serialize;
+
+use crate::analyze::races::CandidateCheck;
 
 /// The analysis's identity, in the workspace.
 pub const CHECKPOINT_FILE: &str = "analyze-checkpoint.json";
@@ -524,6 +527,13 @@ pub struct Progress {
     /// structured fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub decision: Option<DecidedEvents>,
+    /// The race candidates the report checked by intervention, each under
+    /// its key (`race_report::candidate_key`: the edited run, the edit and
+    /// the edited schedule): a resumed analysis takes these verdicts instead
+    /// of replaying them. Kept apart from the journal, so a check's replay is
+    /// never a search answer.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub candidate_checks: BTreeMap<String, CandidateCheck>,
 }
 
 /// The events a finished search decided on.
@@ -566,7 +576,28 @@ impl ProgressHandle {
     /// to: its interval stays the progress's until this one's search
     /// replaces it, so an analysis stopped again before its search keeps it.
     pub fn carry(&self, earlier: &Progress) {
-        self.update(|progress| progress.interval = earlier.interval.clone());
+        self.update(|progress| {
+            progress.interval = earlier.interval.clone();
+            progress.candidate_checks = earlier.candidate_checks.clone();
+        });
+    }
+
+    /// Record the check of the race candidate `key` names.
+    pub fn checked(&self, key: String, check: CandidateCheck) {
+        self.update(|progress| {
+            progress.candidate_checks.insert(key, check);
+        });
+    }
+
+    /// The recorded check of the race candidate `key` names, if any.
+    pub fn check_of(&self, key: &str) -> Option<CandidateCheck> {
+        self.state
+            .lock()
+            .unwrap()
+            .0
+            .candidate_checks
+            .get(key)
+            .cloned()
     }
 
     /// Write the progress into `workspace` from now on.
@@ -630,6 +661,35 @@ impl ProgressHandle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The checks of race candidates are written with the progress and come
+    /// back to a resumed analysis, which carries them.
+    #[test]
+    fn candidate_checks_are_kept_for_a_resume() {
+        let dir = tempfile::tempdir().unwrap();
+        let check = CandidateCheck {
+            verdict: crate::analyze::races::CheckVerdict::Decides,
+            edited: "target".to_string(),
+            edit: "moving 2 events of thread 4 before thread 3's turn at #10, crossing no other \
+                   thread"
+                .to_string(),
+            moved: None,
+            trial: Some("racing_candidate_1".to_string()),
+            detail: "misses the target; the unedited control meets it".to_string(),
+        };
+        let first = ProgressHandle::default();
+        first.write_into(dir.path());
+        first.checked("target: k".to_string(), check.clone());
+        let read = Progress::read(dir.path()).unwrap();
+        assert_eq!(read.candidate_checks.get("target: k"), Some(&check));
+        let resumed = ProgressHandle::default();
+        resumed.carry(&read);
+        assert_eq!(resumed.check_of("target: k"), Some(check));
+        assert_eq!(resumed.check_of("target: other"), None);
+        // An old progress without the section still reads.
+        let old: Progress = serde_json::from_str(r#"{"phase":"prefix-search"}"#).unwrap();
+        assert!(old.candidate_checks.is_empty());
+    }
 
     fn identity(dir: &Path) -> Identity {
         let hermit = dir.join("hermit");
