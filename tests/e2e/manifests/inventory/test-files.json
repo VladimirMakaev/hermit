@@ -3596,6 +3596,12 @@
     },
     {
       "disposition": "guest-fixture",
+      "path": "tests/debugger/guests/dlopen_threads.c",
+      "runner": "tests/debugger/run_debugger_tests.sh",
+      "why": "tests/debugger/guests/dlopen_threads.c is owned by tests/debugger/run_debugger_tests.sh: The debugger guest for gdb's own dynamic-loader breakpoints, compiled with -pthread by harness.compile_guest. Its two threads each load and unload a library ten times and print the order of their loads, so test_gdb_strict_timer.py can check that a strict run under a gdb session that only continues is not refused for a skid overshoot and is scheduled as without gdb, which a standalone manifest program cannot supply."
+    },
+    {
+      "disposition": "guest-fixture",
       "path": "tests/debugger/guests/sleepers.c",
       "runner": "tests/debugger/run_debugger_tests.sh",
       "why": "tests/debugger/guests/sleepers.c is owned by tests/debugger/run_debugger_tests.sh: The debugger guest for gdb's interrupt, compiled with -pthread by harness.compile_guest. Its threads never stop on their own (two sleep in a loop, one yields, main waits), so test_gdb_interrupt.py can interrupt it under a live gdbserver and inspect every thread, which a standalone manifest program cannot supply."
@@ -3647,6 +3653,12 @@
       "path": "tests/debugger/test_gdb_strict_gdbserver.py",
       "runner": "tests/debugger/run_debugger_tests.sh",
       "why": "tests/debugger/test_gdb_strict_gdbserver.py is owned by tests/debugger/run_debugger_tests.sh: The debugger asset `test_gdb_strict_gdbserver.py` is a debugger-specific Python case requiring a live gdbserver and GDB/LLDB client. The driver owns ports, process cleanup, and replay assertions that a standalone manifest program cannot supply."
+    },
+    {
+      "disposition": "guest-fixture",
+      "path": "tests/debugger/test_gdb_strict_timer.py",
+      "runner": "tests/debugger/run_debugger_tests.sh",
+      "why": "tests/debugger/test_gdb_strict_timer.py is owned by tests/debugger/run_debugger_tests.sh: The debugger asset `test_gdb_strict_timer.py` is a debugger-specific Python case requiring a live gdbserver and a GDB client. The driver owns ports and process cleanup, which a standalone manifest program cannot supply."
     },
     {
       "disposition": "guest-fixture",
