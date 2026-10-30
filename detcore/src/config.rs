@@ -150,7 +150,7 @@ mod tests {
         // Adds `GlobalRequest::ReplayCallNeverReturns` and `GlobalResponse::ReplayCallNeverReturns` (#4701).
         (20, "98da43bb225cac65", "846052997d97693f"),
         // Adds `Resources.polls_a_named_fifo` (#4692).
-        (17, "182b80da8855a429", "f013e36743d8d9e6"),
+        (21, "98da43bb225cac65", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
