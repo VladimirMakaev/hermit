@@ -2202,6 +2202,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run's chaos_instruction_offset_round_trips_and_is_refused_where_inert
     // and replay_of_instruction_offsets_is_refused_where_unsupported
     // (--chaos-instruction-offset): 1164.
+    // And the eight pinned_cpu::tests units of CPU reservations across
+    // concurrent runs: 1143.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -6931,6 +6933,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same reproducer unit: 1116, listed.
     // And the same two reproducer units: 1117, listed.
     // And the same two --chaos-instruction-offset run units: 1158.
+    // And the same eight reservation units: 1137.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
