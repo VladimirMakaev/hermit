@@ -74,8 +74,6 @@ struct RawRecord {
     rewrite_exclusives_in_memory: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     rejoins: Option<Vec<crate::scheduler::rejoin_log::Rejoin>>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    format_version: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     background_starts: Vec<BackgroundStart>,
 }

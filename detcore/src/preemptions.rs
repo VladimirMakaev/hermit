@@ -44,10 +44,11 @@ use crate::types::SchedEvent;
 /// record written before the field existed, and every record since that holds
 /// nothing a format-1 reader would misread. Format 2 adds the instruction
 /// offsets of the schedule trace's events ([`INSTRUCTION_OFFSET_FORMAT`]).
-/// A reader reads every format up to its own, and refuses a newer one
-/// ([`RecordFormatRefusal`]). (Provisional: renumbered to the next free
-/// number if another format-bumping change lands first.)
-pub const PREEMPTION_RECORD_FORMAT: u32 = 2;
+/// Format 3 notes every background start of the recorded run
+/// ([`BACKGROUND_STARTS_FORMAT`]). A reader reads every format up to its
+/// own, each by the feature that defined it, and refuses a newer one
+/// ([`RecordFormatRefusal`]).
+pub const PREEMPTION_RECORD_FORMAT: u32 = 3;
 
 /// The format of a record written by a Hermit that records
 /// `--chaos-instruction-offset` decisions in its schedule trace
@@ -90,17 +91,26 @@ pub fn check_record_format(format: u32) -> Result<(), RecordFormatRefusal> {
     }
 }
 
-/// The newest preemption-record format this Hermit writes and reads
-/// (`PreemptionRecord::format_version`). Format 1 has no version field: every
-/// record written before the field existed. Format 2 notes every background
-/// start of the recorded run (`background_starts`). A record of a newer format
-/// is refused (`PreemptionRecord::validate`).
-pub const PREEMPTION_RECORD_FORMAT: u32 = 2;
-
 /// The first format whose records note every background start
 /// (`BackgroundStart`), so that a call such a record does not start at a point
 /// did not start there.
-pub const BACKGROUND_STARTS_FORMAT: u32 = 2;
+pub const BACKGROUND_STARTS_FORMAT: u32 = 3;
+
+/// The format a record keeps once its background starts are dropped (an edit,
+/// a shorter schedule prefix, a copy of the preemptions alone): the newest
+/// format whose promises still hold without them. Format 2's promise, that
+/// the schedule trace holds every instruction-offset decision, rides with the
+/// events; format 3's, that the record notes every background start, does not.
+/// Only format 3 is lowered: format 1 or 2 has nothing to drop, and a format
+/// this Hermit does not read (a newer one, or the invalid 0) is kept as
+/// stated, so that reading the record still refuses it by name
+/// (`check_record_format`, `PreemptionRecord::validate`).
+fn format_without_background_starts(format: Option<u32>) -> Option<u32> {
+    match format {
+        Some(BACKGROUND_STARTS_FORMAT) => Some(INSTRUCTION_OFFSET_FORMAT),
+        other => other,
+    }
+}
 
 /// The turn that began a kernel-run blocking call
 /// (`ResourceID::is_kernel_run_blocking`: a blocking read of an external
@@ -224,11 +234,14 @@ pub struct PreemptionRecord {
     /// architectures, and for records written before the field existed.
     store_exclusive_failures: HostObservedCount,
     /// The record's format (`PREEMPTION_RECORD_FORMAT`): `None` for format 1.
-    /// The writer states format 2 once it records an instruction-offset
-    /// decision, and an edit keeps the format of the record it edits: format
-    /// 2 says the schedule trace holds every offset decision, which offsets
-    /// in a thread's rows alone (a record written before schedule traces held
-    /// them) do not.
+    /// A run that records its schedule without replaying one stamps the
+    /// current format, whether or not it began a background call. Otherwise
+    /// the writer states format 2 once it records an instruction-offset
+    /// decision. An edit keeps format 2 of the record it edits, which says the
+    /// schedule trace holds every offset decision (offsets in a thread's rows
+    /// alone, from a record written before schedule traces held them, do not),
+    /// and drops format 3 with the background starts
+    /// (`format_without_background_starts`).
     format_version: Option<u32>,
     /// Whether the run that produced this record rewrote exclusive loops in
     /// the guest's memory (`Config::rewrite_exclusives_in_memory`, aarch64).
@@ -252,10 +265,6 @@ pub struct PreemptionRecord {
     /// one synthesized or edited in memory, has `None`. Either kind with no
     /// entry replays as before.
     rejoins: Option<Vec<crate::scheduler::rejoin_log::Rejoin>>,
-    /// The record's format (`PREEMPTION_RECORD_FORMAT`): `None` for format 1.
-    /// A run that records its schedule without replaying one stamps the
-    /// current format, whether or not it began a background call.
-    format_version: Option<u32>,
     /// The turns that began kernel-run blocking calls, in the order they
     /// committed (`BackgroundStart`). Empty for records of format 1, which
     /// replay as before, for runs that began no such call, and for records
@@ -342,7 +351,6 @@ impl PreemptionRecord {
             host_inputs: None,
             store_exclusive_failures: HostObservedCount::default(),
             rejoins: None,
-            format_version: None,
             background_starts: Vec::new(),
             rewrite_exclusives_in_memory: false,
             format_version: None,
@@ -418,7 +426,6 @@ impl PreemptionRecord {
             format_version,
             rewrite_exclusives_in_memory,
             rejoins,
-            format_version,
             background_starts,
         } = self;
         let followed = len < global.len();
@@ -472,7 +479,6 @@ impl PreemptionRecord {
             store_exclusive_failures: HostObservedCount::default(),
             // A prefix of an inexact record is inexact too.
             replay_departed_at: *replay_departed_at,
-            format_version: *format_version,
             // A setting of the recorded run, which a replay must share.
             rewrite_exclusives_in_memory: *rewrite_exclusives_in_memory,
             // The readmissions name points of the recorded run, as the
@@ -486,8 +492,13 @@ impl PreemptionRecord {
             // record's does (`forget_run_points`): a format that notes
             // background starts says the record holds every start its run
             // took, so a shorter prefix that kept it without them would tell
-            // its replay that no call began.
-            format_version: if followed { None } else { *format_version },
+            // its replay that no call began. Format 2, offsets in the events
+            // it keeps, goes with the prefix.
+            format_version: if followed {
+                format_without_background_starts(*format_version)
+            } else {
+                *format_version
+            },
             background_starts: if followed {
                 Vec::new()
             } else {
@@ -658,9 +669,10 @@ impl PreemptionRecord {
         self.callback_checkpoints.clear();
         self.rejoins = None;
         // The background starts sit between events an edit moves, so they go
-        // too, and the format with them: the edited record notes no start.
+        // too, and the format that notes them with them: the edited record
+        // notes no start. Format 2, offsets in the events, stays.
         self.background_starts.clear();
-        self.format_version = None;
+        self.format_version = format_without_background_starts(self.format_version);
     }
 
     /// TODO: provide a better way to create an empty PreemptionRecord but with entries for a given set of tids.
@@ -728,10 +740,9 @@ impl PreemptionRecord {
             host_inputs: self.host_inputs.clone(),
             // A count of this run's host, not part of the preemptions.
             store_exclusive_failures: HostObservedCount::default(),
-            format_version: self.format_version,
+            format_version: format_without_background_starts(self.format_version),
             rewrite_exclusives_in_memory: self.rewrite_exclusives_in_memory,
             rejoins: None,
-            format_version: None,
             background_starts: Vec::new(),
         }
     }
@@ -806,7 +817,6 @@ impl PreemptionRecord {
             format_version: None,
             rewrite_exclusives_in_memory: false,
             rejoins: None,
-            format_version: None,
             background_starts: Vec::new(),
         }
     }
@@ -827,8 +837,9 @@ impl PreemptionRecord {
         source: &PreemptionRecord,
     ) -> Result<Self, String> {
         let mut record = Self::from_vecs(bt);
-        // Rebuilt from `source`'s rows, it is of `source`'s format.
-        record.format_version = source.format_version;
+        // Rebuilt from `source`'s rows, it is of `source`'s format, less the
+        // background starts it does not take over.
+        record.format_version = format_without_background_starts(source.format_version);
         if !source.carries_instruction_offsets() {
             return Ok(record);
         }
@@ -1008,15 +1019,6 @@ impl PreemptionRecord {
                     event.dettid
                 ));
             }
-        }
-        if let Some(format) = self.format_version
-            && format > PREEMPTION_RECORD_FORMAT
-        {
-            return Err(format!(
-                "the preemption record is format {format}, written by a newer Hermit; this \
-                 Hermit reads formats up to {PREEMPTION_RECORD_FORMAT}. Replay it with the \
-                 Hermit that recorded it, or a newer one"
-            ));
         }
         let events = self.global.len() as u64;
         if let Some(start) = self
@@ -1589,6 +1591,52 @@ mod tests {
 
     use super::*;
     use crate::types::RcbTimeMultiplier;
+
+    /// A record stating a format this Hermit does not read keeps it through
+    /// every edit, prefix, preemptions-only copy and rebuild that drops the
+    /// background starts, so the copy written and read back is refused like
+    /// the original: an unknown newer format by name, the invalid 0 as
+    /// malformed. Lowering it to a known format would let a carrier lose the
+    /// declaration before any reader saw it.
+    #[test]
+    fn a_format_this_hermit_does_not_read_survives_every_transform_and_stays_refused() {
+        let tid = DetTid::from_raw(3);
+        for format in [0, PREEMPTION_RECORD_FORMAT + 1, PREEMPTION_RECORD_FORMAT + 2] {
+            let mut value = serde_json::to_value(PreemptionRecord::from_sched_events(vec![
+                SchedEvent::branches(tid, 10),
+                SchedEvent::branches(tid, 20),
+            ]))
+            .unwrap();
+            value["format_version"] = serde_json::json!(format);
+            let record: PreemptionRecord = serde_json::from_value(value).unwrap();
+            let mut edited = record.clone();
+            edited.split_map(|event, _| std::iter::once(event));
+            let mut preemptions_only = record.clone();
+            preemptions_only.preemptions_only();
+            for (transform, out) in [
+                ("edit", edited),
+                ("stripped", record.clone().strip_contents()),
+                ("prefix", record.schedule_prefix(1)),
+                ("preemptions only", preemptions_only),
+                ("preemptions-only copy", record.clone_preemptions_only()),
+                (
+                    "rebuilt",
+                    PreemptionRecord::from_vecs_of(&BTreeMap::new(), &record).unwrap(),
+                ),
+            ] {
+                assert_eq!(out.format_version(), format, "{transform} of format {format}");
+                let read: PreemptionRecord = serde_json::from_str(&out.to_string()).unwrap();
+                assert_eq!(read.format_version(), format, "{transform} of format {format}");
+                assert!(read.validate().is_err(), "{transform} of format {format}");
+                if format != 0 {
+                    assert!(
+                        matches!(read.check_format(), Err(RecordFormatRefusal { format: f }) if f == format),
+                        "{transform} of format {format}"
+                    );
+                }
+            }
+        }
+    }
 
     /// A record written by a replay that left a change point out of it says
     /// so, with the global event count where it first did; records derived
