@@ -4623,6 +4623,7 @@ impl AnalyzeOpts {
         .into_iter()
         .filter_map(|(option, path)| Some((option, path?)))
         .collect();
+        Self::refuse_recordings_numbered_apart(&recordings)?;
         self.adopt_recorded_epoch(&recordings)?;
         self.adopt_recorded_timeslice(&recordings)?;
         // Every trial charges expired timed waits as the target did.
@@ -4630,7 +4631,8 @@ impl AnalyzeOpts {
         // Every trial registers queued sleeps as the target did.
         self.adopt_sleep_registration(run1.as_deref())?;
         self.refuse_recordings_under_another_pipe_wake_latency(&recordings)?;
-        self.refuse_instruction_offsets(&recordings)
+        self.refuse_instruction_offsets(&recordings)?;
+        self.prepare_trial_guest_ids(&recordings)
     }
 
     /// Take the settings `analyze` inherits from the global options: every
