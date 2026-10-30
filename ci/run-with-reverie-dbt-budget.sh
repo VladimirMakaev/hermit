@@ -3125,7 +3125,22 @@ fi
 #     reverie-dbt/native            e2a6ab75ab64 -> e2a6ab75ab64
 # so the inventory, SDK and native inputs, calibrated budget, job width and
 # limits carry unchanged from the de4e3baa entry.
-expected_pin=b8b453d0d50527ce864b6a9cd74d784eff8d623a
+# CARRY TO fe58a18a5851ce3f9e6deb476b9db188c8059730 (2026-10-30): from
+# b8b453d0d50527ce864b6a9cd74d784eff8d623a. The train22 cluster-2 Reverie
+# branch (train22/2-aarch64): reverie#1137, reverie#1141, reverie#1145,
+# reverie#1157, reverie#1149, reverie#1150, reverie#1156, reverie#1158,
+# reverie#1167, reverie#1168, reverie#1172 on top of it, plus three train
+# resolution commits. Not on Reverie's main branch yet; it lands there first
+# and the pin then moves to the landed revision.
+# git diff is empty under reverie-dbt/ and third-party/ and for the root
+# Cargo.toml, Cargo.lock and rust-toolchain.toml; the repository inputs to
+# the DynamoRIO content key are byte-identical by git object id:
+#     reverie-dbt/vendor/dynamorio  4e4afaa7cb1a -> 4e4afaa7cb1a
+#     reverie-dbt/build.rs          3f2abba1b74a -> 3f2abba1b74a
+#     reverie-dbt/native            e2a6ab75ab64 -> e2a6ab75ab64
+# so the inventory, SDK and native inputs, calibrated budget, job width and
+# limits carry unchanged from the b8b453d0 entry.
+expected_pin=fe58a18a5851ce3f9e6deb476b9db188c8059730
 
 # TAKE THE PIN, NOT WHATEVER ELSE THE PRODUCER PRINTED.
 #
