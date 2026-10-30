@@ -3623,7 +3623,7 @@ mod legacy_backend_json {
     /// `count_store_exclusives` came after it as well: the run's global state
     /// counts store-exclusives on aarch64 ptrace runs, not the runtime, so it
     /// is never written and reads as false.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 46] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 47] = [
         // `chaos_timeslice_range` came after it too: the scheduler draws the
         // slices, not the runtime, so it is never written and reads as unset.
         // `chaos_timeslice_draw` and `chaos_timeslice` came with it, for the same
@@ -5138,11 +5138,12 @@ mod tests {
         // `chaos_timeslice_range`, `chaos_timeslice_draw`, `chaos_timeslice`,
         // `guest_ids`, `virtual_timeout`, `detlog_anon`,
         // `access_trace`, `access_trace_from`, `access_trace_max_records`,
-        // `access_trace_max_bytes`, `chaos_instruction_offset`, `rewrite_exclusives_in_memory` and
-        // `strict_schedule_boundaries` none: fourteen more keys and
-        // forty-five fewer, so thirty-one keys fewer than fields.
+        // `access_trace_max_bytes`, `chaos_instruction_offset`,
+        // `rewrite_exclusives_in_memory`, `count_store_exclusives` and
+        // `strict_schedule_boundaries` none: fourteen more keys and forty-six
+        // fewer, so thirty-two keys fewer than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 31);
+        assert_eq!(fields.len(), keys.len() + 32);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
