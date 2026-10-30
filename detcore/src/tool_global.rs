@@ -92,6 +92,7 @@ use crate::port_allocator::PortAllocator;
 use crate::port_allocator::effective_port_range;
 use crate::port_allocator::parse_reserved_ports;
 use crate::preemptions::ThreadHistory;
+use crate::preemptions::ThreadHistoryIterator;
 use crate::preemptions::boundary_recording::HistoryReader;
 use crate::procfs_inode;
 use crate::procfs_inode::ProcfsName;
@@ -6170,7 +6171,7 @@ impl GlobalState {
         request_mm: MmId,
         physical_ids: Option<(i32, i32)>,
         signal_identity: Option<reverie::SignalTaskIdentity>,
-    ) -> SchedulerRpcResult<(Option<ThreadHistory>, Option<LogicalTime>)> {
+    ) -> SchedulerRpcResult<(Option<ThreadHistoryIterator>, Option<LogicalTime>)> {
         #[cfg(feature = "physical-mm-test-support")]
         self.initial_mm_checkpoint(initial_mm_probe::Point::ThreadStartup, dettid, request_mm)
             .await;
@@ -6352,12 +6353,12 @@ impl GlobalState {
                 {
                     return SchedulerRpcResult::ThreadExited;
                 }
-                let history = pr.extract_thread_record(&dettid).unwrap_or_else(|| {
+                let history = pr.extract_thread_replay(&dettid).unwrap_or_else(|| {
                     warn!(
                         "Replaying preemptions, but no record found for thread {}",
                         dettid
                     );
-                    ThreadHistory::new()
+                    ThreadHistory::new().into_iter()
                 });
                 let old_prio = sched.priorities.insert(dettid, history.initial_priority());
                 (history, old_prio)
@@ -8122,7 +8123,7 @@ pub enum GlobalResponse {
     /// Includes optional preemption points for the new thread, and the
     /// length of its first timeslice when its start grant names one (a
     /// schedule replay's recorded first slice; see `thread_start_request`).
-    StartNewThread(Option<ThreadHistory>, Option<LogicalTime>),
+    StartNewThread(Option<ThreadHistoryIterator>, Option<LogicalTime>),
     DeregisterThread(()),
     SetChildTidAddress(()),
     SetSavedGuestSigmask(()),
@@ -9863,7 +9864,7 @@ pub async fn thread_start_request<G, T>(
     cfg: &Config,
     guest: &mut G,
     detpid: DetPid,
-) -> (Option<ThreadHistory>, Option<LogicalTime>)
+) -> (Option<ThreadHistoryIterator>, Option<LogicalTime>)
 where
     G: Guest<Detcore<T>>,
     T: RecordOrReplay,
@@ -9910,7 +9911,7 @@ where
 pub(crate) fn finish_thread_start<G, T>(
     cfg: &Config,
     guest: &mut G,
-    history: Option<ThreadHistory>,
+    history: Option<ThreadHistoryIterator>,
     first_slice: Option<LogicalTime>,
 ) where
     G: Guest<Detcore<T>>,
@@ -9918,7 +9919,7 @@ pub(crate) fn finish_thread_start<G, T>(
 {
     let reset = {
         let thread = guest.thread_state_mut();
-        thread.preemption_points = history.map(|history| history.into_iter());
+        thread.preemption_points = history;
         crate::slice_boundary::grant::reset_start(thread, cfg)
             .unwrap_or_else(|error| crate::scheduler::exit_on_scheduler_refusal(&error))
     };
@@ -17861,7 +17862,7 @@ mod tests {
         assert_eq!(first.tid, child);
         assert_eq!(
             startup.await,
-            (None, granted(GlobalResponse::StartNewThread(None)))
+            (None, granted(GlobalResponse::StartNewThread(None, None)))
         );
     }
 
@@ -17922,7 +17923,7 @@ mod tests {
         assert_eq!(first.tid, child);
         assert_eq!(
             startup.await,
-            (None, granted(GlobalResponse::StartNewThread(None)))
+            (None, granted(GlobalResponse::StartNewThread(None, None)))
         );
     }
 
@@ -17973,7 +17974,7 @@ mod tests {
         assert_eq!(first.tid, child);
         assert_eq!(
             startup.await,
-            (None, granted(GlobalResponse::StartNewThread(None)))
+            (None, granted(GlobalResponse::StartNewThread(None, None)))
         );
     }
 
@@ -18025,7 +18026,7 @@ mod tests {
         assert_eq!(first_turn.tid, child);
         assert_eq!(
             first_start.await,
-            (None, granted(GlobalResponse::StartNewThread(None)))
+            (None, granted(GlobalResponse::StartNewThread(None, None)))
         );
         first_holder.advance_to(first_holder.as_nanos() + LogicalTime::from_nanos(500));
         let deregistered = state
@@ -18101,7 +18102,7 @@ mod tests {
         assert_eq!(second_turn.tid, child);
         assert_eq!(
             startup.await,
-            (None, granted(GlobalResponse::StartNewThread(None)))
+            (None, granted(GlobalResponse::StartNewThread(None, None)))
         );
     }
 
