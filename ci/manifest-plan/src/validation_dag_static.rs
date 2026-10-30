@@ -1860,6 +1860,15 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // phases::tests::replays_tolerate_branch_skid_only_on_an_inexact_counter: 1130.
     // And schedule_search::tests::the_trimmed_failing_schedule_is_selected_as_a_stable_point: 1131.
     // And phases::tests::timed_out_trials_are_reported_on_their_own_line: 1132.
+    // And analyze --prefix-search: phases::tests::the_prefix_search_finds_the_deciding_event
+    // and schedule_search::tests::{a_failure_on_failing_only_events_ends_with_no_single_swap,
+    // an_unstable_control_schedule_is_an_error,
+    // two_agreeing_replays_classify_a_schedule_after_an_outlier}: 1136.
+    // And phases::tests::a_prefix_trial_keeps_the_target_checkpoints_within_its_prefix
+    // (a prefix trial keeps the callback checkpoints its events reach): 1137.
+    // (a prefix trial keeps the callback checkpoints of the slices its events
+    // end): 1106.
+    // And phases::tests::a_prefix_report_says_when_both_stacks_are_one_thread: 1138.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3069,6 +3078,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And determinize_stat_reports_one_link_for_directories_only and
     // determinize_stat_nlink_pin_edges (directory st_nlink pinned to 1):
     // 2736 + 2 = 2738, listed.
+    // And preemptions::tests::a_schedule_prefix_keeps_the_checkpoints_its_events_reach
+    // (a replay of a schedule's first events keeps their callback
+    // checkpoints): 2683, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5350,6 +5362,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same protection-key subscription unit: 2692, listed.
     // And the same P2b deletion of the anchor device unit: 2694, listed.
     // And the same two directory st_nlink units: 2738, listed.
+    // And the same schedule-prefix unit: 2683, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -5724,6 +5737,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same 3 tests: 1124.
     // And the same test: 1125.
     // And the same test: 1126.
+    // And the same four analyze --prefix-search tests: 1130.
+    // And the same prefix-trial checkpoint test: 1131.
+    // And the same one-thread prefix report test: 1132.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
