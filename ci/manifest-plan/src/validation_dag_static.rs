@@ -3604,6 +3604,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // two_events_reported_by_both_sites_count_two_events): 2704, listed.
     // And tool_local a_chaos_timeslice_range_draws_slices_of_every_scale_up_to_its_max and a_schedule_replay_draws_nothing_from_the_chaos_timeslice_range: 2697.
     // And preemptions::tests::a_drawn_chaos_timeslice_is_seeded_log_uniform_and_recorded: 2698.
+    // And the scheduler units
+    // a_prehook_switch_hands_a_backgrounded_call_its_turn_before_deferred_threads
+    // and only_a_prehook_switch_leaves_its_thread_a_call_to_carry_out: 2684,
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6303,6 +6306,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same nine skid-overshoot event units: 2704, listed.
     // And the same two units: 2697.
     // And preemptions::tests::a_drawn_chaos_timeslice_is_seeded_log_uniform_and_recorded: 2698.
+    // And the same two prehook-handoff scheduler units: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
