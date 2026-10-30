@@ -1269,6 +1269,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (https://github.com/rrnewton/hermit/issues/4876): 1881.
     // config::tests::post_crash_timeslice_parses_off_default_and_bounds:
     // And config::tests::a_post_crash_bound_is_refused_where_it_would_not_take_effect:
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 1882, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2221,6 +2225,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests::replay_departure_uses_the_policy_refusal_exit_and_its_own_cause
     // (a preemption replay that left its record refuses with its own cause),
     // and tests::a_replay_departure_refuses_through_the_verify_path: 1163,
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 1163, listed.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3763,6 +3771,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // listed.
     // And procfs a_lookup_below_an_absent_cpu_or_node_finds_its_prefix,
     // for lookups of absent CPUs and nodes: 2683, listed.
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 2741, listed.
+    // And this branch's Detcore unit tests: 2712.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -5263,6 +5276,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And no_namespace_bisect_replays_the_schedules_it_writes: 648 + 1 = 649.
     // And no_namespace_minimize_replays_its_candidate_records: 649 + 1 = 650.
     // absent_cpus_and_nodes_are_not_found_and_rseq_is_refused: 623.
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 640, listed.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5921,6 +5938,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same --no-namespace bisect test, not excluded: 567 + 1 = 568.
     // And the same --minimize test, not excluded: 568 + 1 = 569.
     // And the same absent CPU and node lookup regression, not excluded: 542.
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 559, listed.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6522,6 +6543,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same six replay-departure units: 2712, listed.
     // And the same departure-beside-a-request unit: 2713, listed.
     // And the same absent CPU and node prefix unit: 2683, listed.
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 2741, listed.
+    // And the same tests: 2712.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6998,6 +7024,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-seeded-timeslice fallback units: 1156, listed
     // (1154 on main plus two).
     // And the same three replay-departure units: 1157, listed.
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 1157, listed.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -7249,6 +7279,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same desync-notes round-trip unit: 1867.
     // And the same post-crash option parse unit: 1867, listed.
     // And the same post-crash refusal unit: 1868, listed.
+    // Re-derived with the node's own selection on #4748 with the aarch64
+    // exclusive-loop stack (#4735, #4740, #4779, #4795) on top, whose rewriter
+    // tests moved from hermit-cli into Detcore and grew there; the aarch64
+    // rewrite tests on top add none here: 1868, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
