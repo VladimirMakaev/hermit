@@ -130,6 +130,8 @@ impl BisectOpts {
             // keeps its two stacks and runs no extra traced replay.
             no_racing_accesses: true,
             race_window: 0,
+            race_watch: Vec::new(),
+            race_watch_window: 0,
             analyze_seed: None,
             verbose: self.verbose,
             // The replays log at --guest-log's level (warn without it).

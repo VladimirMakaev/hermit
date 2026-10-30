@@ -2907,15 +2907,15 @@ impl AnalyzeOpts {
     /// `decision`: `target` replayed the first `len` events of `schedule` and
     /// `baseline` one fewer, both then continuing at `continuation`. The
     /// stacks come from a replay of the target's continuation. `None` when a
-    /// side recorded no trace (`--no-racing-accesses`). `target_met`: whether
-    /// the target replay met the target.
+    /// side recorded no trace (`--no-racing-accesses`). `met`: whether the
+    /// target replay and the baseline replay met the target.
     fn prefix_racing_accesses(
         &self,
         decision: usize,
         (schedule, len, continuation): (&PreemptionRecord, usize, MaybeTimeslice),
         target: Option<TracedReplay>,
         baseline: Option<TracedReplay>,
-        target_met: bool,
+        met: (bool, bool),
     ) -> Option<RacingAccesses> {
         let (target, baseline) = (target?, baseline?);
         let record = continued_record(schedule, len, &target.realized);
@@ -2923,17 +2923,32 @@ impl AnalyzeOpts {
             decision,
             target,
             baseline,
-            target_met,
-            |runname| self.prefix_trial(runname, &record, record.schedevents().len(), continuation),
-            // A candidate's check replays a schedule of the run it checks
-            // under the callback checkpoints of that run's prefix, up to where
-            // the edit starts, then continues as the search's trials did.
-            |runname, role, edited, unchanged, replay| {
-                let edited =
-                    continued_record(schedule, check_prefix_len(len, role, unchanged), edited);
-                self.unjournaled()
-                    .prefix_trial(runname, &edited, replay, continuation)
-            },
+            met,
+            (
+                |runname| {
+                    self.prefix_trial(runname, &record, record.schedevents().len(), continuation)
+                },
+                // A candidate's check replays a schedule of the run it checks
+                // under the callback checkpoints of that run's prefix, up to where
+                // the edit starts, then continues as the search's trials did.
+                |runname, role, edited, unchanged, replay| {
+                    let edited =
+                        continued_record(schedule, check_prefix_len(len, role, unchanged), edited);
+                    self.unjournaled()
+                        .prefix_trial(runname, &edited, replay, continuation)
+                },
+                // A watch pass reruns a side's own prefix trial, the target's of
+                // `len` events and the baseline's of one fewer, which realizes
+                // that side's schedule again where a replay of the realized
+                // schedule need not past the prefix's end (#4805). Like the
+                // checks, the passes are unjournaled: a resumed analysis runs
+                // them again, since the stage reads the files they write.
+                |side, runname| {
+                    let len = if side == "baseline" { len - 1 } else { len };
+                    self.unjournaled()
+                        .prefix_trial(runname, schedule, len, continuation)
+                },
+            ),
         );
         Some(racing)
     }
@@ -3199,7 +3214,7 @@ impl AnalyzeOpts {
             (&schedule, decision + 1, continuation),
             target_trace,
             baseline_trace,
-            target_met,
+            (target_met, baseline_met),
         );
 
         println!(
@@ -3402,7 +3417,7 @@ impl AnalyzeOpts {
             (schedule, decision + 1, continuation),
             target_trace.take(),
             baseline_trace.take(),
-            target_met,
+            (target_met, baseline_met),
         );
         println!("Thread {thread} at the deciding event #{decision}:");
         Self::print_stack("the deciding thread's stack", deciding);
@@ -4432,6 +4447,7 @@ impl AnalyzeOpts {
         }
         header.push_str(&sources);
         let target_met = target.finished && target.met_target;
+        let baseline_met = baseline.finished && baseline.met_target;
         let racing_accesses = match (target.traced.take(), baseline.traced.take()) {
             (Some(target), Some(baseline)) => {
                 let realized = target.realized_path.clone();
@@ -4440,36 +4456,53 @@ impl AnalyzeOpts {
                     critical_event_index - 1,
                     target,
                     baseline,
-                    target_met,
-                    |runname| {
-                        Ok(RunData::new_baseline(self, runname.to_string())?
-                            .with_schedule_replay_from(realized.clone()))
-                    },
-                    // A candidate's check replays a schedule of the run it
-                    // checks under the callback checkpoints of that run's
-                    // recording, up to where the edit starts, then continues
-                    // without chaos at the trials' timeslice.
-                    |runname, role, edited, unchanged, replay| {
-                        let path = if role == "baseline" {
-                            &baseline_realized
-                        } else {
-                            &realized
-                        };
-                        let edited = Recording::read(path)
-                            .and_then(|recording| recording.into_legacy("a race candidate's check"))
-                            .map_err(|error| anyhow::anyhow!("{error:#}"))?
-                            .schedule_prefix(unchanged)
-                            .with_schedule(edited.to_vec())
-                            .unwrap_or_else(|| {
-                                PreemptionRecord::from_sched_events(edited.to_vec())
-                            });
-                        self.unjournaled().prefix_trial(
-                            runname,
-                            &edited,
-                            replay,
-                            self.trial_max_timeslice(),
-                        )
-                    },
+                    (target_met, baseline_met),
+                    (
+                        |runname| {
+                            Ok(RunData::new_baseline(self, runname.to_string())?
+                                .with_schedule_replay_from(realized.clone()))
+                        },
+                        // A candidate's check replays a schedule of the run it
+                        // checks under the callback checkpoints of that run's
+                        // recording, up to where the edit starts, then continues
+                        // without chaos at the trials' timeslice.
+                        |runname, role, edited, unchanged, replay| {
+                            let path = if role == "baseline" {
+                                &baseline_realized
+                            } else {
+                                &realized
+                            };
+                            let edited = Recording::read(path)
+                                .and_then(|recording| {
+                                    recording.into_legacy("a race candidate's check")
+                                })
+                                .map_err(|error| anyhow::anyhow!("{error:#}"))?
+                                .schedule_prefix(unchanged)
+                                .with_schedule(edited.to_vec())
+                                .unwrap_or_else(|| {
+                                    PreemptionRecord::from_sched_events(edited.to_vec())
+                                });
+                            self.unjournaled().prefix_trial(
+                                runname,
+                                &edited,
+                                replay,
+                                self.trial_max_timeslice(),
+                            )
+                        },
+                        // A watch pass replays the schedule its side realized,
+                        // unjournaled.
+                        |side, runname| {
+                            let path = if side == "baseline" {
+                                &baseline_realized
+                            } else {
+                                &realized
+                            };
+                            Ok(
+                                RunData::new_baseline(&self.unjournaled(), runname.to_string())?
+                                    .with_schedule_replay_from(path.clone()),
+                            )
+                        },
+                    ),
                 ))
             }
             _ => None,
