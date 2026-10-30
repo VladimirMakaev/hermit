@@ -1202,6 +1202,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's four host-input set tests (host_input::tests): 1884,
     // listed.
     // And detcore-model host_input::tests::stdio_kinds_name_each_changed_descriptor: 1885.
+    // config::tests::one_rcb_minimum_multiplies_like_detcores_pmu_epsilon (the
+    // one-RCB --max-timeslice minimum multiplies like Detcore's PMU epsilon):
+    // 1881 (1880 on main plus one).
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -1993,6 +1996,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run::replay_takes_the_recorded_seeds_and_refuses_a_contradicting_seed
     // (the scheduler seed too, and an explicit --seed checked): 1161, listed.
     // And metadata::tests::record_version_rejects_single_stream_random_device_recordings: 1161.
+    // And run::a_small_max_timeslice_gets_a_notice and
+    // analyze::phases::tests::trials_get_the_small_max_timeslice_notice_from_their_run_arguments
+    // (the small --max-timeslice notice): 1162 (1160 on main plus two).
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -4565,6 +4571,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_replay_of_a_guest_that_uses_its_private_tmp_names_no_change, which
     // need no PMU either: 640, listed.
     // And a_schedule_replay_names_a_stdio_kind_changed_since_the_recording: 641.
+    // And a_small_max_timeslice_gets_one_notice (the small --max-timeslice
+    // notice): 638 (637 on main plus one).
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5104,6 +5112,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // neither a PMU nor CPUID faulting: 557, listed.
     // And the same two host-input tests, which need neither: 559, listed.
     // And the same stdio-kind replay test: 560.
+    // The small --max-timeslice notice test starts no guest and needs no PMU
+    // (without one it checks that no notice is written): 557 (556 on main plus
+    // one).
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6002,6 +6013,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same cut-path decided-budget test: 1232.
     // And the same recorded-seeds replay test: 1155, listed.
     // And the same single-stream record-version test: 1155.
+    // And the same two small --max-timeslice notice units: 1156 (1154 on main
+    // plus two).
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6215,6 +6228,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same replay-cursor drop test: 1867, listed.
     // And the same four host-input set tests: 1870, listed.
     // And the same detcore-model stdio unit: 1871.
+    // And the same one-RCB minimum unit: 1867 (1866 on main plus one).
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
