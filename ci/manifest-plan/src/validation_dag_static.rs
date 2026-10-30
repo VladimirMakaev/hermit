@@ -1844,6 +1844,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1121, listed (1114 on main plus seven).
     // And the fourteen pinned_cpu::tests units, which choose the CPU a run is
     // pinned to (https://github.com/rrnewton/hermit/issues/4824): 1135, listed.
+    // And test_isolation::tests::a_test_rerun_alone_is_out_of_reach_of_a_malloc_lock_another_test_holds
+    // (unit tests that clone a container or set the skid margin run in a
+    // process of their own): 1136, listed (1135 on main plus one).
+    // And the three test_isolation units for the checks a test build makes
+    // before a container clone or a recorded --skid-margin: 1139, listed.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5702,6 +5707,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // test.hermit_unit runs all seven: 1115, listed
     // (1114 on main plus one).
     // And the same fourteen pinned_cpu::tests units: 1129, listed.
+    // And the same test_isolation malloc-lock test: 1130, listed.
+    // And the same three test_isolation check units: 1133, listed.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.

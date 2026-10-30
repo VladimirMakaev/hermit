@@ -20,6 +20,7 @@ mod bisect;
 mod clean;
 mod cli_owned_lifecycle;
 mod container;
+mod container_clone;
 mod dap_adapter;
 #[cfg(test)]
 mod exec_stop_launch_tests;
@@ -76,6 +77,8 @@ mod run_config;
 mod run_timeout;
 mod schedule_search;
 mod strace;
+#[cfg(test)]
+mod test_isolation;
 mod tracing;
 mod verify;
 mod verify_inputs;
