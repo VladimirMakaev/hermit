@@ -33,9 +33,9 @@
  *   refuses with EINVAL;
  * - `newpid`: a clone3 with CLONE_NEWPID and no set_tid; the child prints its
  *   own ID, 1 in its namespace;
- * - `newpid-fork`, `newpid-set-tid`: `newpid`, whose child then forks, or
- *   makes a clone3 with CLONE_NEWPID and set_tid [1], from inside its new
- *   namespace;
+ * - `newpid-fork`, `newpid-set-tid`, `newpid-untraced`: `newpid`, whose
+ *   child then forks, makes a clone3 with CLONE_NEWPID and set_tid [1], or
+ *   makes a clone3 with CLONE_UNTRACED, from inside its new namespace;
  * - `own-tid N`: a clone3 with CLONE_NEWPID and its own set_tid of N entries,
  *   [1] (the new namespace's ID only) or [1, first + 100] (also the ID in the
  *   guest's own namespace); the child checks it is 1 in its namespace;
@@ -58,14 +58,16 @@
  *   two levels short of the guest's own namespace;
  * - `no-caps`: `own-tid 1` with CLONE_NEWUSER too, after the guest gives up
  *   every capability: Linux lets it make the user namespace and choose the
- *   ID inside it;
+ *   ID inside it; `no-caps-untraced` with CLONE_UNTRACED too, and
+ *   `no-caps-untraced-vfork` also with CLONE_VFORK;
  * - `bad-tid`: a clone3 whose set_tid points at an unmapped address (EFAULT);
  * - `bad-size`: a clone3 with set_tid but set_tid_size 0 (EINVAL);
  * - `seccomp`: a fork after the guest installs a seccomp filter of its own
  *   (one that allows everything);
  * - `signal65`: a raw clone with exit signal 65, which clone accepts and
  *   clone3 does not; `vfork65` the same with CLONE_VFORK, whose parent waits
- *   for its child's exit;
+ *   for its child's exit; `untraced65` and `untraced-vfork65` those two with
+ *   CLONE_UNTRACED too;
  * - `sp1`: a raw clone with new stack pointer 1, which clone3 cannot express
  *   (its child would fault at once).
  *
@@ -207,11 +209,16 @@ static int one_call(int argc, char** argv) {
     return 0;
   }
   if (strcmp(what, "signal65") == 0 || strcmp(what, "vfork65") == 0 ||
-      strcmp(what, "sp1") == 0) {
+      strcmp(what, "untraced65") == 0 ||
+      strcmp(what, "untraced-vfork65") == 0 || strcmp(what, "sp1") == 0) {
     int sp1 = strcmp(what, "sp1") == 0;
     unsigned long flags = sp1 ? SIGCHLD : 65;
-    if (strcmp(what, "vfork65") == 0) {
+    if (strstr(what, "vfork65") != NULL) {
       flags |= CLONE_VFORK;
+    }
+    /* A call given a host ID: Hermit must still trace its task. */
+    if (strncmp(what, "untraced", 8) == 0) {
+      flags |= CLONE_UNTRACED;
     }
     long child = syscall(SYS_clone, flags, sp1 ? 1 : 0, 0, 0, 0);
     if (child == 0) {
@@ -233,9 +240,10 @@ static int one_call(int argc, char** argv) {
   if (strncmp(what, "newpid", 6) == 0) {
     args.flags = CLONE_NEWPID;
     args.set_tid = 0;
-    nested_call = strcmp(what, "newpid-fork") == 0   ? 1
-                  : strcmp(what, "newpid-set-tid") == 0 ? 2
-                                                        : 0;
+    nested_call = strcmp(what, "newpid-fork") == 0       ? 1
+                  : strcmp(what, "newpid-set-tid") == 0   ? 2
+                  : strcmp(what, "newpid-untraced") == 0 ? 3
+                                                          : 0;
   } else if (strcmp(what, "own-tid") == 0 && argc > 2) {
     args.flags = CLONE_NEWPID;
     args.set_tid_size = strtoul(argv[2], NULL, 10);
@@ -249,7 +257,7 @@ static int one_call(int argc, char** argv) {
     }
     args.flags = CLONE_NEWPID;
     args.set_tid_size = 1;
-  } else if (strcmp(what, "no-caps") == 0) {
+  } else if (strncmp(what, "no-caps", 7) == 0) {
     struct __user_cap_header_struct header = {_LINUX_CAPABILITY_VERSION_3, 0};
     struct __user_cap_data_struct none[2];
     memset(none, 0, sizeof none);
@@ -258,6 +266,12 @@ static int one_call(int argc, char** argv) {
       return 1;
     }
     args.flags = CLONE_NEWUSER | CLONE_NEWPID;
+    if (strstr(what, "untraced") != NULL) {
+      args.flags |= CLONE_UNTRACED;
+    }
+    if (strstr(what, "vfork") != NULL) {
+      args.flags |= CLONE_VFORK;
+    }
     args.set_tid_size = 1;
   } else if (strcmp(what, "bad-tid") == 0) {
     args.set_tid = 8;
@@ -321,6 +335,8 @@ static int one_call(int argc, char** argv) {
         inner.flags = CLONE_NEWPID;
         inner.set_tid = (uint64_t)(uintptr_t)inner_tids;
         inner.set_tid_size = 1;
+      } else if (nested_call == 3) {
+        inner.flags = CLONE_UNTRACED;
       }
       long grandchild = syscall(SYS_clone3, &inner, sizeof inner);
       if (grandchild == 0) {

@@ -458,6 +458,10 @@ impl<T: RecordOrReplay> Detcore<T> {
             Some(Clone3Read::Bytes(bytes)) => Some(bytes),
             _ => None,
         };
+        // A call issued as made is issued traced, without CLONE_UNTRACED
+        // (#4660's `inject_traced_clone`), except a clone3 whose struct
+        // Detcore could not read: no copy without the flag can be made.
+        let untraceable = untraced && sysno == Sysno::clone3 && clone3_args.is_none();
         let form = clone3_form(sysno, &args, clone3_args.as_deref());
         // A restarted call's ID is for that call only: taken here whatever
         // the plan, so that no other call inherits it.
@@ -479,20 +483,20 @@ impl<T: RecordOrReplay> Detcore<T> {
                              the guest made, whose IDs the kernel picks"
                         );
                         return self
-                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                             .await;
                     }
                     None => {
                         let why =
                             "the PID namespace its task is created in could not be read".to_owned();
                         return self
-                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                             .await;
                     }
                 };
                 if let Some(why) = self.clone3_could_fare_otherwise(guest) {
                     return self
-                        .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                        .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                         .await;
                 }
                 (args, size, inner, false)
@@ -511,7 +515,7 @@ impl<T: RecordOrReplay> Detcore<T> {
                                    access"
                             .to_owned();
                         return self
-                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                             .await;
                     }
                 };
@@ -546,14 +550,14 @@ impl<T: RecordOrReplay> Detcore<T> {
                             tids.len()
                         );
                         return self
-                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                             .await;
                     }
                     None => {
                         let why =
                             "the PID namespace its task is created in could not be read".to_owned();
                         return self
-                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                            .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                             .await;
                     }
                 }
@@ -565,7 +569,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             ChosenIdCall::Unchanged => return Ok(ClonePlan::KernelRefuses),
             ChosenIdCall::Inexpressible(why) => {
                 return self
-                    .host_id_planned(guest, sysno, why, refuse_host_ids, untraced)
+                    .host_id_planned(guest, sysno, why, refuse_host_ids, untraceable)
                     .await;
             }
         };
@@ -589,7 +593,7 @@ impl<T: RecordOrReplay> Detcore<T> {
                             sysno,
                             "Detcore's global state chose no ID".to_owned(),
                             refuse_host_ids,
-                            untraced,
+                            untraceable,
                         )
                         .await;
                 }
@@ -647,9 +651,10 @@ impl<T: RecordOrReplay> Detcore<T> {
     }
 
     /// A call whose task will get a host ID, for `why`: the end of a run that
-    /// needs every ID chosen, or of any run if the call is `untraced` (its
+    /// needs every ID chosen, or of any run if the call is `untraceable` (a
+    /// clone3 with CLONE_UNTRACED whose struct Detcore could not read: its
     /// task would run outside Detcore's scheduler), else a plan to issue it
-    /// as made. A run that needs every ID chosen ends before the kernel sees
+    /// as made, traced. A run that needs every ID chosen ends before the kernel sees
     /// the call, so an error the kernel would also have given it is not the
     /// guest's to see: the run fails closed rather than refusing only after a
     /// task with a host ID exists.
@@ -659,10 +664,10 @@ impl<T: RecordOrReplay> Detcore<T> {
         sysno: Sysno,
         why: String,
         refuse_host_ids: bool,
-        untraced: bool,
+        untraceable: bool,
     ) -> Result<ClonePlan, Error> {
         let reason = format!("this {sysno} cannot be given a chosen process ID: {why}");
-        if untraced {
+        if untraceable {
             refuse_untraced(guest, reason).await
         }
         if refuse_host_ids {
@@ -728,7 +733,7 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// so a report after the call would come too late for the preemption
     /// record. A call that then fails was reported all the same, which errs
     /// on the side of a record a replay refuses.
-    async fn vfork_gets_host_id<G: Guest<Self>>(&self, guest: &mut G, reason: &str) {
+    pub(crate) async fn vfork_gets_host_id<G: Guest<Self>>(&self, guest: &mut G, reason: &str) {
         let reason = format!(
             "this vfork's task gets a host ID, not a chosen one, reported before the call: \
              {reason}"
@@ -761,15 +766,7 @@ impl<T: RecordOrReplay> Detcore<T> {
     ) -> Result<i64, Errno> {
         self.vfork_gets_host_id(guest, reason).await;
         let result = guest.inject(call).await;
-        if let Err(errno) = result
-            && !is_restart(errno)
-        {
-            warn!(
-                "[detcore, dtid {}] the vfork reported above failed with {errno} and created no \
-                 task; the run's count of host-ID tasks includes it",
-                guest.thread_state().dettid
-            );
-        }
+        note_unborn_reported_vfork(guest, &result);
         result
     }
 
@@ -886,9 +883,12 @@ impl<T: RecordOrReplay> Detcore<T> {
                 .await
             }
             return self
-                .issue_as_made(guest, call, &cause, untraced, vfork)
+                .issue_as_made(guest, call, &cause, untraced, vfork, &args, size)
                 .await;
         }
+        // The call's own arguments as Detcore read them, without
+        // CLONE_UNTRACED: what `issue_as_made` issues a clone3 from.
+        let guest_args = args;
         let mut entries = [0 as libc::pid_t; MAX_SET_TID];
         entries[..set_tid.len()].copy_from_slice(&set_tid);
         let mut stack = guest.stack().await;
@@ -973,15 +973,20 @@ impl<T: RecordOrReplay> Detcore<T> {
             )
             .await
         }
-        self.issue_as_made(guest, call, &cause, untraced, vfork)
+        self.issue_as_made(guest, call, &cause, untraced, vfork, &guest_args, size)
             .await
     }
 
     /// Issue the guest's own call `call`, whose task, if it creates one, has
     /// a host ID for `cause` ([`Self::gave_host_id`], or for a `vfork` call
-    /// [`Self::vfork_gets_host_id`] before it). An untraced call is not
-    /// issued: its task would run outside Detcore's scheduler, so even a run
-    /// that takes host IDs ends.
+    /// [`Self::vfork_gets_host_id`] before it). An `untraced` call is issued
+    /// without CLONE_UNTRACED, as #4660's `inject_traced_clone` issues every
+    /// clone, since its task must be traced to run in Detcore's scheduler: a
+    /// legacy clone with the flag cleared in its first argument, a clone3
+    /// from `args`, the `size`-byte struct Detcore read (already without the
+    /// flag), copied to scratch memory; only when that cannot be written is
+    /// the run ended instead.
+    #[allow(clippy::too_many_arguments)]
     async fn issue_as_made<G: Guest<Self>>(
         &self,
         guest: &mut G,
@@ -989,26 +994,73 @@ impl<T: RecordOrReplay> Detcore<T> {
         cause: &str,
         untraced: bool,
         vfork: bool,
+        args: &[u8; CLONE_ARGS_SIZE_VER2],
+        size: usize,
     ) -> Result<i64, Errno> {
-        if untraced {
-            refuse_untraced(
-                guest,
-                format!(
-                    "this {} cannot create its task with its chosen ID ({cause}), and the guest's \
-                     own call would create a task the tracer does not follow (CLONE_UNTRACED)",
-                    call.number()
-                ),
-            )
-            .await
-        }
-        if vfork {
-            return self.issue_reported_vfork(guest, call, cause).await;
-        }
-        let original = guest.inject(call).await;
-        if let Ok(child) = original {
-            self.gave_host_id(guest, child, cause).await;
-        }
-        original
+        // Held until the call has returned: the copy the clone3 reads.
+        let mut scratch = None;
+        let call = match call {
+            Syscall::Clone3(_) if untraced => {
+                let mut stack = guest.stack().await;
+                let copy = stack.push(*args);
+                match stack.commit() {
+                    Ok(written) => {
+                        scratch = Some(written);
+                        Syscall::Clone3(
+                            syscalls::Clone3::new()
+                                .with_args(AddrMut::from_raw(copy.as_raw()))
+                                .with_size(size),
+                        )
+                    }
+                    Err(error) => {
+                        refuse_untraced(
+                            guest,
+                            format!(
+                                "this {} cannot create its task with its chosen ID ({cause}), \
+                                 and a copy of its clone_args without CLONE_UNTRACED could not \
+                                 be written to scratch memory: {error}",
+                                call.number()
+                            ),
+                        )
+                        .await
+                    }
+                }
+            }
+            call if untraced => {
+                let (sysno, raw) = call.into_parts();
+                Syscall::from_raw(sysno, traced_legacy_clone(raw))
+            }
+            call => call,
+        };
+        let result = if vfork {
+            self.issue_reported_vfork(guest, call, cause).await
+        } else {
+            let original = guest.inject(call).await;
+            if let Ok(child) = original {
+                self.gave_host_id(guest, child, cause).await;
+            }
+            original
+        };
+        drop(scratch);
+        result
+    }
+}
+
+/// Warn when a `CLONE_VFORK` call reported before it
+/// ([`Detcore::vfork_gets_host_id`]) failed with `result`, other than for a
+/// restart: it created no task, though the count already has it.
+pub(crate) fn note_unborn_reported_vfork<T: RecordOrReplay, G: Guest<Detcore<T>>>(
+    guest: &G,
+    result: &Result<i64, Errno>,
+) {
+    if let Err(errno) = *result
+        && !is_restart(errno)
+    {
+        warn!(
+            "[detcore, dtid {}] the vfork reported above failed with {errno} and created no \
+             task; the run's count of host-ID tasks includes it",
+            guest.thread_state().dettid
+        );
     }
 }
 

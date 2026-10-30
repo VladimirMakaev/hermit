@@ -10725,16 +10725,21 @@ fn no_namespace_completes_a_guest_set_tid_with_the_chosen_id() {
     );
     assert!(stdout(&refused).is_empty(), "{}", stdout(&refused));
 
-    let tolerant = no_namespace_in_own_pid_namespace(&["--summary"], &["no-caps"]);
-    assert_success(&tolerant, &["no-caps"]);
-    assert!(
-        stdout(&tolerant).starts_with("clone3 no-caps: child ")
-            && stdout(&tolerant).ends_with(", exit 0\n")
-            && stderr(&tolerant).contains("1 task(s) got a host ID instead"),
-        "stdout:\n{}\nstderr:\n{}",
-        stdout(&tolerant),
-        stderr(&tolerant)
-    );
+    // The guest's own call, issued instead, is issued traced: with
+    // CLONE_UNTRACED (and with CLONE_VFORK too) its task runs in Detcore's
+    // scheduler like any other and the run completes.
+    for call in ["no-caps", "no-caps-untraced", "no-caps-untraced-vfork"] {
+        let tolerant = no_namespace_in_own_pid_namespace(&["--summary"], &[call]);
+        assert_success(&tolerant, &[call]);
+        assert!(
+            stdout(&tolerant).starts_with(&format!("clone3 {call}: child "))
+                && stdout(&tolerant).ends_with(", exit 0\n")
+                && stderr(&tolerant).contains("1 task(s) got a host ID instead"),
+            "{call}: stdout:\n{}\nstderr:\n{}",
+            stdout(&tolerant),
+            stderr(&tolerant)
+        );
+    }
 }
 
 /// A guest `clone3` with `CLONE_NEWPID` and no `set_tid` creates its task
@@ -10824,6 +10829,19 @@ fn no_namespace_refuses_before_the_task_a_call_that_cannot_carry_a_chosen_id() {
         // A vfork parent returns only once its child has exited, so its host
         // ID is reported before the call.
         ("vfork65", "clone vfork65: created\n".to_owned()),
+        // With CLONE_UNTRACED the call is issued without it, so that its task
+        // runs in Detcore's scheduler like any other.
+        ("untraced65", "clone untraced65: created\n".to_owned()),
+        (
+            "untraced-vfork65",
+            "clone untraced-vfork65: created\n".to_owned(),
+        ),
+        (
+            "newpid-untraced",
+            format!(
+                "{newpid_child}newpid child's clone3: created\nclone3 newpid-untraced: child +1, exit 0\n"
+            ),
+        ),
         (
             "newpid-fork",
             format!(
@@ -10836,7 +10854,8 @@ fn no_namespace_refuses_before_the_task_a_call_that_cannot_carry_a_chosen_id() {
         assert!(
             stdout(&tolerant) == expected
                 && stderr(&tolerant).contains("1 task(s) got a host ID instead")
-                && (call != "vfork65" || stderr(&tolerant).contains("reported before the call")),
+                && (!call.contains("vfork")
+                    || stderr(&tolerant).contains("reported before the call")),
             "{call}: stdout:\n{}\nstderr:\n{}",
             stdout(&tolerant),
             stderr(&tolerant)
