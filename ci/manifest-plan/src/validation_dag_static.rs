@@ -1193,6 +1193,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // virtual_cpus_parse_from_1_to_128: 1882.
     // The shared caller/ABI16 companion adds detcore-dbt's
     // capability_clear_image_readiness_preserves_legacy_conditions: 1883, listed.
+    // And detcore-model's six access_trace::tests (record round trip, on-disk
+    // spelling, out_bytes hex, returned_digest, reader refusals, conflict
+    // rules), the access trace's record types: 1886.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -1913,6 +1916,46 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // the_handler_stops_what_analyze_started_and_nothing_else}: 1209.
     // And rundata::tests::a_trials_schedules_are_discarded_unless_kept (a
     // bisection trial's schedules are removed once read): 1210, listed.
+    // And analyze's racing-access finder, races::tests::{
+    // close_against_a_use_that_fails_with_ebadf,
+    // stale_fd_after_reuse_reaches_another_open_file,
+    // double_close_pairs_the_two_closes,
+    // lost_futex_wake_pairs_the_wake_with_the_wait,
+    // kill_against_a_futex_return_is_a_lifetime_conflict,
+    // pipe_bytes_order_the_write_before_the_read,
+    // futex_wake_edge_orders_a_pair_on_another_resource,
+    // timed_waits_whose_returns_flip_make_a_timing_pair,
+    // a_cut_short_trace_marks_the_window_truncated, none_found_says_why,
+    // also_reordered_lists_three_and_counts_the_rest,
+    // failed_calls_stay_out_of_the_fd_history,
+    // the_last_difference_before_a_control_flow_change_is_the_victim,
+    // a_partner_whose_thread_changed_course_has_no_matching_call,
+    // channels_whose_data_gives_no_edge_are_named,
+    // an_fd_access_is_ordered_at_its_entry,
+    // backward_edges_are_ignored_with_a_note, renders_the_fdsan_case,
+    // json_form_names_status_pair_order_and_verdicts,
+    // traces_that_cannot_answer_are_unavailable,
+    // the_close_that_released_the_victims_file_outranks_a_later_dup,
+    // calls_before_the_decision_align_whatever_their_arguments,
+    // a_kill_that_ends_a_thread_before_its_next_call_is_a_lifetime_pair,
+    // a_clock_read_victim_times_the_flip,
+    // a_wait_entered_before_the_decision_aligns_whatever_its_arguments,
+    // a_thread_whose_calls_already_split_gives_no_lifetime_pair}: 1235.
+    // And seven ranked-candidate finder tests,
+    // analyze::races::tests::{
+    // a_wait_in_flight_across_the_decision_is_the_first_candidate_unless_corroborated,
+    // a_watchdog_asleep_across_the_decision_is_not_singled_out,
+    // a_long_wait_flipping_around_a_later_clock_read_ranks_first,
+    // a_wait_that_never_returns_in_the_baseline_feeds_no_flip,
+    // a_reader_fed_by_a_thread_that_changed_course_is_no_race,
+    // partners_are_singled_out_on_the_outcomes_causal_path,
+    // the_pair_that_released_what_its_victim_used_stands_for_its_partner}: 1242.
+    // And two change-of-course timing tests,
+    // analyze::races::tests::{
+    // a_poller_nap_around_a_changed_course_is_a_weak_candidate,
+    // a_weak_nap_ranks_after_the_evidenced_pairs}: 1244.
+    // And analyze::races::tests::
+    // a_nearer_wait_of_similar_length_ranks_before_a_long_nap: 1245.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -5806,6 +5849,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same bisection-trial checkpoint test: 1196.
     // And the same eight workspace-cleanup tests: 1203.
     // And the same trial-schedule discard test: 1204, listed.
+    // And the same twenty-six racing-access finder tests: 1229.
+    // And the same seven ranked-candidate finder tests: 1236.
+    // And the same two change-of-course timing tests: 1238.
+    // And the same wait-ranking test: 1239.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6014,6 +6061,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same two --virtual-cpus config tests: 1868.
     // The same shared caller/ABI16 legacy-readiness test, with all fourteen
     // hosted exclusions unchanged: 1869, listed.
+    // Six regular-crate tests the pin missed, as cargo nextest list counts
+    // the cell at this head: 1872.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
