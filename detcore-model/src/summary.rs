@@ -232,6 +232,12 @@ pub struct RunSummary {
     /// human-readable summary.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub stdio_changed: Vec<StdioChange>,
+    /// The run ended because the guest deadlocked: every remaining thread was
+    /// blocked with no possible wake, so natively it would hang forever. Its
+    /// status is then `HERMIT_GUEST_DEADLOCK_EXIT`, not one the guest exited
+    /// with. Absent (false) for every other run and in older summaries.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub guest_deadlock: bool,
 }
 
 /// The seeds a schedule replay adopted from its recording: each is `Some`
@@ -332,6 +338,7 @@ impl RunSummary {
             host_inputs: _,
             host_inputs_changed: _,
             stdio_changed: _,
+            guest_deadlock,
         } = self;
         writeln!(f, "Final thread-tree was: {}", threads_descrip)?;
         writeln!(
@@ -341,6 +348,12 @@ impl RunSummary {
         )?;
         if let Some(syscalls) = syscalls {
             writeln!(f, "Guest threads completed {syscalls} syscalls.")?;
+        }
+        if *guest_deadlock {
+            writeln!(
+                f,
+                "The guest deadlocked: every remaining thread was blocked with no possible wake."
+            )?;
         }
         if include_report_metadata {
             writeln!(

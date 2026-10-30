@@ -2000,6 +2000,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // analyze::phases::tests::trials_get_the_small_max_timeslice_notice_from_their_run_arguments
     // (the small --max-timeslice notice): 1162 (1160 on main plus two).
     // And run::tests::image_env_replaces_only_the_minimal_defaults_it_declares: 1122.
+    // And the guest-deadlock outcome's units:
+    // container::tests::a_container_child_exiting_guest_deadlock_is_a_guest_outcome,
+    // tests::guest_deadlock_uses_its_own_exit_and_marker,
+    // ptrace_completion::tests::a_guest_deadlock_completes_with_its_status_and_the_captured_output
+    // and error::tests::a_guest_deadlock_is_the_guests_outcome_only_once_the_run_finished:
+    // 1125, listed.
     ("test.hermit_unit", 1169),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3280,6 +3286,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And six more scheduler PI units (the deadlock walk's depth, a word
     // naming an owner whose exit was granted, the hand-over at that grant, a
     // signal-woken waiter's place and its hand-over, a SIGKILLed owner): 2719.
+    // And scheduler::test::terminal_verdicts_carry_the_kind_that_decides_the_status
+    // (the guest-deadlock outcome): 2683, listed.
+    // And scheduler::test::
+    // a_deadlock_unwind_retires_the_remaining_threads_in_tid_order:
+    // 2684, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4618,6 +4629,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // futex_lock_pi_in_a_nested_pid_namespace_is_refused_by_name: 643.
     // And run_minimal_base_env_names_the_guests_own_user_and_home and
     // run_explicit_env_replaces_the_minimal_user_and_home: 624.
+    // And a_guest_deadlock_is_the_guests_outcome_not_an_internal_failure,
+    // a_guest_deadlock_verifies_as_the_same_outcome_in_both_runs and
+    // a_recorded_guest_deadlock_replays_to_the_same_outcome (the guest-deadlock
+    // outcome, tests/c/condvar_join_deadlock.c): 625, listed.
+    // And a_guest_deadlock_that_kills_several_threads_verifies_at_parity: 626,
+    // listed.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5170,6 +5187,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same owner-end race and nested-PID refusal tests: 562.
     // The two --base-env=minimal identity tests start only ptrace guests, so
     // test.cli_on_host selects both: 543.
+    // And the same three guest-deadlock outcome tests: 544, listed.
+    // And the same several-thread guest-deadlock parity test: 545, listed.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5668,6 +5687,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three replay-release units: 2685, listed.
     // And the same eighteen priority-inheritance futex units: 2713.
     // And the same six scheduler PI units: 2719.
+    // And the same guest-deadlock terminal-verdict unit: 2683, listed.
+    // And the same unwind retirement unit: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6080,6 +6101,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two small --max-timeslice notice units: 1156 (1154 on main
     // plus two).
     // And the same --image environment unit test: 1116.
+    // And the same four guest-deadlock outcome units: 1119, listed.
     ("test.hermit_unit_on_host", 1163),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
