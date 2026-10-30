@@ -3812,7 +3812,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And cpu_clock::handler_tests'
     // timer_settime_on_a_timer_whose_thread_exited_is_esrch: 2728, listed.
     // And scheduler's a_replayed_switch_wakes_its_due_target: 2737, listed.
-    ("test.detcore_unit", 2738),
+    // And the_pipe_capacity_is_two_host_pages (the pipe pin follows the host's
+    // page size): 2738 + 1 = 2739, listed.
+    // And two_pages_is_trusted_only_with_a_two_page_pipe_max_size: 2740,
+    // listed.
+    ("test.detcore_unit", 2740),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6594,7 +6598,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same five CPU-clock fix-forward units: 2727, listed.
     // And the same timer_settime ESRCH unit: 2728, listed.
     // And the same replayed-switch wake unit: 2737, listed.
-    ("test.detcore_unit_on_host", 2738),
+    // And the same pipe page-size unit: 2739, listed.
+    // And the same two-page pipe-max-size unit: 2740, listed.
+    ("test.detcore_unit_on_host", 2740),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
