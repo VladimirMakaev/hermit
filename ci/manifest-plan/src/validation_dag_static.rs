@@ -1201,6 +1201,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (a replay resync drops the events it skips): 1881, listed.
     // And detcore-model's four host-input set tests (host_input::tests): 1884,
     // listed.
+    // And detcore-model host_input::tests::stdio_kinds_name_each_changed_descriptor: 1885.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -4563,6 +4564,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And recording_host_inputs_adds_no_inotify_event_the_guest_sees and
     // a_replay_of_a_guest_that_uses_its_private_tmp_names_no_change, which
     // need no PMU either: 640, listed.
+    // And a_schedule_replay_names_a_stdio_kind_changed_since_the_recording: 641.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5101,6 +5103,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_schedule_replay_names_a_host_input_changed_since_the_recording needs
     // neither a PMU nor CPUID faulting: 557, listed.
     // And the same two host-input tests, which need neither: 559, listed.
+    // And the same stdio-kind replay test: 560.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6211,6 +6214,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // the cell at this head: 1872.
     // And the same replay-cursor drop test: 1867, listed.
     // And the same four host-input set tests: 1870, listed.
+    // And the same detcore-model stdio unit: 1871.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
