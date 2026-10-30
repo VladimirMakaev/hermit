@@ -17,6 +17,7 @@ mod files;
 pub(crate) use files::status_published_sigblk;
 pub(crate) mod guest_siginfo;
 pub mod helpers;
+mod implicit_bind;
 
 /// Re-exported so `procfs` can report the SAME ceiling that `F_SETPIPE_SZ`
 /// enforces. Two constants that must agree are one constant.
