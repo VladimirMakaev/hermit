@@ -1286,7 +1286,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // summary::tests::skid_overshoots_mark_a_run_not_reproducible_from_its_seed
     // (skid overshoots outside --strict): 1981, listed.
     // And this change's detcore-model tests: 1983.
-    ("test.regular_crates", 1983),
+    // And hermit-verify's splitting_branches_keeps_no_store_exclusive_count:
+    // 1934 + 1 = 1984.
+    ("test.regular_crates", 1984),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3392,7 +3394,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // for main's prefix records: 3440.
     // And record_serde's the_store_exclusive_segment_flag_survives_the_record_serde:
     // 3246 + 1 = 3441.
-    ("test.detcore_unit", 3441),
+    // And preemptions' a_split_schedule_keeps_no_store_exclusive_counts,
+    // an_edited_schedule_keeps_no_store_exclusive_counts and
+    // a_replaced_schedule_keeps_no_store_exclusive_counts: 3247 + 3 = 3444.
+    ("test.detcore_unit", 3444),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5391,7 +5396,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Kept equal to the second test.regular_crates_on_host entry below: 1966.
     // And this change's tests, as at this node's second entry below: 1967.
     // Kept equal to the second test.regular_crates_on_host entry below: 1969.
-    ("test.regular_crates_on_host", 1969),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1970.
+    ("test.regular_crates_on_host", 1970),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5956,7 +5962,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same test: 3439.
     // And the same prefix-record unit: 3440.
     // And the same record_serde unit: 3441.
-    ("test.detcore_unit_on_host", 3441),
+    // And the same three transformed-record units: 3444.
+    ("test.detcore_unit_on_host", 3444),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6624,7 +6631,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same launch-namespace config unit: 1966.
     // And the same skid-overshoot summary test: 1967, listed.
     // And the same tests: 1969.
-    ("test.regular_crates_on_host", 1969),
+    // And the same split-branches test: 1970.
+    ("test.regular_crates_on_host", 1970),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
