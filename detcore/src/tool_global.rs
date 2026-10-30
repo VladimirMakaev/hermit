@@ -6386,9 +6386,18 @@ impl GlobalState {
                 );
             }
 
+            // Read after any wait for the schedule: a release another thread's
+            // event made meanwhile, in an earlier turn, counts too, and so does
+            // the end of the schedule.
+            let (schedule_released, schedule_over) = {
+                let sched = self.lock_rpc_scheduler(false).await;
+                (sched.schedule_released(), sched.schedule_replay_over())
+            };
             TraceSchedEventResponse {
                 print_stack_strace: print_stack.or(print_stack2),
                 timeslice: end_of_timeslice,
+                schedule_released,
+                schedule_over,
             }
         } else {
             let print_stack_strace = {
@@ -6407,6 +6416,8 @@ impl GlobalState {
             TraceSchedEventResponse {
                 print_stack_strace,
                 timeslice: None,
+                schedule_released: false,
+                schedule_over: false,
             }
         };
 
@@ -8731,7 +8742,9 @@ where
         return;
     };
     let clock_multiplier = guest.config().clock_multiplier.unwrap_or(1.0);
-    let schedule_replay = guest.config().replay_schedule_from.is_some();
+    let schedule_replay = guest
+        .thread_state()
+        .follows_replayed_schedule(guest.config());
     // A configuration with an invalid turn cost is refused before any guest
     // runs; zero here only drops the floor.
     let min_slice = Duration::from_nanos(guest.config().scheduler_turn_charge().unwrap_or(0));
@@ -9591,6 +9604,12 @@ where
 pub struct TraceSchedEventResponse {
     print_stack_strace: MaybePrintStack,
     timeslice: Option<LogicalTime>,
+    /// Whether the replay has dropped the rest of its schedule
+    /// (`Scheduler::schedule_released`).
+    schedule_released: bool,
+    /// Whether the replayed schedule is over: it ran out or was released
+    /// (`Scheduler::schedule_replay_over`).
+    schedule_over: bool,
 }
 
 struct SchedEventForLog<'a> {
@@ -9696,8 +9715,16 @@ where
             GlobalResponse::TraceSchedEvent(TraceSchedEventResponse {
                 print_stack_strace,
                 timeslice,
+                schedule_released,
+                schedule_over,
             }),
         ) => {
+            if schedule_released {
+                guest.thread_state_mut().callback_history.release();
+            }
+            if schedule_over {
+                guest.thread_state_mut().schedule_replay_over = true;
+            }
             if let Some(m_path) = print_stack_strace {
                 trace!("[trace_schedevent] writing stacktrace via Reverie...");
                 write_backtrace(guest, m_path.as_ref());
