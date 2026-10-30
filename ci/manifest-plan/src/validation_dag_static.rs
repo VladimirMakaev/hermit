@@ -1238,6 +1238,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's detcore-model test: 1881.
     // summary::tests::binder_external_calls_show_in_the_report_but_not_the_info_view
     // (the run summary's binder count): 1881, listed.
+    // config::tests::access_trace_never_enters_the_legacy_form_and_round_trips
+    // (--record-access-trace-to): 1887.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -2092,6 +2094,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // -p hermit-run --features third-party-backends,kvm-native-test-support
     // --lib --bins` lists 1171, of which this node's `--skip` patterns
     // remove 5 and one `#[ignore]` test is listed but never executed.
+    // And run::access_trace_is_refused_where_its_records_would_name_nothing
+    // and run::a_manifest_leaves_out_the_access_trace: 1123.
     ("test.hermit_unit", 1171),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
@@ -3525,6 +3529,12 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // strict_refuses_binder_except_in_a_replay_with_readmissions and
     // external_binder_calls_are_counted_and_each_process_is_warned_once
     // (`--strict`'s binder policy, the per-process warning and count): 2714.
+    // And fourteen access_trace::tests of the access trace's writer and
+    // resource extraction, tool_local's
+    // traced_call_tests::a_traced_call_notes_the_slots_it_changes, and
+    // access_trace's clock_and_timer_reads_carry_what_they_returned and
+    // a_capped_trace_stops_without_its_end_line
+    // (--record-access-trace-to): 2699, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4962,6 +4972,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // where the kernel has no binder filesystem: 642.
     // And a_schedule_replay_that_leaves_its_readmissions_ends_there_under_die_on_desync:
     // 643.
+    // And access_trace's an_access_trace_leaves_a_replayed_run_unchanged,
+    // access_trace_indices_name_the_runs_own_events and
+    // access_trace_from_leaves_out_only_earlier_records: 625.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5594,6 +5607,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same preemption-replay readmission test: 559.
     // And the same two strict binder tests: 561.
     // And the same --die-on-desync readmission test: 562.
+    // And the same three access trace tests, not excluded: 544.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6160,6 +6174,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same blocking-classification unit: 2701.
     // And the same eleven readmission units: 2712.
     // And the same two binder policy units: 2714.
+    // And the same seventeen access-trace tests as test.detcore_unit: 2699.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6593,6 +6608,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three units: 1160 + 3 = 1163.
     // And the same two --no-namespace replay units: 1163 + 2 = 1165.
     // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1169.
+    // And the same two access-trace run:: tests as test.hermit_unit: 1117.
     ("test.hermit_unit_on_host", 1165),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
@@ -6825,6 +6841,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same guest-numbering legacy-form test: 1867, listed.
     // And the same test: 1867.
     // And the same binder-count summary test: 1867, listed.
+    // And the same access-trace tests as test.regular_crates: 1873.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
