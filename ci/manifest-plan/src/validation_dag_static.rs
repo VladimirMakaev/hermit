@@ -3636,6 +3636,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler::test::consuming_the_last_legacy_event_stops_the_spread
     // and scheduler::boundary_controller::tests::
     // consuming_the_last_boundary_record_stops_the_spread: 2711.
+    // And tool_global's
+    // a_start_grant_carries_the_threads_replayed_first_slice and
+    // finish_thread_start_installs_a_replayed_first_slice: 2684, listed.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -6340,6 +6343,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two replayed-SIGCHLD scheduler units: 2684, listed.
     // And the same two replayed-SIGCHLD readmission units: 2686, listed.
     // And the same two spread transition tests: 2711.
+    // And the same two start-grant units: 2684, listed.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
