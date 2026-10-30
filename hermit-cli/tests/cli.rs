@@ -308,6 +308,7 @@ static UNTRACED_CLONE_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static CHILD_WAIT_DEADLOCK_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static CONDVAR_JOIN_DEADLOCK_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static VIRTUAL_TIMEOUT_LOOP_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static LOST_WAKEUP_DEADLOCK_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SIGNAL_THEN_SIBLING_EXIT_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static GROUP_EXIT_SIGNAL_WAIT_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static PARKED_WAIT_THEN_EXEC_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -3595,6 +3596,32 @@ fn virtual_timeout_loop_guest() -> &'static Path {
         assert!(
             output.status.success(),
             "virtual-timeout-loop guest compilation failed:\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        guest
+    })
+}
+
+fn lost_wakeup_deadlock_guest() -> &'static Path {
+    LOST_WAKEUP_DEADLOCK_GUEST.get_or_init(|| {
+        let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("hermit-cli should be inside the repository");
+        let build_root = process_build_root("lost-wakeup-deadlock");
+        fs::create_dir_all(&build_root)
+            .expect("failed to create the lost-wakeup-deadlock guest directory");
+        let guest = build_root.join("lost_wakeup_deadlock");
+        let output = Command::new("cc")
+            .args(["-O0", "-g", "-Wall", "-Wextra", "-Werror", "-pthread"])
+            .arg(repository.join("tests/c/lost_wakeup_deadlock.c"))
+            .arg("-o")
+            .arg(&guest)
+            .output()
+            .expect("failed to compile the lost-wakeup-deadlock guest");
+        assert!(
+            output.status.success(),
+            "lost-wakeup-deadlock guest compilation failed:\nstdout:\n{}\nstderr:\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
@@ -43279,6 +43306,133 @@ fn run_kvm_virtual_timeout_is_reported_from_the_childs_note() {
     );
     assert!(!log.contains("class=run-timeout"), "{log}");
     assert!(!log.contains("HERMIT_INTERNAL_FAILURE"), "{log}");
+}
+
+/// The flags every run of the lost-wakeup guest below shares: strict, the
+/// canonical epoch, and a 1000 ns timeslice bound, short enough for chaos to
+/// preempt the waiter inside its window.
+const LOST_WAKEUP_RUN_FLAGS: [&str; 4] = [
+    "--strict",
+    "--base-env=minimal",
+    detcore_model::config::CANONICAL_TEST_EPOCH_ARG,
+    "--max-timeslice=1000",
+];
+
+/// A chaos run of `tests/c/lost_wakeup_deadlock.c` that lost a wakeup and
+/// deadlocked, with the schedule it recorded and its seed.
+struct DeadlockedChaosRecording {
+    _directory: tempfile::TempDir,
+    record: PathBuf,
+    seed: u64,
+    stdout: String,
+}
+
+/// Record the first chaos seed of the lost-wakeup guest that deadlocks after
+/// at least one round: exit 121 with the class line, and the rounds before
+/// the lost wakeup printed. Seeds 1-6 all do today; scanning a few keeps the
+/// premise independent of how one seed's draws fall.
+fn record_a_deadlocked_chaos_run() -> DeadlockedChaosRecording {
+    let guest = lost_wakeup_deadlock_guest().to_str().unwrap();
+    let mut outcomes = Vec::new();
+    for seed in 1..=8u64 {
+        let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+        let record = directory.path().join("chaos.preempts");
+        let record_arg = format!("--record-preemptions-to={}", record.display());
+        let seed_arg = format!("--seed={seed}");
+        let mut args = vec!["run"];
+        args.extend(LOST_WAKEUP_RUN_FLAGS);
+        args.extend(["--chaos", &seed_arg, &record_arg, "--", guest, "200"]);
+        let output = hermit(&args);
+        let stdout = stdout(&output);
+        if output.status.code() == Some(detcore_model::HERMIT_GUEST_DEADLOCK_EXIT)
+            && stderr(&output).contains("HERMIT_GUEST_DEADLOCK class=guest-deadlock")
+            && stdout.starts_with("round 0\n")
+        {
+            return DeadlockedChaosRecording {
+                _directory: directory,
+                record,
+                seed,
+                stdout,
+            };
+        }
+        outcomes.push(format!(
+            "seed {seed}: {:?}, {} rounds",
+            output.status.code(),
+            stdout.lines().count()
+        ));
+    }
+    panic!(
+        "premise: no chaos seed in 1-8 lost a wakeup after its first round, so there is no \
+         deadlocked recording to replay (scheduler, compiler or glibc drift?): {outcomes:?}"
+    );
+}
+
+/// A replay of the deadlocked recording with `replay` (the record option),
+/// which must deadlock at the recorded round: exit 121, the class line, and
+/// the recorded stdout byte for byte. It takes the recording's guest and
+/// fuzz seeds, as `hermit analyze` trials do, so only the schedule source
+/// differs.
+fn assert_replay_deadlocks_at_the_recorded_round(
+    recording: &DeadlockedChaosRecording,
+    replay: &str,
+) {
+    let guest = lost_wakeup_deadlock_guest().to_str().unwrap();
+    let rng_seed = format!("--rng-seed={}", recording.seed);
+    let fuzz_seed = format!("--fuzz-seed={}", recording.seed);
+    let mut args = vec!["run"];
+    args.extend(LOST_WAKEUP_RUN_FLAGS);
+    args.extend([rng_seed.as_str(), &fuzz_seed, replay, "--", guest, "200"]);
+    let output = hermit(&args);
+    let log = stderr(&output);
+    assert_eq!(
+        output.status.code(),
+        Some(detcore_model::HERMIT_GUEST_DEADLOCK_EXIT),
+        "{replay} of chaos seed {}: {log}",
+        recording.seed
+    );
+    assert!(
+        log.contains("HERMIT_GUEST_DEADLOCK class=guest-deadlock"),
+        "{replay} of chaos seed {}: {log}",
+        recording.seed
+    );
+    assert_eq!(
+        stdout(&output),
+        recording.stdout,
+        "{replay} of chaos seed {}: {log}",
+        recording.seed
+    );
+}
+
+/// A schedule replay (`--replay-schedule-from`, of the record with its times
+/// stripped, as `hermit analyze` replays a target) of a chaos run that lost
+/// a wakeup deadlocks at the recorded round. It needs the replay to stay on
+/// its schedule through the round: a replay that drops the schedule after a
+/// resync runs on unguided, the wakeup is not lost, and every round finishes
+/// (ptrace, `--strict`).
+#[test]
+fn a_schedule_replay_of_a_deadlocked_chaos_run_deadlocks_at_the_recorded_round() {
+    let _guard = hermit_run_guard();
+    let recording = record_a_deadlocked_chaos_run();
+    let stripped = detcore::preemptions::strip_times_from_events_file(&recording.record, None)
+        .expect("strip the recorded schedule's times");
+    assert_replay_deadlocks_at_the_recorded_round(
+        &recording,
+        &format!("--replay-schedule-from={}", stripped.display()),
+    );
+}
+
+/// A preemption replay (`--replay-preemptions-from`) of a chaos run that lost
+/// a wakeup deadlocks at the recorded round, not at another: each replayed
+/// timeslice must end where the recorded one ended, at its syscall or its
+/// branch (ptrace, `--strict`).
+#[test]
+fn a_preemption_replay_of_a_deadlocked_chaos_run_deadlocks_at_the_recorded_round() {
+    let _guard = hermit_run_guard();
+    let recording = record_a_deadlocked_chaos_run();
+    assert_replay_deadlocks_at_the_recorded_round(
+        &recording,
+        &format!("--replay-preemptions-from={}", recording.record.display()),
+    );
 }
 
 /// A parent waiting for a child that cannot exit (its only thread paused

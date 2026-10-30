@@ -5013,6 +5013,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_schedule_replay_keeps_the_long_slices_of_a_preemption_replay: 638.
     // And run_rejects_a_missing_mount_target_outside_tmp_by_name: 623.
     // And prctl_set_ptracer_answers_as_the_host_kernel_does: 623.
+    // outcome, tests/c/condvar_join_deadlock.c): 604, listed.
+    // And a_schedule_replay_of_a_deadlocked_chaos_run_deadlocks_at_the_recorded_round
+    // and a_preemption_replay_of_a_deadlocked_chaos_run_deadlocks_at_the_recorded_round
+    // (tests/c/lost_wakeup_deadlock.c): 606, listed.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5650,6 +5654,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same uncapped-slices replay test: 557.
     // And the same missing --mount target test, not excluded: 542.
     // And prctl_set_ptracer_answers_as_the_host_kernel_does: 542.
+    // And the same three guest-deadlock outcome tests: 523, listed.
+    // And the same two deadlocked chaos-run replay tests: 525, listed.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
