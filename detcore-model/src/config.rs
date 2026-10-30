@@ -3636,7 +3636,7 @@ mod legacy_backend_json {
     /// `rewrite_exclusives_overlay` likewise: the run's global state names the
     /// files the overlay rewrite left, so it is never written and reads as
     /// empty.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 47] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 48] = [
         // `chaos_timeslice_range` came after it too: the scheduler draws the
         // slices, not the runtime, so it is never written and reads as unset.
         // `chaos_timeslice_draw` and `chaos_timeslice` came with it, for the same
@@ -5160,11 +5160,12 @@ mod tests {
         // `guest_ids`, `virtual_timeout`, `detlog_anon`,
         // `access_trace`, `access_trace_from`, `access_trace_max_records`,
         // `access_trace_max_bytes`, `chaos_instruction_offset`,
-        // `rewrite_exclusives_in_memory`, `count_store_exclusives` and
-        // `strict_schedule_boundaries` none: fourteen more keys and forty-six
-        // fewer, so thirty-two keys fewer than fields.
+        // `rewrite_exclusives_in_memory`, `count_store_exclusives`,
+        // `rewrite_exclusives_overlay` and `strict_schedule_boundaries` none:
+        // fourteen more keys and forty-seven fewer, so thirty-three keys fewer
+        // than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 32);
+        assert_eq!(fields.len(), keys.len() + 33);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
