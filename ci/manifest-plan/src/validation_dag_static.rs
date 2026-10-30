@@ -1236,6 +1236,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detcore-model's config::tests::the_guest_numbering_never_enters_the_legacy_form
     // (--no-namespace chosen guest IDs): 1881, listed.
     // And this change's detcore-model test: 1881.
+    // summary::tests::binder_external_calls_show_in_the_report_but_not_the_info_view
+    // (the run summary's binder count): 1881, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -3519,6 +3521,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and
     // a_preemption_replay_past_its_last_readmission_parks_a_finished_call_only_up_to_the_valve:
     // 2712.
+    // And syscalls::binder's
+    // strict_refuses_binder_except_in_a_replay_with_readmissions and
+    // external_binder_calls_are_counted_and_each_process_is_warned_once
+    // (`--strict`'s binder policy, the per-process warning and count): 2714.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4951,6 +4957,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And a_preemption_replay_readmits_a_backgrounded_call_where_its_recording_did
     // (readmissions in a `hermit run` preemption record, replayed under a race
     // probe): 640.
+    // And a_fresh_strict_run_refuses_binder_and_names_the_replay_route and
+    // a_strict_replay_of_a_record_with_readmissions_may_use_binder, which skip
+    // where the kernel has no binder filesystem: 642.
+    // And a_schedule_replay_that_leaves_its_readmissions_ends_there_under_die_on_desync:
+    // 643.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5581,6 +5592,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same binder descriptor test, not excluded: 557.
     // And the same blocking binder read test: 558.
     // And the same preemption-replay readmission test: 559.
+    // And the same two strict binder tests: 561.
+    // And the same --die-on-desync readmission test: 562.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -6146,6 +6159,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same five binder parsing units: 2700, listed.
     // And the same blocking-classification unit: 2701.
     // And the same eleven readmission units: 2712.
+    // And the same two binder policy units: 2714.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
@@ -6810,6 +6824,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same reused-thread-ID detcore-model test: 1867.
     // And the same guest-numbering legacy-form test: 1867, listed.
     // And the same test: 1867.
+    // And the same binder-count summary test: 1867, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.

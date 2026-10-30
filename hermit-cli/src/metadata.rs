@@ -1348,6 +1348,7 @@ fn record_or_replay_config_with_timer_support(
         signal_state_copy: false,
         // The copy is off, so no delivery is checked.
         signal_delivery_check_fatal: false,
+        strict_binder: false,
         chaos: false,
         sigint_instakill: false,
         warn_non_zero_binds: false,
