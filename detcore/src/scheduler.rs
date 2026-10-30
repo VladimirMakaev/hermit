@@ -2446,6 +2446,30 @@ pub struct Scheduler {
     /// thread over since its last committed turn
     /// ([`Self::bound_chaos_starvation`]).
     chaos_passed_over: BTreeMap<DetTid, u32>,
+    /// Where change points are bounded (`chaos_bounds_starvation`), each
+    /// thread's committed turns, host-timed polling retries aside, since its
+    /// last priority change point (`chaos_slice_spent_in_turns`). An entry
+    /// goes when its thread retires (a last turn committed after that may
+    /// leave one behind, which nothing reads unless the thread ID returns).
+    chaos_turns_in_slice: BTreeMap<DetTid, u64>,
+    /// How many committed turns end a chaos slice: as many as charge one
+    /// maximum timeslice of virtual time, but at least
+    /// `MIN_CHAOS_TURNS_PER_SLICE`; `None` when either is zero or unset.
+    chaos_turns_per_slice: Option<u64>,
+    /// The thread whose grant this pass ended a sleep at its deadline
+    /// (`ends_a_due_sleep`), taken by the next `bump_global_time`: such a turn
+    /// does not count toward the thread's chaos slice
+    /// (`chaos_slice_spent_in_turns`).
+    chaos_due_sleep_grant: Option<DetTid>,
+    /// The threads that have had a grant, so that a thread that has not yet
+    /// run can be told apart (`note_chaos_first_turn_waits`). An entry goes
+    /// when its thread retires.
+    chaos_had_turn: BTreeSet<DetTid>,
+    /// Where change points are bounded, each queued thread that has not yet
+    /// run and lost the latest grants to threads of better priority, with how
+    /// many consecutive non-polling grants it has lost
+    /// (`chaos_first_turn_overdue`).
+    chaos_first_turn_waits: BTreeMap<DetTid, u64>,
 
     /// Happens-before enforcement state, present only when the run carries a
     /// `HappensBeforeProgram`. Holds AFTER anchors until their BEFORE anchors
@@ -4534,9 +4558,36 @@ pub type MaybePrintStack = Option<Option<PathBuf>>;
 /// How many chaos timer-slice change points may pass a runnable thread over,
 /// since its last committed turn, before the changing thread moves behind it
 /// ([`Scheduler::bound_chaos_starvation`]). Each pass ends a slice, capped by
-/// `--max-timeslice`, so a passed-over thread waits at most this many slices
-/// of a thread that never blocks.
+/// `--max-timeslice` of the thread's own time and, for a thread that takes
+/// many turns, by `chaos_turns_per_slice` of its turns
+/// (`Scheduler::chaos_slice_spent_in_turns`), or at once while a thread that
+/// has not yet run is overdue (`Scheduler::chaos_first_turn_overdue`), so a
+/// passed-over thread waits at most this many slices of a thread that never
+/// blocks.
 const CHAOS_PASSOVER_BOUND: u32 = 2;
+
+/// The fewest committed turns that end a chaos slice
+/// (`Scheduler::chaos_slice_spent_in_turns`), 200 ms of turn charges at the
+/// default charge, whatever the maximum timeslice. With a small maximum,
+/// own-time slices already end every few turns of a thread that hands off
+/// the CPU, and counting its turns would add a change point every turn or
+/// two.
+const MIN_CHAOS_TURNS_PER_SLICE: u64 = 400;
+
+/// Whether `request` is a sleep whose deadline has come by `now`: a single
+/// `SleepUntil` with a real deadline, neither the zero of a yield epoch nor
+/// an indefinite one, that its caller did not ask to last no time (a
+/// zero-length sleep is a yield idiom: `Resources::zero_length_sleep`). Its
+/// grant does not count toward a chaos slice
+/// (`Scheduler::chaos_due_sleep_grant`).
+pub(crate) fn ends_a_due_sleep(request: &Resources, now: LogicalTime) -> bool {
+    !request.zero_length_sleep
+        && request.resources.len() == 1
+        && request.resources.keys().any(|resource| {
+            matches!(resource, ResourceID::SleepUntil(deadline)
+                if deadline.as_nanos() > 0 && !deadline.is_indefinite() && *deadline <= now)
+        })
+}
 
 enum ThreadStatus {
     // Not present in scheduler structures.
@@ -4954,6 +5005,19 @@ impl Scheduler {
                 && cfg.sched_heuristic == crate::config::SchedHeuristic::None
                 && cfg.replay_preemptions_from.is_none(),
             chaos_passed_over: Default::default(),
+            chaos_turns_in_slice: Default::default(),
+            chaos_turns_per_slice: cfg
+                .max_timeslice
+                .map(std::num::NonZeroU64::get)
+                .zip(
+                    cfg.scheduler_turn_charge()
+                        .ok()
+                        .filter(|charge| *charge > 0),
+                )
+                .map(|(slice, charge)| slice.div_ceil(charge).max(MIN_CHAOS_TURNS_PER_SLICE)),
+            chaos_due_sleep_grant: None,
+            chaos_had_turn: Default::default(),
+            chaos_first_turn_waits: Default::default(),
             fuzz_prng: Pcg64Mcg::seed_from_u64(cfg.fuzz_seed()),
             post_fork_prng: Pcg64Mcg::seed_from_u64(cfg.sched_seed() ^ 0x706f_7374_666f_726b),
             happens_before: cfg.happens_before.clone().map(HbRuntime::new),
@@ -5930,6 +5994,9 @@ impl Scheduler {
         self.deschedule_or_defer(*dtid);
         // Remove from all non-runnable pools:
         self.remove_blocking_entries(dtid);
+        self.chaos_turns_in_slice.remove(dtid);
+        self.chaos_had_turn.remove(dtid);
+        self.chaos_first_turn_waits.remove(dtid);
         self.retire_sigalrm_thread(*dtid, *detpid);
         // The process's last thread: its shared queue goes with it.
         let last_of_process = self
@@ -16211,6 +16278,7 @@ impl Scheduler {
         chaos_epochs: &[crate::resources::ChaosEpochTransition],
     ) -> Result<(), SkipTurn> {
         assert!(runqueue::is_ordinary_priority(new_priority));
+        self.chaos_turns_in_slice.remove(&dettid);
         let new_priority = self.bound_chaos_starvation(dettid, new_priority);
         // Alter the threads priority and requeue.
         let old_priority = self.priorities.insert(dettid, new_priority);
@@ -16615,6 +16683,9 @@ impl Scheduler {
             }
             (gtime.as_nanos(), gtime.elapsed_nanos())
         };
+        // Taken at every bump, a skipped one included, so it never outlives
+        // the turn its grant began.
+        let due_sleep_grant = self.chaos_due_sleep_grant.take();
         // A host-timed retry is not a turn that both runs of --verify share:
         // letting it set the previous turn's thread would make whether the
         // next signal delivery is charged depend on how many retries ran.
@@ -16629,6 +16700,12 @@ impl Scheduler {
         {
             self.previous_turn_tid = Some(resources.tid);
             self.previous_turn_expired_wait = expired_wait;
+            if self.chaos_bounds_starvation
+                && !self.has_schedule_replay()
+                && due_sleep_grant != Some(resources.tid)
+            {
+                *self.chaos_turns_in_slice.entry(resources.tid).or_insert(0) += 1;
+            }
         }
 
         match snapshot.cmp(&self.committed_time) {
@@ -16805,23 +16882,33 @@ impl Scheduler {
         }
         let fatal_alarm = self.in_guest_fatal_alarm_pending(dtid);
         let futex_timed_out = self.blocked.timed_out_futex_waiters.remove(&dtid);
-        let (guest_state_poll, fruitless, wants_alone, sleep_due) = match self
-            .next_turns
-            .get(&dtid)
-            .and_then(|turn| turn.req.try_read())
-        {
-            Some(Ok(rs)) => (
-                Self::is_polling_turn(&rs) && rs.polls_guest_state_only,
-                Self::retries_its_call_without_progress(&rs),
-                rs.waits_until_nothing_else_can_run,
-                Self::is_due_sleep(&rs, self.committed_time),
-            ),
-            _ => (false, false, false, false),
-        };
+        let now = self.committed_time;
+        let (polling_grant, guest_state_only, fruitless, wants_alone, sleep_due, chaos_sleep_due) =
+            match self
+                .next_turns
+                .get(&dtid)
+                .and_then(|turn| turn.req.try_read())
+            {
+                Some(Ok(rs)) => (
+                    Self::is_polling_turn(&rs),
+                    rs.polls_guest_state_only,
+                    Self::retries_its_call_without_progress(&rs),
+                    rs.waits_until_nothing_else_can_run,
+                    Self::is_due_sleep(&rs, now),
+                    ends_a_due_sleep(&rs, now),
+                ),
+                _ => (false, false, false, false, false, false),
+            };
+        let guest_state_poll = polling_grant && guest_state_only;
         // Whether this grant ends a timed wait at its deadline
         // (`expired_wait_grant`, read by `bump_global_time`).
         self.expired_wait_grant =
             ((futex_timed_out || sleep_due) && !signaled && !fatal_alarm).then_some(dtid);
+        self.chaos_due_sleep_grant = (chaos_sleep_due && !signaled && !fatal_alarm).then_some(dtid);
+        if !polling_grant {
+            self.note_chaos_first_turn_waits(dtid);
+        }
+        self.chaos_had_turn.insert(dtid);
         // The committed request, read before `clear_nextturn` empties it.
         let work_span_request = self
             .work_span
@@ -16890,7 +16977,7 @@ impl Scheduler {
                 SchedResponse::Go(as_schedvalue)
             }
         };
-        match self.deadline_remaining_from(dtid, self.committed_time) {
+        match self.grant_deadline_hint(dtid) {
             Some(remaining) => self.deadline_hints.insert(dtid, remaining),
             None => self.deadline_hints.remove(&dtid),
         };
@@ -16899,6 +16986,186 @@ impl Scheduler {
         self.boundary_budgets.committed_grant(dtid);
         resp.put(answer);
         Ok(())
+    }
+
+    /// The deadline hint a grant to `granted` carries: zero once its turns
+    /// have spent its chaos slice (`chaos_slice_spent_in_turns`) or while a
+    /// thread that has not yet run is overdue for its first turn
+    /// (`chaos_first_turn_overdue`), else the time left before the earliest
+    /// pending deadline (`deadline_remaining_from`).
+    fn grant_deadline_hint(&self, granted: DetTid) -> Option<Duration> {
+        if self.chaos_slice_spent_in_turns(granted) || self.chaos_first_turn_overdue() {
+            Some(Duration::ZERO)
+        } else {
+            self.deadline_remaining_from(granted, self.committed_time)
+        }
+    }
+
+    /// Under bounded chaos, update `chaos_first_turn_waits` at a non-polling
+    /// grant to `granted`: each queued, non-polling thread that has not yet
+    /// run and whose priority is worse than `granted`'s lost this grant on
+    /// priority, and its count of consecutive lost grants goes up by one. Any
+    /// other thread's count goes: one that ran, left the queue or had the
+    /// better priority (it was passed for another reason, a gated or deferred
+    /// request) is not waiting on chaos priorities.
+    ///
+    /// The inputs are the run queue and the priorities at a grant, the same
+    /// ones turn selection reads, and only non-polling grants count, as for
+    /// `chaos_turns_in_slice`: how many host-timed polling retries ran does
+    /// not move the count.
+    fn note_chaos_first_turn_waits(&mut self, granted: DetTid) {
+        if !self.chaos_bounds_starvation || self.recordreplay_modes || self.has_schedule_replay() {
+            return;
+        }
+        let Some(granted_priority) = self.priorities.get(&granted).copied() else {
+            self.chaos_first_turn_waits.clear();
+            return;
+        };
+        let waits: BTreeMap<DetTid, u64> = self
+            .run_queue
+            .tids()
+            .copied()
+            .filter(|tid| {
+                *tid != granted
+                    && !self.chaos_had_turn.contains(tid)
+                    && self.run_queue.contains_non_polling_tid(*tid)
+                    && !self.pending_run_queue_removals.contains_key(tid)
+                    && self
+                        .priorities
+                        .get(tid)
+                        .is_some_and(|priority| *priority > granted_priority)
+            })
+            .map(|tid| {
+                let lost = self.chaos_first_turn_waits.get(&tid).copied().unwrap_or(0);
+                (tid, lost + 1)
+            })
+            .collect();
+        self.chaos_first_turn_waits = waits;
+    }
+
+    /// Whether a thread that has not yet run has lost `chaos_turns_per_slice`
+    /// consecutive grants on priority (`note_chaos_first_turn_waits`): 400 at
+    /// the default settings, about 0.2 s of virtual time. While one has, every
+    /// grant carries a zero deadline hint (`grant_deadline_hint`), so each
+    /// thread that runs ends its slice at its next check-in, and at two such
+    /// change points the starvation bound puts the changing thread behind the
+    /// new one (`bound_chaos_starvation`). A new thread then gets its first
+    /// turn within about 400 grants and a few hundred more turns, whatever
+    /// the threads ahead of it do.
+    ///
+    /// This covers what `chaos_slice_spent_in_turns` leaves out: a thread
+    /// whose turns end sleeps at their deadlines, such as a loop of sleeps
+    /// shorter than a turn charge, which is always due and can hold a worse
+    /// band off the CPU for seconds. A newly created thread waited
+    /// 5 s for its first turn behind a 1 ms sleep loop, and a test's own 5 s
+    /// watchdog fired. A thread that has run before is not bounded by this
+    /// rule: the same holding is what reproduces a real use-after-free (main
+    /// held off for 3.8 s behind a 200 us sleep loop while a pipeline
+    /// restarts), and a bound shorter than that loses it. It is freed too
+    /// only when a new thread is overdue at the same time, since the
+    /// starvation bound puts the changing thread behind every thread it
+    /// passed over.
+    ///
+    /// Same conditions as `chaos_slice_spent_in_turns`.
+    fn chaos_first_turn_overdue(&self) -> bool {
+        self.chaos_bounds_starvation
+            && !self.recordreplay_modes
+            && !self.has_schedule_replay()
+            && self.chaos_turns_per_slice.is_some_and(|turns| {
+                self.chaos_first_turn_waits
+                    .values()
+                    .any(|lost| *lost >= turns)
+            })
+    }
+
+    /// Whether `granted` has taken `chaos_turns_per_slice` committed turns
+    /// since its last chaos change point (`chaos_turns_in_slice`): at the
+    /// default settings 400 turns, as many as charge one maximum timeslice
+    /// of virtual time. If so, its grant carries a zero deadline hint
+    /// (`grant_deadline_hint`), so the thread ends its slice at its next
+    /// check-in once it has run the minimum slice, one turn charge of its own
+    /// time (`cap_timeslice_at_deadline`), and the slice end is a change
+    /// point like any other. A change point therefore comes at the latest
+    /// 400 turns plus one turn charge of the thread's own time into a slice
+    /// (about 100 more turns of 5 us syscalls), unless the thread's own time
+    /// ends it sooner.
+    ///
+    /// Chaos draws a new priority, and the starvation bound
+    /// (`bound_chaos_starvation`) acts, only at a change point. A change point
+    /// comes when a thread's slice ends, and a slice is measured in the
+    /// thread's own time. Threads that pass the CPU back and forth (a condition
+    /// variable hand-off, a `sched_yield` loop beside a short sleeper) spend
+    /// microseconds of their own time per turn while each turn charges half a
+    /// millisecond of virtual time. A futex call or `sched_yield` costs 5 us
+    /// of a thread's own time, so a 200 ms slice could take up to 40,000 of
+    /// them (about 30,000 were seen), many seconds of virtual time, without
+    /// a change point. A
+    /// thread that drew a worse band waited that long for its first turn,
+    /// and a guest's own watchdogs fired.
+    ///
+    /// Any thread that takes that many turns within one slice is affected,
+    /// not only one that hands off the CPU: a thread making turn-taking
+    /// syscalls back to back now gets a change point every 400 turns, where
+    /// its own-time slice could have lasted 20,000 to 40,000 syscalls (10 us
+    /// for most, 5 us for a futex call or `sched_yield`).
+    ///
+    /// A turn whose grant ended a sleep at its deadline (`ends_a_due_sleep`,
+    /// `chaos_due_sleep_grant`) does not count. A sleep is paced by its
+    /// thread's own deadline, not handed to it by another thread. A sleep
+    /// shorter than a turn charge is always due, so a loop of them holds a
+    /// worse band off the CPU until its own-time slice ends, and that holding
+    /// is what reproduces a real use-after-free: main held off for 3.8 s
+    /// behind a 200 us sleep loop while a pipeline restarts. Counting those
+    /// turns cut the holding to about 0.2 s and the repro from 4 of 12 seeds
+    /// to 0. A thread that has not yet run is still bounded
+    /// (`chaos_first_turn_overdue`). A zero-length sleep (`nanosleep` or
+    /// `clock_nanosleep` of zero, `usleep(0)`: `Resources::zero_length_sleep`) is
+    /// a yield idiom and counts. So does a zero-timeout `poll`, which with
+    /// sequentialized threads is not a sleep at all
+    /// (`zero_timeout_poll_request`). So does a futex wait that timed out: its
+    /// thread waits for another thread, and a loop of them holding the CPU
+    /// starves the thread they wait for. Sixteen pollers on a 10 us `wait_for`
+    /// held a bundle-adjustment solver off for minutes when their timeouts did
+    /// not count.
+    /// The count is of turns, not of virtual time, so it keeps counting
+    /// across a sleep. The threshold uses the maximum timeslice, the bound
+    /// on a slice, not the mean a chaos slice is drawn with
+    /// (`--target-timeslice`), because it bounds how long a slice can last.
+    ///
+    /// Only where change points are bounded (`chaos_bounds_starvation`: chaos
+    /// with timer preemption and the default heuristic, not replaying
+    /// preemptions), and neither under a schedule replay nor under `hermit
+    /// record`/`hermit replay` (`recordreplay_modes`), as for every deadline
+    /// hint. A schedule replay's live tail, once its trace has run out, is still
+    /// a schedule replay (`has_schedule_replay`): it runs without this count and
+    /// without the first-turn bound, as it runs without the starvation bound
+    /// (`bound_chaos_starvation`) and without any deadline hint (the guest side
+    /// reads `replay_schedule_from` for the whole run in
+    /// `cap_timeslice_at_deadline`). The tail is deterministic, and the
+    /// starvation these rules end can come back there.
+    /// The count is of committed turns, host-timed polling retries aside, as for
+    /// `previous_turn_tid`: background calls and skipped turns do not commit, and
+    /// host-timed admissions and signals change only which pass a turn falls in,
+    /// not how many turns a thread has taken. Both runs of --verify therefore end
+    /// the same slices. A preemption recording records the slice end it causes
+    /// like any other change point, and a preemption or schedule replay follows
+    /// its recorded slice ends and applies no hint (`cap_timeslice_at_deadline`),
+    /// so a replay needs none.
+    /// Such a slice ends at a syscall check-in, and a preemption replay ends
+    /// a slice recorded there at the same branch count, which can fall just
+    /// before the syscall rather than after it; until
+    /// <https://github.com/rrnewton/hermit/pull/4597> lands, its virtual times
+    /// can then differ from the recording's by a few microseconds.
+    /// No clock moves: only the software end of the thread's slice does.
+    fn chaos_slice_spent_in_turns(&self, granted: DetTid) -> bool {
+        self.chaos_bounds_starvation
+            && !self.recordreplay_modes
+            && !self.has_schedule_replay()
+            && self.chaos_turns_per_slice.is_some_and(|turns| {
+                self.chaos_turns_in_slice
+                    .get(&granted)
+                    .is_some_and(|spent| *spent >= turns)
+            })
     }
 
     /// The virtual time left, from `now`, before the earliest deadline a turn
@@ -21993,6 +22260,278 @@ mod test {
             sched.run_queue.tentative_pop_in_progress(),
             "a proceeding turn must keep its tentative selection open for step4"
         );
+    }
+
+    /// Where chaos change points are bounded, a thread's committed turns since
+    /// its last change point count toward its slice: once they have charged a
+    /// maximum timeslice (400 turns of 0.5 ms against 200 ms), its next grant
+    /// ends the slice (`chaos_slice_spent_in_turns`). A polling retry, a
+    /// skipped turn and a turn whose grant ended a sleep at its deadline do
+    /// not count, a change point restarts the count, and nothing counts
+    /// without chaos or under `hermit record`/`hermit replay`.
+    #[test]
+    fn a_chaos_slice_is_spent_after_a_timeslice_of_turn_charges() {
+        let thread = DetTid::from_raw(13);
+        let chaos = Config {
+            chaos: true,
+            ..Config::default()
+        };
+        let setup = |config: &Config| {
+            let mut sched = Scheduler::new(config);
+            register_known_thread_for(&mut sched, thread);
+            sched.runqueue_push_back(thread);
+            (sched, Mutex::new(GlobalTime::new(config)))
+        };
+        let commit = |sched: &mut Scheduler, time: &Mutex<GlobalTime>, turns: u64| {
+            for _ in 0..turns {
+                sched.bump_global_time(time, &Ok(Resources::new(thread)));
+            }
+        };
+
+        let (mut sched, time) = setup(&chaos);
+        assert_eq!(sched.chaos_turns_per_slice, Some(400));
+        commit(&mut sched, &time, 399);
+        assert!(!sched.chaos_slice_spent_in_turns(thread), "399 turns");
+        let mut retry = Resources::new(thread);
+        retry.insert(ResourceID::InternalIOPolling, Permission::W);
+        retry.poll_attempt = 1;
+        sched.bump_global_time(&time, &Ok(retry));
+        sched.chaos_due_sleep_grant = Some(thread);
+        sched.bump_global_time(&time, &Err(SkipTurn));
+        assert_eq!(
+            sched.chaos_due_sleep_grant, None,
+            "a skipped bump takes the note too"
+        );
+        sched.chaos_due_sleep_grant = Some(thread);
+        commit(&mut sched, &time, 1);
+        assert!(
+            !sched.chaos_slice_spent_in_turns(thread),
+            "a polling retry, a skipped turn and a due sleep's end do not count"
+        );
+        assert_eq!(sched.chaos_due_sleep_grant, None, "taken by the bump");
+        commit(&mut sched, &time, 1);
+        assert!(sched.chaos_slice_spent_in_turns(thread), "400 turns");
+        assert_eq!(
+            sched.grant_deadline_hint(thread),
+            Some(Duration::ZERO),
+            "the grant ends the slice at the next check-in"
+        );
+        sched.recordreplay_modes = true;
+        assert!(
+            !sched.chaos_slice_spent_in_turns(thread),
+            "under hermit record/replay"
+        );
+        sched.recordreplay_modes = false;
+        assert_eq!(sched.run_queue.tentative_pop_next(), Some(thread));
+        let _ = sched.perform_priority_changepoint(
+            thread,
+            DEFAULT_PRIORITY,
+            LogicalTime::from_nanos(1),
+            1,
+            &[],
+        );
+        assert!(
+            !sched.chaos_slice_spent_in_turns(thread),
+            "a change point restarts the count"
+        );
+
+        let (mut plain, time) = setup(&Config::default());
+        commit(&mut plain, &time, 400);
+        assert!(!plain.chaos_slice_spent_in_turns(thread), "without chaos");
+
+        let small = Config {
+            chaos: true,
+            max_timeslice: std::num::NonZeroU64::new(1_000_000),
+            ..Config::default()
+        };
+        assert_eq!(
+            Scheduler::new(&small).chaos_turns_per_slice,
+            Some(400),
+            "a 1 ms timeslice still takes 400 turns"
+        );
+    }
+
+    /// A sleep's grant ends a timed wait at its deadline once the deadline
+    /// has come; a future, zero (yield epoch) or indefinite deadline, a
+    /// zero-length sleep, or a request that holds more than the sleep, does
+    /// not.
+    #[test]
+    fn a_due_sleep_is_one_whose_deadline_has_come() {
+        let thread = DetTid::from_raw(13);
+        let now = LogicalTime::from_nanos(5_000_000);
+        let sleep = |deadline: LogicalTime| {
+            let mut request = Resources::new(thread);
+            request.insert(ResourceID::SleepUntil(deadline), Permission::W);
+            request
+        };
+        assert!(ends_a_due_sleep(&sleep(now), now), "at its deadline");
+        assert!(
+            ends_a_due_sleep(&sleep(LogicalTime::from_nanos(4_000_000)), now),
+            "past it"
+        );
+        assert!(
+            !ends_a_due_sleep(&sleep(LogicalTime::from_nanos(6_000_000)), now),
+            "before it"
+        );
+        assert!(
+            !ends_a_due_sleep(&sleep(LogicalTime::ZERO), now),
+            "a yield epoch's zero"
+        );
+        assert!(
+            !ends_a_due_sleep(&sleep(LogicalTime::MAX), now),
+            "indefinite"
+        );
+        let mut zero_length = sleep(now);
+        zero_length.zero_length_sleep = true;
+        assert!(!ends_a_due_sleep(&zero_length, now), "a zero-length sleep");
+        let mut more = sleep(now);
+        more.insert(ResourceID::FutexWait, Permission::R);
+        assert!(!ends_a_due_sleep(&more, now), "more than a sleep");
+        assert!(!ends_a_due_sleep(&Resources::new(thread), now), "no sleep");
+    }
+
+    /// Under bounded chaos, a queued thread that has not yet run and loses
+    /// `chaos_turns_per_slice` consecutive grants on priority
+    /// (`note_chaos_first_turn_waits`, called here as `unblock_guest` calls it
+    /// for a non-polling grant) makes every grant end its slice at the next
+    /// check-in (`chaos_first_turn_overdue`). Its count goes once it has had
+    /// a grant; a thread that has run or one of better priority never
+    /// counts; nothing counts without chaos or under record or replay.
+    #[test]
+    fn a_new_thread_overdue_for_its_first_turn_ends_every_grants_slice() {
+        let runner = DetTid::from_raw(3);
+        let newcomer = DetTid::from_raw(5);
+        let chaos = Config {
+            chaos: true,
+            ..Config::default()
+        };
+        let setup = |newcomer_priority: Priority| {
+            let mut sched = Scheduler::new(&chaos);
+            for tid in [runner, newcomer] {
+                sched.thread_tree.add_child(runner, tid, true);
+                register_known_thread_for(&mut sched, tid);
+            }
+            sched.priorities.insert(runner, 1000);
+            sched.priorities.insert(newcomer, newcomer_priority);
+            sched.runqueue_push_back(newcomer);
+            sched.chaos_had_turn.insert(runner);
+            sched
+        };
+        let grant = |sched: &mut Scheduler, grants: u64| {
+            for _ in 0..grants {
+                sched.note_chaos_first_turn_waits(runner);
+            }
+        };
+
+        let mut sched = setup(9000);
+        grant(&mut sched, 399);
+        assert!(!sched.chaos_first_turn_overdue(), "399 lost grants");
+        assert_eq!(
+            sched.grant_deadline_hint(runner),
+            sched.deadline_remaining_from(runner, sched.committed_time),
+            "the ordinary hint"
+        );
+        grant(&mut sched, 1);
+        assert!(sched.chaos_first_turn_overdue(), "400 lost grants");
+        assert_eq!(
+            sched.grant_deadline_hint(runner),
+            Some(Duration::ZERO),
+            "every grant ends its slice at the next check-in"
+        );
+        sched.recordreplay_modes = true;
+        assert!(
+            !sched.chaos_first_turn_overdue(),
+            "under hermit record/replay"
+        );
+        sched.recordreplay_modes = false;
+        sched.chaos_had_turn.insert(newcomer);
+        sched.note_chaos_first_turn_waits(runner);
+        assert!(
+            !sched.chaos_first_turn_overdue(),
+            "once it has run, its wait goes"
+        );
+
+        let mut better = setup(500);
+        grant(&mut better, 400);
+        assert!(
+            !better.chaos_first_turn_overdue(),
+            "a thread of better priority was passed for another reason"
+        );
+
+        let mut ran = setup(9000);
+        ran.chaos_had_turn.insert(newcomer);
+        grant(&mut ran, 400);
+        assert!(!ran.chaos_first_turn_overdue(), "a thread that has run");
+
+        let mut plain = Scheduler::new(&Config::default());
+        for tid in [runner, newcomer] {
+            plain.thread_tree.add_child(runner, tid, true);
+            register_known_thread_for(&mut plain, tid);
+        }
+        plain.priorities.insert(newcomer, 9000);
+        plain.runqueue_push_back(newcomer);
+        for _ in 0..400 {
+            plain.note_chaos_first_turn_waits(runner);
+        }
+        assert!(!plain.chaos_first_turn_overdue(), "without chaos");
+    }
+
+    /// What a grant notes for the two chaos rules, through `unblock_guest`
+    /// itself under bounded chaos. A lone sleep whose deadline has come is a
+    /// due sleep (`chaos_due_sleep_grant`), so its turn does not count toward
+    /// the thread's slice. A zero-length sleep at the same deadline is not, nor
+    /// is a futex wait that timed out (`timed_out_futex_waiters`), so their
+    /// turns count. Each of these grants also counts one lost grant for a
+    /// queued thread of worse priority that has never run
+    /// (`chaos_first_turn_waits`), but not without chaos.
+    #[test]
+    fn a_grant_notes_a_due_sleep_and_a_new_threads_lost_grant() {
+        let granted = DetTid::from_raw(3);
+        let newcomer = DetTid::from_raw(5);
+        let chaos = Config {
+            chaos: true,
+            ..Config::default()
+        };
+        let grant = |config: &Config, request: Resources, timed_out: bool| {
+            let mut scheduler = Scheduler::new(config);
+            scheduler.committed_time = at(0);
+            queue_request(&mut scheduler, newcomer, Resources::new(newcomer));
+            queue_request(&mut scheduler, granted, request);
+            scheduler.priorities.insert(granted, 1000);
+            scheduler.priorities.insert(newcomer, 9000);
+            if timed_out {
+                scheduler.blocked.timed_out_futex_waiters.insert(granted);
+            }
+            let response = scheduler.next_turns[&granted].resp.clone();
+            assert!(scheduler.unblock_guest(granted, &response).is_ok());
+            scheduler
+        };
+        let due = sleep_request(granted, at(0));
+        let mut zero_length = due.clone();
+        zero_length.zero_length_sleep = true;
+        let mut futex = Resources::new(granted);
+        futex.insert(ResourceID::FutexWait, Permission::R);
+
+        for (case, request, timed_out, due_sleep) in [
+            ("a due sleep", due.clone(), false, true),
+            ("a zero-length sleep", zero_length, false, false),
+            ("a futex wait that timed out", futex, true, false),
+        ] {
+            let scheduler = grant(&chaos, request, timed_out);
+            assert_eq!(
+                scheduler.chaos_due_sleep_grant,
+                due_sleep.then_some(granted),
+                "{case}"
+            );
+            assert_eq!(
+                scheduler.chaos_first_turn_waits.get(&newcomer),
+                Some(&1),
+                "{case}: the new thread lost one grant on priority"
+            );
+        }
+
+        let plain = grant(&Config::default(), due, false);
+        assert!(plain.chaos_first_turn_waits.is_empty(), "without chaos");
     }
 
     /// F8 (non-committing fizzle must not advance virtual time): both sides of
