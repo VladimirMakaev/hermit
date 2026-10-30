@@ -1222,6 +1222,8 @@ fn record_or_replay_config_with_timer_support(
         // Not measured for record and replay.
         inherited_seccomp: detcore::InheritedSeccomp::Unknown,
         has_uts_namespace: true,
+        // A recording replays nothing, so it adopts no seeds.
+        replay_adopted_seeds: None,
         // Record and replay print no notice for an abstract AF_UNIX bind,
         // `hermit record start --network=host` included; only `hermit run`
         // sets it.

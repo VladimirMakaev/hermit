@@ -199,6 +199,45 @@ pub struct RunSummary {
     /// human-readable summary, whose INFO view is compared by `--verify`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub syscall_histogram: Option<SyscallHistogramSummary>,
+    /// The seeds a schedule replay took from the recording it replays, for
+    /// the run that omitted them (`Config::replay_adopted_seeds`). Shown in
+    /// the full report, but not the INFO guest-behavior view used by
+    /// `--verify`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted_seeds: Option<AdoptedSeeds>,
+}
+
+/// The seeds a schedule replay adopted from its recording: each is `Some`
+/// when the run omitted it and the recording stored it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdoptedSeeds {
+    /// The guest's random seed (`--rng-seed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rng: Option<u64>,
+    /// The scheduler's seed (`--sched-seed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sched: Option<u64>,
+}
+
+impl AdoptedSeeds {
+    /// Whether the replay adopted any seed.
+    pub fn any(&self) -> bool {
+        self.rng.is_some() || self.sched.is_some()
+    }
+}
+
+impl fmt::Display for AdoptedSeeds {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let seeds: Vec<String> = [("guest random", self.rng), ("scheduler", self.sched)]
+            .into_iter()
+            .filter_map(|(name, seed)| Some(format!("{name} seed {}", seed?)))
+            .collect();
+        write!(
+            f,
+            "Seeds adopted from the replayed recording: {}",
+            seeds.join(", ")
+        )
+    }
 }
 
 /// The full human-readable report, including recorded launch configuration.
@@ -262,6 +301,7 @@ impl RunSummary {
             preemption,
             dispatch_stats: _,
             syscall_histogram: _,
+            adopted_seeds,
         } = self;
         writeln!(f, "Final thread-tree was: {}", threads_descrip)?;
         writeln!(
@@ -288,6 +328,9 @@ impl RunSummary {
 
         if include_report_metadata && let Some(preemption) = preemption {
             writeln!(f, "{preemption}")?;
+        }
+        if include_report_metadata && let Some(adopted) = adopted_seeds {
+            writeln!(f, "{adopted}")?;
         }
 
         if let Some(txt) = desync_descrip {
