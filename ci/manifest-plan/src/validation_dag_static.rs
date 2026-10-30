@@ -1284,7 +1284,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And hermit-verify's schedule_trace
     // interpolate_refuses_schedules_recorded_under_different_cap_preemption_charges
     // and an_interpolated_schedule_carries_its_inputs_cap_and_charge_rule: 1893.
-    ("test.regular_crates", 1891),
+    // frontier: 1960, recomputed by cargo nextest list over the frontier stack.
+    ("test.regular_crates", 1960),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2252,7 +2253,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // frontier: 1497, recomputed by cargo nextest list over the frontier stack.
     // And verify_run::tests::a_timed_out_run_ends_the_comparison_as_run_verify_does
     // (`--timeout` bounds each `--verify` run): 1498.
-    ("test.hermit_unit", 1171),
+    // frontier: 1498, recomputed by cargo nextest list over the frontier stack.
+    ("test.hermit_unit", 1498),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3831,7 +3833,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // lib's a_replayed_slice_arms_an_exact_stop_only_where_a_branch_ends_it;
     // and slice_boundary::grant's a_boundary_grants_pmu_count_keeps_its_exact_stop:
     // 2747, listed.
-    ("test.detcore_unit", 2740),
+    // frontier: 3222, recomputed by cargo nextest list over the frontier stack.
+    ("test.detcore_unit", 3222),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -3966,7 +3969,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // handler, a recovered handler followed by RDTSC traps, or a recovered
     // lineage beside another crash; each crashing trial switches; an abort
     // inside a fault handler switches at once): 174.
-    ("test.detcore_misc", 182),
+    // frontier: 206, recomputed by cargo nextest list over the frontier stack.
+    ("test.detcore_misc", 206),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -3979,6 +3983,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // stay: 31 - 29 = 2, and 2 + 29 = 31 still run under the full label.
     // And a_capped_preemption_charge_bounds_the_time_short_slices_add, which
     // disables max_timeslice and is selected by name: 3.
+    // frontier: 3, recomputed by cargo nextest list over the frontier stack.
     ("test.detcore_time", 3),
     // 402ba973 adds two clock_determinism tests, retaining all 158 prior IDs:
     // default_virtual_epoch_tracks_invocation_start_and_is_reported and
@@ -4213,7 +4218,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And fatal_core_capture's three tests of cores that hold every thread
     // (the note layout and each thread's registers, gdb, two identical runs):
     // 289, listed.
-    ("test.hermit_integration_2", 287),
+    // frontier: 293, recomputed by cargo nextest list over the frontier stack.
+    ("test.hermit_integration_2", 293),
     // And standalone's 13 internal standalone targets, one ignored for the
     // per-test CPU budget, in the third shard: 60 + 263 + 244 = 567.
     // Less no_networking_network_bind_full, ignored for the per-test CPU
@@ -4262,7 +4268,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And scheduler_deadlock's poll-deadlock report: 347.
     // And robust_futex_owner_death's native and ptrace SIGKILL owner-death
     // tests: 349, listed.
-    ("test.hermit_integration_3", 347),
+    // frontier: 350, recomputed by cargo nextest list over the frontier stack.
+    ("test.hermit_integration_3", 350),
     ("test.arbitrary_binaries", 4),
     // Every record_replay identity but one (`cargo nextest list` lists 110):
     // the --skip waiver of record_node_eventfd_epoll_sequence
@@ -4448,7 +4455,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And record_replay_gives_the_guest_a_private_dev_shm: 222.
     // And record_replay_gives_the_guest_a_private_ipc_namespace: 223.
     // And record_poller_beside_a_short_sleeper: 221.
-    ("test.record_replay", 226),
+    // frontier: 229, recomputed by cargo nextest list over the frontier stack.
+    ("test.record_replay", 229),
     // Seven proc-fallback, warning, and record/replay tests retain all 80
     // selected identities under the unchanged shipped CLI skip filters.
     // The successful-exec POSIX timer regression retains all 87 prior CLI cases.
@@ -5340,7 +5348,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run_verify_timeout_bounds_the_first_run_and_reports_no_result and
     // run_verify_timeout_bounds_the_second_run_and_reports_no_result
     // (https://github.com/rrnewton/hermit/issues/4973): 774.
-    ("test.cli", 654),
+    // frontier: 775, recomputed by cargo nextest list over the frontier stack.
+    ("test.cli", 775),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5401,6 +5410,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // rr_multiple_pending_signals no longer ignored, now that Detcore chooses
     // a process-directed signal's receiving thread
     // (https://github.com/rrnewton/hermit/issues/4034): 193.
+    // frontier: 193, recomputed by cargo nextest list over the frontier stack.
     ("test.rr_suite_contract", 193),
     ("privileged-test.pmu_buck_chaos_cases", 6),
     // PMU-subject cases moved out of test.hermit_unit and test.cli so the
@@ -5443,7 +5453,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // run_chaos_preemption_replay_does_not_single_step_toward_check_in_ends,
     // whose replays need the PMU's exact stops to go wrong, join them: 20,
     // listed.
-    ("privileged-test.pmu_cli_cases", 19),
+    // frontier: 31, recomputed by cargo nextest list over the frontier stack.
+    ("privileged-test.pmu_cli_cases", 31),
     // The six x86-64-v3 CLI cases that run a guest, with
     // HERMIT_TEST_REQUIRE_CPU_PROFILE_V3=1 so that a refusal fails
     // (https://github.com/rrnewton/hermit/issues/4243): 6, listed with this
@@ -5508,6 +5519,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the two deadline_slice_cap cases of recorded and replayed slice ends
     // taken without a stop (a_recording_keeps_lone_slice_ends_and_marks_them,
     // replays_take_recorded_lone_slice_ends_the_same_way): 44.
+    // frontier: 44, recomputed by cargo nextest list over the frontier stack.
     ("test.pmu_integration_cases", 44),
     // And signal_determinism's
     // ptrace_delivery_check_approves_a_signal_to_a_thread_in_user_code: its
@@ -6009,7 +6021,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And detlog_anon_records_a_write_to_an_anonymous_mapping: 542.
     // frontier: 691, recomputed by cargo nextest list over the frontier stack.
     // And the same two --verify --timeout tests, not excluded: 693.
-    ("test.cli_on_host", 573),
+    // frontier: 694, recomputed by cargo nextest list over the frontier stack.
+    ("test.cli_on_host", 694),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6095,7 +6108,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the four property snapshot tests: 168.
     // And the uncopied-file alias refusal: 169.
     // And the same ten post-crash switch tests: 174.
-    ("test.detcore_misc_on_host", 182),
+    // frontier: 206, recomputed by cargo nextest list over the frontier stack.
+    ("test.detcore_misc_on_host", 206),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).
@@ -6109,6 +6123,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The host twin carries test.detcore_time's PMU-free filter: 2 of 31
     // (https://github.com/rrnewton/hermit/issues/3663).
     // And the same capped-preemption-charge case: 3.
+    // frontier: 3, recomputed by cargo nextest list over the frontier stack.
     ("test.detcore_time_on_host", 3),
     // The two bootstrap-turn scheduler-time tests listed for test.detcore_unit
     // (https://github.com/rrnewton/hermit/issues/3517) retain all 876 prior
@@ -6627,7 +6642,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two-page pipe-max-size unit: 2740, listed.
     // And the same nine re-landed #4597 preemption-replay units: 2747,
     // listed.
-    ("test.detcore_unit_on_host", 2740),
+    // frontier: 3222, recomputed by cargo nextest list over the frontier stack.
+    ("test.detcore_unit_on_host", 3222),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6747,7 +6763,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three fatal_core_capture tests: 696, listed.
     // And scheduler_deadlock's poll-deadlock report: 694.
     // And robust_futex_owner_death's two SIGKILL owner-death tests: 696, listed.
-    ("test.hermit_integration_on_host", 694),
+    // frontier: 704, recomputed by cargo nextest list over the frontier stack.
+    ("test.hermit_integration_on_host", 704),
     // The host twin selects the same 4 GiB iced decode regression
     // (https://github.com/rrnewton/hermit/issues/3462), and the two fbcode
     // version-format tests (https://github.com/rrnewton/hermit/pull/3511),
@@ -7112,7 +7129,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two PID-namespace units: 1165, listed.
     // frontier: 1491, recomputed by cargo nextest list over the frontier stack.
     // And the same timed-out --verify-run unit: 1492.
-    ("test.hermit_unit_on_host", 1165),
+    // frontier: 1492, recomputed by cargo nextest list over the frontier stack.
+    ("test.hermit_unit_on_host", 1492),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -7370,11 +7388,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three store-exclusive cause units: 1872.
     // And the same split_branches unit: 1869, listed.
     // And the same two interpolation units: 1879.
-    ("test.regular_crates_on_host", 1877),
+    // frontier: 1946, recomputed by cargo nextest list over the frontier stack.
+    ("test.regular_crates_on_host", 1946),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
     // And the same two multiple-pending-signals cases: 192.
+    // frontier: 192, recomputed by cargo nextest list over the frontier stack.
     ("test.rr_suite_contract_on_host", 192),
     // The host twin also selects the two startup-order tests, and the three
     // SaBRe host-input tests (12).
