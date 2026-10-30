@@ -615,6 +615,13 @@ impl TrialLog {
             TrialLog::Debug => LevelFilter::DEBUG,
         }
     }
+
+    /// The scheduler seed of the target run, which every trial whose
+    /// schedule analyze writes replays under
+    /// ([`AnalyzeOpts::adopt_trial_sched_seed`],
+    /// [`AnalyzeOpts::stamp_trial_record`]); `None` before it is known.
+    #[clap(skip)]
+    pub trial_sched_seed: Option<u64>,
 }
 
 /// `--trial-timeout`.

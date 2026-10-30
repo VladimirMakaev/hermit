@@ -1104,14 +1104,19 @@ impl RunData {
     /// Extract the (initial) RunOpts for target/run1 that are implied by all of hermit analyze's arguments.
     fn get_run1_runopts(aopts: &AnalyzeOpts) -> anyhow::Result<RunOpts> {
         let mut ro = Self::get_base_runopts(aopts)?;
+        Self::aim_at_run1(aopts, &mut ro);
+        Ok(ro)
+    }
 
+    /// Make `ro` the target run's: `--run1-seed`'s, or a replay of
+    /// `--run1-preemptions`.
+    fn aim_at_run1(aopts: &AnalyzeOpts, ro: &mut RunOpts) {
         // If there was a --sched-seed specified in run_args, it is overridden by this setting:
         // --run1-preemptions: `new_run1_target` replays a workspace copy.
         if let Some(seed) = aopts.run1_seed {
             ro.det_opts.det_config.seed = seed;
             Self::draw_no_instruction_offsets(&mut ro);
         }
-        Ok(ro)
     }
 
     /// A temporary constructor method until minimize overhaul is complete and it returns a RunData directly.
@@ -1945,6 +1950,39 @@ impl AnalyzeOpts {
         Ok(())
     }
 
+    /// Run every trial whose schedule analyze writes (bisection, swap,
+    /// reordering and stack-trace trials) under the scheduler seed of the
+    /// target run, as [`Self::adopt_trial_rng_seed`] runs every trial under
+    /// its guest random seed: such a schedule leaves choices open that the
+    /// target's scheduler made from its seed. The seed is the one the target
+    /// run takes ([`RunOpts::adopt_replayed_rng_seed`]): that of the
+    /// `target` recording (`--run1-preemptions` for analyze, `--bad` for
+    /// bisect), unless the run arguments give a scheduler seed, or else
+    /// `--run1-seed`'s or the run arguments'. Stamped into every schedule
+    /// analyze writes ([`Self::stamp_trial_record`]), never into the run
+    /// arguments: each endpoint recording (the target, a `--run2-preemptions`
+    /// baseline) still replays under its own scheduler seed, and the two
+    /// differ, as a target and a baseline recorded at different `--seed`s do.
+    pub fn adopt_trial_sched_seed(&mut self, target: Option<&Path>) -> anyhow::Result<()> {
+        let mut run = RunData::get_raw_runopts(self);
+        match target {
+            Some(path) => {
+                run.det_opts.det_config.replay_preemptions_from = Some(path.to_path_buf());
+            }
+            None => RunData::aim_at_run1(self, &mut run),
+        }
+        run.adopt_replayed_rng_seed()?;
+        self.trial_sched_seed = Some(run.det_opts.det_config.sched_seed());
+        Ok(())
+    }
+
+    /// A target `--search` found ran under a scheduler seed of its own:
+    /// the trials whose schedule analyze writes take it
+    /// ([`Self::adopt_trial_sched_seed`]).
+    pub fn adopt_found_target_sched_seed(&mut self, target: &RunData) {
+        self.trial_sched_seed = Some(target.runopts.det_opts.det_config.sched_seed());
+    }
+
     /// The guest random seed every trial gives the guest
     /// ([`Self::adopt_trial_rng_seed`]): the effective `--rng-seed` of the
     /// trials' run arguments.
@@ -2118,7 +2156,8 @@ impl AnalyzeOpts {
     /// (<https://github.com/rrnewton/hermit/issues/4380>). It also carries the
     /// trials' guest random seed, so that `hermit run` or `hermit bisect`
     /// replaying it gives the guest the trials' random values
-    /// (<https://github.com/rrnewton/hermit/issues/4868>).
+    /// (<https://github.com/rrnewton/hermit/issues/4868>), and the target's
+    /// scheduler seed ([`Self::adopt_trial_sched_seed`]).
     /// It also carries the uncapped-slices mark of the schedules the trials
     /// come from (`trial_schedules_uncapped`): a trial's schedule has no event
     /// times, so without the mark its replay would end their long slices at
@@ -2144,7 +2183,12 @@ impl AnalyzeOpts {
             .with_queued_sleeps_registered_at_first_pass(
                 self.trial_sleep_registration() == SleepRegistration::FirstPass,
             )
-            .with_rng_seed(Some(self.trial_rng_seed()))
+            .with_rng_seed(Some(self.trial_rng_seed()));
+        // And the target's scheduler seed, once known.
+        match self.trial_sched_seed {
+            Some(seed) => record.with_sched_seed(Some(seed)),
+            None => record,
+        }
     }
 
     /// Whether the trials cap preemption charges (`--cap-preemption-charge`
