@@ -182,7 +182,12 @@ static VFORK_KILL_EXEC_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static VFORK_EXEC_RESUME_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static FUTEX_WAKE_COUNT_ZERO_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static FUTEX_REQUEUE_WAKE_OP_GUEST: OnceLock<PathBuf> = OnceLock::new();
-static FUTEX_LOCK_PI_REFUSED_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static FUTEX_REQUEUE_PI_REFUSED_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static FUTEX_PI_COMMANDS_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static FUTEX_PI_MUTEX_CONTENDED_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static FUTEX_PI_ROBUST_OWNER_DEATH_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static FUTEX_PI_CONDVAR_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static FUTEX_PI_OWNER_END_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static FUTEX_KEYED_ACCESS_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static FUTEX_WAKE_OP_FILE_SHARED_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static FUTEX_REWAIT_CHANGED_WORD_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -45041,13 +45046,14 @@ fn run_kvm_futex_wait_on_an_unreadable_word_matches_linux() {
     );
 }
 
-/// A priority-inheritance futex command is refused by name, never a panic
-/// (https://github.com/rrnewton/hermit/issues/3958): a fail-closed run stops with
-/// the policy-refusal status, and with `--allow-unsupported-syscalls` the guest
-/// gets ENOSYS, Linux's answer when built without CONFIG_FUTEX_PI.
+/// The requeue-PI pair, FUTEX_WAIT_REQUEUE_PI and FUTEX_CMP_REQUEUE_PI, is
+/// refused by name, never a panic (https://github.com/rrnewton/hermit/issues/3958):
+/// a fail-closed run stops with the policy-refusal status, and with
+/// `--allow-unsupported-syscalls` the guest gets ENOSYS, Linux's answer when
+/// built without CONFIG_FUTEX_PI. Natively the guest's call returns 0.
 #[test]
-fn futex_lock_pi_is_refused_by_name() {
-    let guest = futex_c_guest(&FUTEX_LOCK_PI_REFUSED_GUEST, "futex_lock_pi_refused")
+fn futex_requeue_pi_is_refused_by_name() {
+    let guest = futex_c_guest(&FUTEX_REQUEUE_PI_REFUSED_GUEST, "futex_requeue_pi_refused")
         .to_str()
         .unwrap()
         .to_owned();
@@ -45072,7 +45078,7 @@ fn futex_lock_pi_is_refused_by_name() {
         "a fail-closed run must stop with the policy-refusal status:\nstderr:\n{log}"
     );
     assert!(
-        log.contains("futex command FUTEX_LOCK_PI is not supported"),
+        log.contains("futex command FUTEX_CMP_REQUEUE_PI is not supported"),
         "the refusal must name the command:\nstderr:\n{log}"
     );
     let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
@@ -45097,7 +45103,306 @@ fn futex_lock_pi_is_refused_by_name() {
         Some(0),
         "stdout:\n{stdout}\nstderr:\n{log}"
     );
-    assert_eq!(stdout, "lock_pi: -1 ENOSYS\n", "stderr:\n{log}");
+    assert_eq!(stdout, "cmp_requeue_pi: -1 ENOSYS\n", "stderr:\n{log}");
+}
+
+/// FUTEX_LOCK_PI from the init of a nested PID namespace is refused by name:
+/// the TID a PI word holds is the caller's namespace's, which Detcore does not
+/// translate into the thread IDs it keys PI ownership by. Natively the call
+/// takes the free word (0).
+#[test]
+fn futex_lock_pi_in_a_nested_pid_namespace_is_refused_by_name() {
+    let guest = futex_c_guest(&FUTEX_REQUEUE_PI_REFUSED_GUEST, "futex_requeue_pi_refused")
+        .to_str()
+        .unwrap()
+        .to_owned();
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let (status, log) = run_with_deadline(
+        hermit_command(&[
+            "--log=error",
+            "run",
+            "--strict",
+            "--timeout",
+            "60",
+            "--",
+            guest.as_str(),
+            "nested-pid",
+        ]),
+        directory.path(),
+        Duration::from_secs(120),
+        false,
+    );
+    assert_eq!(
+        status.and_then(|status| status.code()),
+        Some(HERMIT_POLICY_REFUSAL_EXIT),
+        "a fail-closed run must stop with the policy-refusal status:\nstderr:\n{log}"
+    );
+    assert!(
+        log.contains(
+            "futex command FUTEX_LOCK_PI is not supported: the caller is in a nested PID \
+             namespace"
+        ),
+        "the refusal must name the command and the reason:\nstderr:\n{log}"
+    );
+}
+
+/// `guest` under ptrace `run --strict --verify --verify-strict` with `schedule`
+/// (the default one, or a chaos seed): the two runs must agree at bitwise parity
+/// with INFO messages compared on both sides. Returns the guest's stdout.
+fn futex_pi_guest_at_bitwise_parity(guest: &str, schedule: &[&str]) -> String {
+    let directory = tempfile::tempdir_in(env!("CARGO_TARGET_TMPDIR")).unwrap();
+    let report = directory.path().join("verify.json");
+    let report_arg = report.to_str().expect("report path should be UTF-8");
+    let mut args = vec![
+        "--backend=ptrace",
+        "run",
+        "--strict",
+        "--base-env=minimal",
+        "--epoch=2026-01-01T00:00:00Z",
+    ];
+    args.extend_from_slice(schedule);
+    args.extend([
+        "--verify",
+        "--verify-strict",
+        "--verify-json",
+        report_arg,
+        "--",
+        guest,
+    ]);
+    let output = hermit(&args);
+    assert_success(&output, &args);
+    let verdict: serde_json::Value =
+        serde_json::from_slice(&fs::read(&report).expect("strict verification wrote no verdict"))
+            .expect("strict verification verdict is valid JSON");
+    assert_eq!(verdict["bitwise_parity"], true, "{args:?}: {verdict}");
+    for side in ["left", "right"] {
+        assert!(
+            verdict["compared_log_messages"][side].as_u64().unwrap_or(0) > 0,
+            "{args:?}: no INFO messages compared: {verdict}"
+        );
+    }
+    stdout(&output)
+}
+
+/// FUTEX_LOCK_PI, FUTEX_LOCK_PI2, FUTEX_TRYLOCK_PI and FUTEX_UNLOCK_PI called
+/// directly, as Linux's kernel/futex/pi.c answers them: taking a free word,
+/// EDEADLK for its owner, EPERM for an unlock by anyone else, the argument
+/// checks in Linux's order, FUTEX_WAITERS left by a failed TRYLOCK_PI and by
+/// ESRCH for an exited owner, absolute deadlines on each clock, a plain wake
+/// and requeue stopping at a PI waiter, EINVAL behind a plain waiter, the
+/// hand-over to waiters first in, first out, a caught signal restarting a
+/// blocked lock with its deadline, EDEADLK for a lock that closes a cycle, an
+/// owner's exit and an owner's exec handing the word to its waiter with
+/// FUTEX_OWNER_DIED, and a process-shared word handed to a child. Every line
+/// must match native, and native the fixed expectation; under Hermit the run is
+/// at bitwise parity under the default schedule and a chaos seed.
+#[test]
+fn futex_pi_lock_commands_match_linux() {
+    let guest = futex_c_guest(&FUTEX_PI_COMMANDS_GUEST, "futex_pi_commands");
+    let expected = "trylock_pi, unowned word: 0, word main\n\
+         lock_pi, word the caller owns: -1 EDEADLK, word main\n\
+         trylock_pi, word the caller owns: -1 EDEADLK, word main\n\
+         unlock_pi, no waiter: 0, word 0\n\
+         unlock_pi, word 0: -1 EPERM, word 0\n\
+         lock_pi, unowned word: 0, word main\n\
+         unlock_pi again: 0, word 0\n\
+         lock_pi, tv_nsec 1e9: -1 EINVAL, word 0\n\
+         lock_pi, unmapped timeout: -1 EFAULT, word 0\n\
+         trylock_pi ignores its timeout argument: 0, word main\n\
+         unlock_pi: 0, word 0\n\
+         lock_pi with FUTEX_CLOCK_REALTIME: -1 ENOSYS, word 0\n\
+         lock_pi, NULL word: -1 EFAULT\n\
+         lock_pi, misaligned word: -1 EINVAL\n\
+         unlock_pi, misaligned word naming the caller: -1 EINVAL\n\
+         unlock_pi, misaligned word naming nobody: -1 EPERM\n\
+         lock_pi, read-only word: -1 EFAULT, word 0\n\
+         shared lock_pi, read-only anonymous word: -1 EFAULT, word 0\n\
+         unlock_pi, read-only word naming nobody: -1 EPERM, word 0\n\
+         unlock_pi, word another thread holds: -1 EPERM, word holder\n\
+         trylock_pi, word another thread holds: -1 EAGAIN, word holder|WAITERS\n\
+         lock_pi, CLOCK_REALTIME deadline 20 ms on: -1 ETIMEDOUT, word holder|WAITERS\n\
+         lock_pi2, CLOCK_MONOTONIC deadline 20 ms on: -1 ETIMEDOUT, word holder|WAITERS\n\
+         lock_pi2 with FUTEX_CLOCK_REALTIME, deadline 20 ms on: -1 ETIMEDOUT, word holder|WAITERS\n\
+         the holder's unlock_pi with no waiter left: 0, word 0\n\
+         lock_pi, word naming an exited thread: -1 ESRCH, word exited|WAITERS\n\
+         trylock_pi, word naming an exited thread: -1 ESRCH, word exited|WAITERS\n\
+         trylock_pi, word marked OWNER_DIED: 0, word main|OWNER_DIED\n\
+         unlock_pi, word marked OWNER_DIED: 0, word 0\n\
+         word with a queued waiter: 0, word main|WAITERS\n\
+         futex_wake, word with a PI waiter: -1 EINVAL, word main|WAITERS\n\
+         futex_requeue 0 and 0, word with a PI waiter: 0, word main|WAITERS\n\
+         futex_requeue 0 and 1, word with a PI waiter: -1 EINVAL, word main|WAITERS\n\
+         unlock_pi, waiter queued: 0, word waiter|WAITERS\n\
+         the waiter: lock_pi 0, word waiter|WAITERS; its unlock_pi 0, word 0\n\
+         unlock_pi, two waiters queued: 0, word first|WAITERS\n\
+         the first waiter: lock_pi 0, word first|WAITERS; its unlock_pi 0, word second|WAITERS\n\
+         the second waiter: lock_pi 0, word second|WAITERS; its unlock_pi 0, word 0\n\
+         another thread's trylock_pi, plain waiter queued first: -1 EINVAL, word main\n\
+         its lock_pi: -1 EINVAL, word main\n\
+         unlock_pi, plain waiter queued first: -1 EINVAL, word main\n\
+         futex_wake of the plain waiter: 1, word main\n\
+         unlock_pi once it left: 0, word 0\n\
+         unlock_pi, waiter signalled with SA_RESTART: 0, word restarted|WAITERS\n\
+         the signalled waiter: lock_pi 0, word restarted|WAITERS; its unlock_pi 0, word 0\n\
+         unlock_pi, waiter signalled without SA_RESTART: 0, word resumed|WAITERS\n\
+         the signalled waiter: lock_pi 0, word resumed|WAITERS; its unlock_pi 0, word 0\n\
+         the waiter signalled 200 ms into a 300 ms deadline: lock_pi -1 ETIMEDOUT, ended by the deadline: yes, handler ran 3 times in all\n\
+         unlock_pi, timed waiter gone: 0, word 0\n\
+         lock_pi on a word whose owner waits for the caller's: -1 EDEADLK, word cycle|WAITERS\n\
+         unlock_pi, cycle waiter queued: 0, word cycle|WAITERS\n\
+         the cycle waiter: lock_pi 0, word cycle|WAITERS; its unlock_pi 0, word 0\n\
+         its unlock_pi of the word main waited on: 0, word 0\n\
+         the waiter when its owner exited: lock_pi 0, word heir|OWNER_DIED|WAITERS; its unlock_pi 0, word 0\n\
+         shared unlock_pi, child queued: 0, word child|WAITERS\n\
+         the child: lock_pi 0, word child|WAITERS; its unlock_pi 0, word 0\n\
+         the child when its owner exec'd: lock_pi 0, word exec child|OWNER_DIED|WAITERS; its unlock_pi 0, word 0\n";
+    assert_eq!(native_stdout(guest), expected, "natively");
+    let guest = guest.to_str().expect("guest path should be UTF-8");
+    for schedule in [&[][..], &["--chaos", "--sched-seed=2"]] {
+        assert_eq!(
+            futex_pi_guest_at_bitwise_parity(guest, schedule),
+            expected,
+            "{schedule:?}"
+        );
+    }
+}
+
+/// Four threads contend a PTHREAD_PRIO_INHERIT mutex, which glibc serves with
+/// FUTEX_LOCK_PI and FUTEX_UNLOCK_PI, and every one finds itself alone in the
+/// critical section; the final count matches native. Main holds the mutex
+/// while it starts them and until a FUTEX_LOCK_PI has queued behind it, so
+/// every run contends it at least once. Under the default
+/// schedule and a chaos seed the run is at bitwise parity. Before Detcore
+/// emulated the PI commands, the first contended lock stopped the run with the
+/// policy-refusal status.
+#[test]
+fn a_contended_pi_mutex_keeps_mutual_exclusion_at_bitwise_parity() {
+    let guest = futex_c_guest(&FUTEX_PI_MUTEX_CONTENDED_GUEST, "futex_pi_mutex_contended");
+    let expected = "threads 4, iterations 100: count 400, overlaps 0\n";
+    assert_eq!(native_stdout(guest), expected, "natively");
+    let guest = guest.to_str().expect("guest path should be UTF-8");
+    for schedule in [&[][..], &["--chaos", "--sched-seed=1"]] {
+        assert_eq!(
+            futex_pi_guest_at_bitwise_parity(guest, schedule),
+            expected,
+            "{schedule:?}"
+        );
+    }
+}
+
+/// A robust PTHREAD_PRIO_INHERIT mutex whose owner exits holding it: the next
+/// pthread_mutex_lock (FUTEX_LOCK_PI) and pthread_mutex_trylock
+/// (FUTEX_TRYLOCK_PI) get EOWNERDEAD, and so does a waiter blocked in
+/// FUTEX_LOCK_PI when the owner exits, whom the exit hands the lock. Each then
+/// makes the mutex consistent and locks it again, as natively, at bitwise
+/// parity under the default schedule and a chaos seed.
+#[test]
+fn a_robust_pi_mutex_reports_its_owners_death_as_linux() {
+    let guest = futex_c_guest(
+        &FUTEX_PI_ROBUST_OWNER_DEATH_GUEST,
+        "futex_pi_robust_owner_death",
+    );
+    let recovered = "EOWNERDEAD, consistent 0, unlock 0, lock again 0, unlock 0, word 0\n";
+    let expected = format!(
+        "owner exited holding it, no waiter: word OWNER_DIED\n\
+         pthread_mutex_lock: {recovered}\
+         pthread_mutex_trylock: {recovered}\
+         pthread_mutex_lock blocked when the owner exited: {recovered}"
+    );
+    assert_eq!(native_stdout(guest), expected, "natively");
+    let guest = guest.to_str().expect("guest path should be UTF-8");
+    for schedule in [&[][..], &["--chaos", "--sched-seed=4"]] {
+        assert_eq!(
+            futex_pi_guest_at_bitwise_parity(guest, schedule),
+            expected,
+            "{schedule:?}"
+        );
+    }
+}
+
+/// A PI word whose owner ends while the word still names it, and a
+/// FUTEX_LOCK_PI that nothing orders after that end but the schedule: an owner
+/// thread's raw `exit` raced by main spinning on a flag it sets just before,
+/// and a child process holding a process-shared word that main SIGKILLs and
+/// then locks. Natively either order happens. Under Hermit each schedule gives
+/// one answer at bitwise parity, following the committed order, whenever the
+/// owner's thread deregisters: the lock with FUTEX_OWNER_DIED where main
+/// queued behind the owner first (`exit_pi_state_list`), and ESRCH with
+/// FUTEX_WAITERS left where the owner's exit was granted, or its SIGKILL
+/// committed, first (`handle_exit_race`). A waiter already queued when the
+/// SIGKILL comes is handed the lock, natively and under Hermit. When another
+/// member of the owner's process group sends the SIGKILL, telling the owner
+/// to unlock just before, the owner is alive until the kill commits: its
+/// FUTEX_UNLOCK_PI hands the waiter the lock or never runs, and never fails.
+#[test]
+fn a_pi_owner_that_exits_or_is_killed_is_dead_from_its_committed_end() {
+    let guest = futex_c_guest(&FUTEX_PI_OWNER_END_GUEST, "futex_pi_owner_end");
+    let raw_exit = "lock_pi on a word whose owner left by a raw exit";
+    let killed = "lock_pi right after a SIGKILL ended the owner's process";
+    let waiter = "the waiter queued when a SIGKILL ended the owner's process: \
+                  0, word waiter|OWNER_DIED|WAITERS";
+    let group_waiter = "the waiter queued when a member's group SIGKILL ended the owner's process";
+    let group_unlock = "the owner's unlock_pi before the kill";
+    let handed = "0, word main|OWNER_DIED|WAITERS";
+    let dead = "-1 ESRCH, word owner|WAITERS";
+    // The group kill's two lines: the owner unlocked first and handed the
+    // waiter the lock, or the kill ended it first.
+    let unlocked_first = format!("{group_waiter}: 0, word waiter|WAITERS\n{group_unlock}: 0");
+    let killed_first =
+        format!("{group_waiter}: 0, word waiter|OWNER_DIED|WAITERS\n{group_unlock}: not reached");
+    let native = native_stdout(guest);
+    let lines: Vec<&str> = native.lines().collect();
+    assert_eq!(lines.len(), 5, "natively: {native}");
+    for (line, what) in lines.iter().zip([raw_exit, killed]) {
+        assert!(
+            [handed, dead]
+                .iter()
+                .any(|answer| *line == format!("{what}: {answer}")),
+            "natively: {native}"
+        );
+    }
+    assert_eq!(lines[2], waiter, "natively");
+    // Natively the owner can also unlock and die before it records that it
+    // did, so the hand-over can come with "not reached". It never fails.
+    let unlocked_unrecorded =
+        format!("{group_waiter}: 0, word waiter|WAITERS\n{group_unlock}: not reached");
+    let group = lines[3..].join("\n");
+    assert!(
+        [&unlocked_first, &killed_first, &unlocked_unrecorded].contains(&&group),
+        "natively: {native}"
+    );
+    let guest = guest.to_str().expect("guest path should be UTF-8");
+    for (schedule, first, group) in [
+        (&[][..], handed, &unlocked_first),
+        (&["--chaos", "--sched-seed=1"][..], dead, &killed_first),
+        (&["--chaos", "--sched-seed=2"][..], dead, &killed_first),
+    ] {
+        assert_eq!(
+            futex_pi_guest_at_bitwise_parity(guest, schedule),
+            format!("{raw_exit}: {first}\n{killed}: {dead}\n{waiter}\n{group}\n"),
+            "{schedule:?}"
+        );
+    }
+}
+
+/// A bounded queue under a PTHREAD_PRIO_INHERIT mutex and two condition
+/// variables, whose threads yield while holding the mutex: glibc's condition
+/// variables wait on their own words and take the contended mutex again with
+/// FUTEX_LOCK_PI, never the requeue-PI pair. Every item is consumed once, as
+/// natively, under the default schedule and a chaos seed.
+#[test]
+fn a_pi_mutex_condition_variable_queue_matches_linux() {
+    let guest = futex_c_guest(&FUTEX_PI_CONDVAR_GUEST, "futex_pi_condvar");
+    let expected = "producers 2, consumers 2: items 300, sum as produced, queue left 0\n";
+    assert_eq!(native_stdout(guest), expected, "natively");
+    let guest = guest.to_str().expect("guest path should be UTF-8");
+    for schedule in [&[][..], &["--chaos", "--sched-seed=3"]] {
+        assert_eq!(
+            futex_pi_guest_at_bitwise_parity(guest, schedule),
+            expected,
+            "{schedule:?}"
+        );
+    }
 }
 
 /// FUTEX_REQUEUE, FUTEX_CMP_REQUEUE and FUTEX_WAKE_OP key and access their

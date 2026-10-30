@@ -3274,6 +3274,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (a replay stuck off its schedule lets go of it),
     // scheduler::test::a_released_schedule_drops_its_callback_checkpoints and
     // preemptions::callback_history::tests::a_released_replay_drops_the_remaining_checkpoints:
+    // And the eighteen priority-inheritance futex units (nine
+    // syscalls::pi_futex, eight scheduler PI-state, one futex deadline): 2713.
+    // And six more scheduler PI units (the deadlock walk's depth, a word
+    // naming an owner whose exit was granted, the hand-over at that grant, a
+    // signal-woken waiter's place and its hand-over, a SIGKILLed owner): 2719.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -4603,6 +4608,13 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (seeds 1, 2 and 3), so each fits the 57-second wall bound: 656 + 4 = 660.
     // And a_replay_stuck_off_its_schedule_lets_every_thread_run: 623, listed.
     // And a_replay_past_its_schedule_ends_slices_as_a_run_without_one_does: 624.
+    // futex_lock_pi_is_refused_by_name becomes futex_requeue_pi_is_refused_by_name,
+    // and futex_pi_lock_commands_match_linux,
+    // a_contended_pi_mutex_keeps_mutual_exclusion_at_bitwise_parity,
+    // a_robust_pi_mutex_reports_its_owners_death_as_linux and
+    // a_pi_mutex_condition_variable_queue_matches_linux join them: 641.
+    // And a_pi_owner_that_exits_or_is_killed_is_dead_from_its_committed_end and
+    // futex_lock_pi_in_a_nested_pid_namespace_is_refused_by_name: 643.
     ("test.cli", 654),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
@@ -5151,6 +5163,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 575 + 4 = 579.
     // And a_replay_stuck_off_its_schedule_lets_every_thread_run: 542, listed.
     // And the same replay-continuation slice test: 543.
+    // The same renamed requeue-PI refusal test and four PI futex tests: 560.
+    // And the same owner-end race and nested-PID refusal tests: 562.
     ("test.cli_on_host", 573),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
@@ -5647,6 +5661,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same backstop-coincidence unit: 2744, listed.
     // And the same four replayed-slice-end units: 2748, listed.
     // And the same three replay-release units: 2685, listed.
+    // And the same eighteen priority-inheritance futex units: 2713.
+    // And the same six scheduler PI units: 2719.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
