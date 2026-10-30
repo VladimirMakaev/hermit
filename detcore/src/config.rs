@@ -147,6 +147,8 @@ mod tests {
         // `Found::unverified_pairs` (#4908), and the digest now covers the
         // StoreExclusive request's payload types.
         (19, "2890e2999391e67d", "846052997d97693f"),
+        // Adds `GlobalRequest::ReplayCallNeverReturns` and `GlobalResponse::ReplayCallNeverReturns` (#4701).
+        (17, "33adba6c7b5f0619", "846052997d97693f"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
