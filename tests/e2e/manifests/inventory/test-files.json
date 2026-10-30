@@ -2491,6 +2491,12 @@
       "why": "tests/c/sabre_exit_group_parked.c is owned by hermit-cli/tests/hermit_modes.rs: The Rust integration test compiles this SaBRe-only lifecycle guest, supplies the reviewed loader, enforces strict verification, and owns bounded process-group cleanup; a generic manifest cell cannot express that backend-specific setup and timeout contract."
     },
     {
+      "disposition": "guest-fixture",
+      "path": "tests/c/sanitizer_leak.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/sanitizer_leak.c is owned by hermit-cli/tests/cli.rs: Guest built with AddressSanitizer that either loses an allocation and exits 0, so only LeakSanitizer's exit-time check can fail it, or reads past an allocation, which AddressSanitizer reports with its exitcode setting, so the integration tests can compare a native run with a hermit run: the user's sanitizer options reach the guest, leak checking is turned off, and hermit says so. Driven only by those tests, which compile it with -fsanitize=address, so it is a test-owned guest fixture rather than a manifest-discovered CI program."
+    },
+    {
       "disposition": "manifest-test",
       "path": "tests/c/sched_getaffinity_identity.c",
       "runner": "target/debug/test-harness via tests/e2e/manifests/c-programs.yaml (explicit mode selection; ci=false)",

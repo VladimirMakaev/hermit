@@ -15970,6 +15970,250 @@ fn guest_env_difference_rejects_a_dropped_explicit_variable() {
     assert!(difference.contains("KVM_M3C=passed"), "{difference}");
 }
 
+/// The start of the line hermit prints, once per command, when turning off the
+/// sanitizers' leak check turns a guest's check off.
+const SANITIZER_WARNING: &str = "hermit: WARNING: leak checking is off in this guest: hermit \
+                                appends detect_leaks=0 to ASAN_OPTIONS and LSAN_OPTIONS";
+
+/// `tests/c/sanitizer_leak.c` built with AddressSanitizer by the first of `cc`
+/// and `clang` that can, or `None`, said on stderr, when neither can here.
+/// Setting `HERMIT_REQUIRE_ASAN` turns that skip into a failure, so a job that
+/// means to cover sanitizer builds cannot silently stop covering them.
+fn asan_guest() -> Option<&'static Path> {
+    static GUEST: OnceLock<Option<PathBuf>> = OnceLock::new();
+    let guest = GUEST
+        .get_or_init(|| {
+            let repository = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .parent()
+                .expect("hermit-cli should be inside the repository");
+            let build_root = process_build_root("sanitizer-leak");
+            fs::create_dir_all(&build_root).expect("failed to create the ASan guest directory");
+            let guest = build_root.join("sanitizer_leak");
+            let built = ["cc", "clang"].into_iter().any(|compiler| {
+                Command::new(compiler)
+                    .args([
+                        "-fsanitize=address",
+                        "-g",
+                        "-O0",
+                        "-Wall",
+                        "-Wextra",
+                        "-Werror",
+                    ])
+                    .arg(repository.join("tests/c/sanitizer_leak.c"))
+                    .arg("-o")
+                    .arg(&guest)
+                    .output()
+                    .is_ok_and(|output| output.status.success())
+            });
+            built.then_some(guest)
+        })
+        .as_deref();
+    if guest.is_none() {
+        assert!(
+            std::env::var_os("HERMIT_REQUIRE_ASAN").is_none(),
+            "HERMIT_REQUIRE_ASAN is set, but neither cc nor clang can build an \
+             AddressSanitizer program here"
+        );
+        eprintln!("skipping: neither cc nor clang can build an AddressSanitizer program here");
+    }
+    guest
+}
+
+/// The guest run natively, with `ASAN_OPTIONS` set to `options` when given and
+/// nothing else in its environment but `LSAN_OPTIONS`, which keeps LeakSanitizer
+/// from taking a stale copy of the lost pointer on the stack or in a register
+/// for a reference to it, as compiler-rt's own leak tests do.
+fn native_asan_run(guest: &Path, mode: &str, options: Option<&str>) -> Output {
+    let mut command = Command::new(guest);
+    command
+        .arg(mode)
+        .env_clear()
+        .env("LSAN_OPTIONS", "use_stacks=0:use_registers=0");
+    if let Some(options) = options {
+        command.env("ASAN_OPTIONS", options);
+    }
+    command
+        .output()
+        .unwrap_or_else(|error| panic!("failed to run {} natively: {error}", guest.display()))
+}
+
+/// Sanitizer options given to hermit reach the guest with every setting but
+/// the leak check, which hermit turns off after them, and hermit says so once.
+#[test]
+fn sanitizer_options_keep_every_setting_but_the_leak_check() {
+    let output = hermit(&[
+        "run",
+        "--base-env=empty",
+        "--env=ASAN_OPTIONS=abort_on_error=1:symbolize=0",
+        "--env=LSAN_OPTIONS=report_objects=1",
+        "--",
+        "/usr/bin/env",
+    ]);
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "hermit run failed:\n{stderr}");
+    let mut environment: Vec<&str> = stdout.lines().filter(|line| !line.is_empty()).collect();
+    environment.sort_unstable();
+    assert_eq!(
+        environment,
+        [
+            "ASAN_OPTIONS=abort_on_error=1:symbolize=0:detect_leaks=0",
+            "LSAN_OPTIONS=report_objects=1:detect_leaks=0",
+        ],
+        "the guest's sanitizer options are not the user's followed by detect_leaks=0"
+    );
+    assert_eq!(
+        stderr.matches(SANITIZER_WARNING).count(),
+        1,
+        "hermit did not say once that leak checking is off:\n{stderr}"
+    );
+}
+
+/// The warning is said once per command: `hermit run --verify` says it once
+/// for its two runs, and `hermit record start` says it too.
+#[test]
+fn the_sanitizer_warning_is_said_once_per_command() {
+    let data_dir = tempfile::tempdir().expect("failed to create a data directory");
+    for args in [
+        [
+            "run",
+            "--verify",
+            "--base-env=empty",
+            "--env=ASAN_OPTIONS=exitcode=42",
+            "--",
+            "/bin/true",
+        ],
+        [
+            "record",
+            "start",
+            "--base-env=empty",
+            "--env=ASAN_OPTIONS=exitcode=42",
+            "--",
+            "/bin/true",
+        ],
+    ] {
+        let output = hermit_test::hermit_output(
+            &format!("hermit {args:?}"),
+            hermit_command(&args).env("HERMIT_DATA_DIR", data_dir.path()),
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "hermit {args:?} failed:\n{stderr}");
+        assert_eq!(
+            stderr.matches(SANITIZER_WARNING).count(),
+            1,
+            "hermit {args:?} did not say once that leak checking is off:\n{stderr}"
+        );
+    }
+}
+
+/// A guest that is not a sanitizer build gets no warning unless sanitizer
+/// options are given with `--env`: hermit's own `detect_leaks=0` turns nothing
+/// off for it. Options it only inherits from hermit's environment do not count,
+/// so a shell that exports them does not warn on every run.
+#[test]
+fn a_run_without_sanitizers_gets_no_sanitizer_warning() {
+    for base_env in ["--base-env=minimal", "--base-env=host"] {
+        let output = hermit_test::hermit_output(
+            "hermit run",
+            hermit_command(&["run", base_env, "--", "/bin/true"])
+                .env("ASAN_OPTIONS", "halt_on_error=0")
+                .env("LSAN_OPTIONS", "report_objects=1"),
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            output.status.success(),
+            "hermit run {base_env} failed:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("leak checking is off"),
+            "a run without sanitizers ({base_env}) got the sanitizer warning:\n{stderr}"
+        );
+    }
+}
+
+/// An AddressSanitizer error under hermit ends the guest with the exit code
+/// the user's `ASAN_OPTIONS` gives it, as natively. Before, hermit replaced the
+/// whole variable with `detect_leaks=0`, and the guest exited 1.
+#[test]
+fn an_asan_guest_under_hermit_keeps_the_users_options_as_natively() {
+    let Some(guest) = asan_guest() else {
+        return;
+    };
+    let options = "exitcode=42:symbolize=0";
+    let native = native_asan_run(guest, "overflow", Some(options));
+    let env = format!("--env=ASAN_OPTIONS={options}");
+    let guest_arg = guest.to_str().expect("the guest path is UTF-8");
+    let output = hermit(&[
+        "run",
+        "--base-env=minimal",
+        &env,
+        "--",
+        guest_arg,
+        "overflow",
+    ]);
+    let native_stderr = String::from_utf8_lossy(&native.stderr);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(
+        native.status.code(),
+        Some(42),
+        "native run:\n{native_stderr}"
+    );
+    assert_eq!(
+        output.status.code(),
+        native.status.code(),
+        "hermit's guest did not exit with the user's exitcode:\n{stderr}"
+    );
+    for (run, stderr) in [("native", &native_stderr), ("hermit", &stderr)] {
+        assert!(
+            stderr.contains("ERROR: AddressSanitizer: heap-buffer-overflow"),
+            "the {run} run has no AddressSanitizer report:\n{stderr}"
+        );
+    }
+    assert_eq!(
+        stderr.matches(SANITIZER_WARNING).count(),
+        1,
+        "hermit did not say once that leak checking is off:\n{stderr}"
+    );
+}
+
+/// A leak LeakSanitizer reports natively goes unreported under hermit, which
+/// cannot run that check, and hermit says so even though no sanitizer option
+/// was given: the guest is an AddressSanitizer build.
+#[test]
+fn a_leak_reported_natively_is_named_by_the_warning_under_hermit() {
+    let Some(guest) = asan_guest() else {
+        return;
+    };
+    let native = native_asan_run(guest, "leak", None);
+    let native_stderr = String::from_utf8_lossy(&native.stderr);
+    assert_eq!(
+        native.status.code(),
+        Some(1),
+        "native run:\n{native_stderr}"
+    );
+    assert!(
+        native_stderr.contains("ERROR: LeakSanitizer: detected memory leaks"),
+        "the native run did not report its leak:\n{native_stderr}"
+    );
+    let guest_arg = guest.to_str().expect("the guest path is UTF-8");
+    let output = hermit(&["run", "--base-env=minimal", "--", guest_arg, "leak"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "hermit run failed:\n{stderr}");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "leaked 224 bytes\n"
+    );
+    assert!(
+        !stderr.contains("ERROR: LeakSanitizer"),
+        "LeakSanitizer ran under hermit:\n{stderr}"
+    );
+    assert_eq!(
+        stderr.matches(SANITIZER_WARNING).count(),
+        1,
+        "hermit did not say once that leak checking is off:\n{stderr}"
+    );
+}
+
 #[test]
 fn run_kvm_propagates_explicit_environment() {
     if !Path::new("/dev/kvm").exists() {

@@ -69,6 +69,7 @@ use reverie::process::ExitStatus;
 use reverie::process::Mount;
 use reverie::process::MountFlags;
 use reverie::process::Output;
+use reverie::process::sanitizer;
 
 use super::container::GUEST_DEV_SHM;
 use super::container::GUEST_NAMESPACES;
@@ -1987,20 +1988,28 @@ pub struct RunOpts {
     /// allows through all the environment variables in hermit's own environment.
     /// "Minimal" provides a minimal deterministic environment that sets PATH, HOSTNAME, HOME, USER
     /// and LOGNAME.
+    /// Whatever the base, an instrumented run (any but `--namespace-only`) also turns off the
+    /// sanitizers' leak check in ASAN_OPTIONS and LSAN_OPTIONS; see `--env`.
     ///
     /// "Minimal" sets exactly HOSTNAME=hermetic-container.local,
-    /// PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, HOME=/root, USER=root
-    /// and LOGNAME=root, the same on every host, and like every instrumented guest the guest also
-    /// gets ASAN_OPTIONS=detect_leaks=0 and LSAN_OPTIONS=detect_leaks=0. HOME, USER and LOGNAME
-    /// name the guest's own identity: the guest's getuid() is 0, which its user database names
-    /// root with home directory /root. That directory is usually the host's, which the guest
-    /// cannot write; give a writable one with `--env HOME=/tmp`, and replace any of these values
-    /// with `--env NAME=VALUE`.
+    /// PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin, HOME=/root, USER=root and
+    /// LOGNAME=root, the same on every host. HOME, USER and LOGNAME name the guest's own identity:
+    /// the guest's getuid() is 0, which its user database names root with home directory /root.
+    /// That directory is usually the host's, which the guest cannot write; give a writable one with
+    /// `--env HOME=/tmp`, and replace any of these values with `--env NAME=VALUE`.
     #[clap(long, default_value = "host", value_name = "str")]
     base_env: BaseEnv,
 
     /// Additionally append one or more environment variables to the container environment. If a
     /// name is provided without a value, pass that variable through from the host.
+    ///
+    /// ASAN_OPTIONS and LSAN_OPTIONS (and UBSAN_OPTIONS when set) keep every setting given here
+    /// or by the base environment, with detect_leaks=0 appended unless their last setting
+    /// already turns the leak check off: LeakSanitizer stops every thread with ptrace to check
+    /// for leaks at exit, which cannot work under hermit. When that turns a check off, for a
+    /// program built with AddressSanitizer or LeakSanitizer or when this option names one of
+    /// those variables, hermit warns once on stderr. Under `--namespace-only` they are left as
+    /// given.
     #[clap(short = 'e', long, value_parser = parse_assignment, value_name="name[=val]")]
     env: Vec<(String, Option<String>)>,
 
@@ -2157,7 +2166,7 @@ fn apply_image_base_environment(command: &mut Command, image_env: &[(String, Str
     command.envs(image_env.iter().map(|(key, value)| (key, value)));
 }
 
-fn apply_base_and_explicit_environment(
+pub(super) fn apply_base_and_explicit_environment(
     command: &mut Command,
     base_env: &BaseEnv,
     env: &[(String, Option<String>)],
@@ -2197,19 +2206,104 @@ fn apply_base_and_explicit_environment(
     Ok(())
 }
 
-fn disable_sanitizer_leak_detection(command: &mut Command) {
-    command.env("ASAN_OPTIONS", "detect_leaks=0");
-    command.env("LSAN_OPTIONS", "detect_leaks=0");
+/// Whether `program` is built with LeakSanitizer: with AddressSanitizer, which
+/// includes it on x86-64 Linux, or with LeakSanitizer alone. Every such build
+/// lists its runtime's entry point, `__asan_init` or `__lsan_init`, among its
+/// dynamic symbols, defined by a static runtime or imported from a shared one.
+/// Only the ELF header, the section headers, the dynamic symbol table and its
+/// string table are read, each at once; anything else, a script or a 32-bit
+/// program included, is not such a build.
+fn is_leak_sanitizer_build(program: &Path) -> bool {
+    use object::read::elf::FileHeader;
+    use object::read::elf::SectionHeader;
+    use object::read::elf::Sym;
+    let Ok(file) = fs::File::open(program) else {
+        return false;
+    };
+    let data = object::ReadCache::new(file);
+    let has_entry_point = || -> object::read::Result<bool> {
+        let header = object::elf::FileHeader64::<object::Endianness>::parse(&data)?;
+        let endian = header.endian()?;
+        let sections = header.sections(endian, &data)?;
+        let Some(dynsym) = sections
+            .iter()
+            .find(|section| section.sh_type(endian) == object::elf::SHT_DYNSYM)
+        else {
+            return Ok(false);
+        };
+        let symbols: &[object::elf::Sym64<object::Endianness>] =
+            dynsym.data_as_array(endian, &data)?;
+        let strings = sections
+            .section(object::SectionIndex(dynsym.sh_link(endian) as usize))?
+            .data(endian, &data)?;
+        let strings = object::read::StringTable::new(strings, 0, strings.len() as u64);
+        Ok(symbols.iter().any(|symbol| {
+            matches!(
+                symbol.name(endian, strings),
+                Ok(b"__asan_init" | b"__lsan_init")
+            )
+        }))
+    };
+    has_entry_point().unwrap_or(false)
 }
 
-pub(super) fn apply_base_environment(
-    command: &mut Command,
-    base_env: &BaseEnv,
+/// The warning for a run whose guest would have checked for leaks at exit but
+/// for [`Command::turn_off_leak_check`], which every instrumented run applies,
+/// or `None`.
+///
+/// `values` are the guest environment's own sanitizer options, in
+/// [`sanitizer::SANITIZER_OPTIONS`] order. The guest would have checked when
+/// those options leave the check on (it is on by default) and either the user
+/// named one of those variables with `--env` (`asked`) or `program` is a
+/// LeakSanitizer build. Options inherited from the host environment alone do
+/// not count, so a shell that exports them does not warn on every run; and the
+/// program is read only when the answer depends on it.
+///
+/// The check cannot run under hermit. LeakSanitizer runs it at exit from a
+/// helper thread it clones with `CLONE_UNTRACED`; under hermit that clone
+/// never returns, so the run would hang at the guest's exit (measured with
+/// ptrace). A helper that did run would find every thread already traced and
+/// get `EPERM` from `PTRACE_ATTACH`, which LeakSanitizer reports as a fatal
+/// error.
+fn forced_sanitizer_warning(
+    values: [Option<&OsStr>; 3],
+    asked: bool,
+    program: Option<&Path>,
+) -> Option<String> {
+    let checked = sanitizer::leak_check_left_on(values)
+        && (asked || program.is_some_and(is_leak_sanitizer_build));
+    checked.then(|| {
+        format!(
+            "hermit: WARNING: leak checking is off in this guest: hermit appends {} to \
+             ASAN_OPTIONS and LSAN_OPTIONS (and to UBSAN_OPTIONS when set), keeping every other \
+             setting, because LeakSanitizer stops every thread with ptrace at exit, which \
+             cannot work under hermit. A run without a leak report here does not show that \
+             the program does not leak.",
+            sanitizer::LEAK_CHECK_OFF
+        )
+    })
+}
+
+/// Prints [`forced_sanitizer_warning`] for a guest whose own environment (before
+/// [`Command::turn_off_leak_check`]) is `command`'s, whose `--env` options are
+/// `env`, and whose program is `host_program` on the host, when that is known.
+pub(super) fn warn_of_forced_sanitizer_options(
+    command: &Command,
     env: &[(String, Option<String>)],
-) -> Result<(), Error> {
-    apply_base_and_explicit_environment(command, base_env, env)?;
-    disable_sanitizer_leak_detection(command);
-    Ok(())
+    host_program: impl FnOnce() -> Option<PathBuf>,
+) {
+    let values = sanitizer::SANITIZER_OPTIONS.map(|name| command.get_env(name));
+    let values = values.each_ref().map(|value| value.as_deref());
+    if !sanitizer::leak_check_left_on(values) {
+        return;
+    }
+    let asked = env
+        .iter()
+        .any(|(name, _)| sanitizer::SANITIZER_OPTIONS.contains(&name.as_str()));
+    let program = if asked { None } else { host_program() };
+    if let Some(warning) = forced_sanitizer_warning(values, asked, program.as_deref()) {
+        crate::tracing::diagnostic_eprintln!("{warning}");
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, Parser, Eq, PartialEq)]
@@ -3913,12 +4007,22 @@ fn non_e9patch_validation_preserves_parent_component_paths() {
 fn guest_env_disables_sanitizer_leak_detection_on_every_backend() {
     let asan = OsStr::new("ASAN_OPTIONS");
     let lsan = OsStr::new("LSAN_OPTIONS");
+    let ubsan = OsStr::new("UBSAN_OPTIONS");
     let expected = OsStr::new("detect_leaks=0").to_os_string();
+    let merged = OsStr::new("abort_on_error=1:detect_leaks=0").to_os_string();
 
     // The two variables are present with identical values regardless of the
     // selected backend, so no backend-specific spawn hook is required for parity.
     for backend in ["ptrace", "kvm", "sabre", "dbt"] {
-        let ro = run_opts_for(&["hermit", "--backend", backend, "run", "/bin/echo", "hi"]);
+        let ro = run_opts_for(&[
+            "hermit",
+            "--backend",
+            backend,
+            "run",
+            "--base-env=minimal",
+            "/bin/echo",
+            "hi",
+        ]);
         let envs = ro.guest_command().unwrap().get_captured_envs();
         assert_eq!(
             envs.get(asan),
@@ -3930,7 +4034,85 @@ fn guest_env_disables_sanitizer_leak_detection_on_every_backend() {
             Some(&expected),
             "LSAN_OPTIONS not set for backend {backend}"
         );
+        assert_eq!(
+            envs.get(ubsan),
+            None,
+            "UBSAN_OPTIONS added for backend {backend}"
+        );
+        // A user's options are kept, with the leak check turned off after them.
+        let ro = run_opts_for(&[
+            "hermit",
+            "--backend",
+            backend,
+            "run",
+            "--base-env=minimal",
+            "--env=ASAN_OPTIONS=abort_on_error=1",
+            "--env=UBSAN_OPTIONS=detect_leaks=1",
+            "/bin/echo",
+            "hi",
+        ]);
+        let envs = ro.guest_command().unwrap().get_captured_envs();
+        assert_eq!(
+            envs.get(asan),
+            Some(&merged),
+            "ASAN_OPTIONS not merged for backend {backend}"
+        );
+        assert_eq!(
+            envs.get(lsan),
+            Some(&expected),
+            "LSAN_OPTIONS not set for backend {backend}"
+        );
+        assert_eq!(
+            envs.get(ubsan),
+            Some(&OsStr::new("detect_leaks=1:detect_leaks=0").to_os_string()),
+            "UBSAN_OPTIONS not merged for backend {backend}"
+        );
     }
+}
+
+#[test]
+fn the_sanitizer_warning_is_for_a_leak_check_turned_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("script");
+    fs::write(&script, b"#!/bin/sh\n").unwrap();
+    let warning = |values: [Option<&str>; 3], asked: bool, program: Option<&Path>| {
+        forced_sanitizer_warning(values.map(|value| value.map(OsStr::new)), asked, program)
+    };
+    assert_eq!(warning([None; 3], false, None), None, "no sanitizers");
+    assert_eq!(
+        warning([None; 3], false, Some(&script)),
+        None,
+        "not a sanitizer build"
+    );
+    assert_eq!(
+        warning(
+            [Some("detect_leaks=0"), Some("detect_leaks=0"), None],
+            true,
+            None
+        ),
+        None,
+        "the user's own options already turn the check off"
+    );
+    let warning = warning([Some("exitcode=42"), None, None], true, None)
+        .expect("no warning for options given with --env");
+    assert!(
+        warning.starts_with("hermit: WARNING: leak checking is off"),
+        "{warning}"
+    );
+    for name in sanitizer::SANITIZER_OPTIONS {
+        assert!(warning.contains(name), "{warning}");
+    }
+    assert!(warning.contains(sanitizer::LEAK_CHECK_OFF), "{warning}");
+}
+
+#[test]
+fn only_a_leak_sanitizer_build_is_taken_for_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let script = dir.path().join("script");
+    fs::write(&script, b"#!/bin/sh\necho __asan_init __lsan_init\n").unwrap();
+    assert!(!is_leak_sanitizer_build(&script));
+    assert!(!is_leak_sanitizer_build(&dir.path().join("missing")));
+    assert!(!is_leak_sanitizer_build(Path::new("/bin/sh")));
 }
 
 #[test]
@@ -3945,7 +4127,7 @@ fn namespace_only_guest_command_applies_process_options_once() {
         "first",
         "second",
     ]);
-    let command = ro.namespace_only_guest_command().unwrap();
+    let command = ro.guest_command_as_given().unwrap();
 
     assert_eq!(command.get_program(), OsStr::new("/bin/echo"));
     assert_eq!(
@@ -3994,7 +4176,7 @@ fn namespace_only_guest_command_applies_process_options_once() {
 #[test]
 fn namespace_only_guest_command_preserves_sanitizer_environment() {
     let ro = RunOpts::parse_from(["fakehermit", "--namespace-only", "/bin/true"]);
-    let command = ro.namespace_only_guest_command().unwrap();
+    let command = ro.guest_command_as_given().unwrap();
     let sanitizer_overrides: Vec<_> = command
         .get_envs()
         .filter(|(name, _)| {
@@ -4012,7 +4194,7 @@ fn namespace_only_guest_command_preserves_sanitizer_environment() {
     assert!(std::env::var_os(&missing).is_none());
     let option = format!("--env={missing}");
     let ro = RunOpts::parse_from(["fakehermit", "--namespace-only", &option, "/bin/true"]);
-    let error = match ro.namespace_only_guest_command() {
+    let error = match ro.guest_command_as_given() {
         Ok(_) => panic!("namespace-only accepted a missing pass-through environment variable"),
         Err(error) => error.to_string(),
     };
@@ -9816,6 +9998,9 @@ impl RunOpts {
         // without the feature refuses those runs the way a feature build does;
         // and before stdin is read.
         self.refuse_liteinst_without_the_feature()?;
+        // Before stdin is read and the guest starts. A refusal further down,
+        // of an option combination, can still follow it.
+        self.warn_of_forced_sanitizer_options();
         let verification = self.verify || self.verify_run.is_some();
         let dbt_verification_stdin = if verification && self.selected_backend() == Backend::Dbt {
             // DBT streams this reservation during live or saved-run execution.
@@ -12370,7 +12555,7 @@ impl RunOpts {
             identity_sources: _identity_sources,
         } = self.mounts(tmpfs.path())?;
 
-        let mut command = self.namespace_only_guest_command()?;
+        let mut command = self.guest_command_as_given()?;
         // `--namespace-only` does NOT go through `with_container`: it unshares
         // the guest's PID and IPC namespaces and execs the guest directly, so the guest process
         // ITSELF becomes PID 1 of the new namespace and inherits the same
@@ -13697,14 +13882,29 @@ impl RunOpts {
         Ok(())
     }
 
+    /// The command of an instrumented run's guest: [`Self::guest_command_as_given`]
+    /// with the sanitizers' leak check turned off.
     fn guest_command(&self) -> Result<Command, Error> {
-        self.build_guest_command(true)
+        let mut command = self.guest_command_as_given()?;
+        command.turn_off_leak_check();
+        Ok(command)
     }
 
-    fn namespace_only_guest_command(&self) -> Result<Command, Error> {
-        // Namespace-only bypasses instrumentation, so preserve the caller's
-        // sanitizer environment instead of installing the leak-disable overrides.
-        self.build_guest_command(false)
+    /// Prints [`forced_sanitizer_warning`] for this run's guest, if any, once
+    /// per command: `--verify` runs its two runs in this process. Not for
+    /// `--namespace-only`, whose guest keeps its options.
+    fn warn_of_forced_sanitizer_options(&self) {
+        if self.namespace_only {
+            return;
+        }
+        let Ok(command) = self.guest_command_as_given() else {
+            return;
+        };
+        warn_of_forced_sanitizer_options(&command, &self.env, || {
+            self.resolve_guest_and_host_program()
+                .ok()
+                .map(|(_, host)| host)
+        });
     }
 
     /// The guest's working directory as `--workdir` names it, if given
@@ -13713,10 +13913,10 @@ impl RunOpts {
         self.workdir.as_deref().map(Path::new)
     }
 
-    fn build_guest_command(
-        &self,
-        disable_sanitizer_leak_detection_for_guest: bool,
-    ) -> Result<Command, Error> {
+    /// The guest's command, with the environment the user's options give it,
+    /// which is the one a `--namespace-only` guest gets: [`Self::guest_command`]
+    /// adds what an instrumented run forces.
+    fn guest_command_as_given(&self) -> Result<Command, Error> {
         let program = self.e9patch_program.as_ref().unwrap_or(&self.program);
         let mut command = Command::new(program);
         command.args(&self.args);
@@ -13754,10 +13954,6 @@ impl RunOpts {
         }
 
         apply_base_and_explicit_environment(&mut command, &self.base_env, &self.env)?;
-        if disable_sanitizer_leak_detection_for_guest {
-            disable_sanitizer_leak_detection(&mut command);
-        }
-
         Ok(command)
     }
 
