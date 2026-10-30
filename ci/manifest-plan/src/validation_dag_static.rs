@@ -3367,6 +3367,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // syscalls::implicit_bind::tests units for deterministic implicit-bind
     // ports: 2702, listed.
     // And resumed_kernel_wait_result_maps_only_erestartsys: 2683.
+    // And scheduler::test::{a_finished_poll_beside_runnable_work_is_readmitted_at_the_logged_turn,
+    // replay_ends_a_stalled_wait_once_a_thread_is_queued} (record readmits every
+    // finished background call at once): 2684.
     ("test.detcore_unit", 2738),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
@@ -3967,6 +3970,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And record_replay_shares_memory_between_mappings_of_one_memfd: 226.
     // And record_replay_gives_the_guest_a_private_dev_shm: 222.
     // And record_replay_gives_the_guest_a_private_ipc_namespace: 223.
+    // And record_poller_beside_a_short_sleeper: 221.
     ("test.record_replay", 226),
     // Seven proc-fallback, warning, and record/replay tests retain all 80
     // selected identities under the unchanged shipped CLI skip filters.
@@ -5887,6 +5891,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three replayer units: 2703.
     // And the same twenty implicit-bind port units: 2702, listed.
     // And resumed_kernel_wait_result_maps_only_erestartsys: 2683.
+    // And the same two background-readmission units: 2684.
     ("test.detcore_unit_on_host", 2738),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
