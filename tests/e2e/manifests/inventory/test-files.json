@@ -1225,6 +1225,12 @@
       "why": "tests/c/liteinst_inert_runtime.c is owned by hermit-cli/tests/cli.rs: The Rust CLI integration test compiles this export-shaped but constructor-free DSO, selects the LiteInst backend, injects it as the in-guest Detcore runtime override, and asserts rejection before the guest is dispatched; it remains a guest fixture because a generic manifest cannot express that build, injection, and fail-closed diagnostic contract."
     },
     {
+      "disposition": "guest-fixture",
+      "path": "tests/c/lost_wakeup_deadlock.c",
+      "runner": "hermit-cli/tests/cli.rs",
+      "why": "tests/c/lost_wakeup_deadlock.c is owned by hermit-cli/tests/cli.rs: a signaller that signals without the mutex loses the waiter's wakeup only when the scheduler preempts the waiter in a short window, so a chaos run deadlocks at one round. The integration tests record that run and check that a schedule replay and a preemption replay of its record deadlock at the same round (exit 121, the same stdout), which a generic manifest cell cannot express."
+    },
+    {
       "disposition": "manifest-test",
       "path": "tests/c/lseek_positioning.c",
       "runner": "target/debug/test-harness via tests/e2e/manifests/c-programs.yaml (explicit mode selection; ci=false)",
