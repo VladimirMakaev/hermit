@@ -854,7 +854,16 @@ impl RecordVersion {
 // instead of making a separate anonymous copy. An older reader would fail to
 // decode the event, and an older recording would replay those mappings as
 // separate copies, so it is refused here.
-pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x189);
+// 0x189 -> 0x18a (stacked after the frontier's earlier format changes; on its own 0x186 -> 0x188; provisional: HIGHEST_SHIPPED + 1 at this base is 0x187,
+// which another open change already holds; the lander re-checks
+// HIGHEST_SHIPPED + 1 at land): every /proc status file Detcore renders now
+// shows TracerPid 0, by any path to the task, where it showed 1 on a task's
+// own paths (/proc/self, /proc/thread-self). Detcore renders the status file
+// over the recorded procfs bytes during recording and replay, so an older
+// stream replayed under the new rendering would show the guest 0 where it read
+// 1, and a guest that branches on the value, as a death test that looks for a
+// debugger does, would diverge. It is refused here.
+pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x18a);
 
 /// The highest RECORD_VERSION this project has ever shipped.
 ///
@@ -879,7 +888,7 @@ pub(crate) const RECORD_VERSION: RecordVersion = RecordVersion(0x189);
 /// the version exists to prevent.
 ///
 /// RAISE THIS IN THE SAME COMMIT THAT RAISES RECORD_VERSION.
-const HIGHEST_SHIPPED_RECORD_VERSION: u32 = 0x189;
+const HIGHEST_SHIPPED_RECORD_VERSION: u32 = 0x18a;
 
 const _: () = assert!(
     RECORD_VERSION.0 >= HIGHEST_SHIPPED_RECORD_VERSION,

@@ -245,6 +245,8 @@ static PROC_CPU_TIMES_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static CPUID_TABLE_DUMP_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static DATAGRAM_READ_SHUTDOWN_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static SELECT_TIMEOUT_NORMALIZATION_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static PROC_STATUS_TRACER_PID_GUEST: OnceLock<PathBuf> = OnceLock::new();
+static DEATH_TEST_TRACER_CHECK_GUEST: OnceLock<PathBuf> = OnceLock::new();
 static TOOL_OUTPUT_PROTECTION_GUEST: OnceLock<PathBuf> = OnceLock::new();
 #[cfg(feature = "dbt")]
 static CLOCK_RLIMIT_PARITY_GUEST: OnceLock<PathBuf> = OnceLock::new();
@@ -13134,7 +13136,7 @@ fn assert_pid_lifecycle_transcript(output: &str) {
                 "child grandchild={grandchild} waited={grandchild} exit=5\n",
                 "root child={child} waited={child} exit=6\n",
                 "exec-child pid={exec} ppid=3 tid={exec}\n",
-                "exec-proc stat={exec}/3 status={exec}/3 tracer=1\n",
+                "exec-proc stat={exec}/3 status={exec}/3 tracer=0\n",
                 "root exec={exec} waited={exec} exit=8\n",
                 "waitid-child pid={waitid} ppid=3 tid={waitid}\n",
                 "root waitid={waitid} reported={waitid} exit=9\n",
@@ -13162,7 +13164,7 @@ fn assert_pid_lifecycle_oracle_rejects_broken_relationships() {
         "child grandchild=7 waited=7 exit=5\n",
         "root child=4 waited=4 exit=6\n",
         "exec-child pid=9 ppid=3 tid=9\n",
-        "exec-proc stat=9/3 status=9/3 tracer=1\n",
+        "exec-proc stat=9/3 status=9/3 tracer=0\n",
         "root exec=9 waited=9 exit=8\n",
         "waitid-child pid=12 ppid=3 tid=12\n",
         "root waitid=12 reported=12 exit=9\n",
@@ -31333,6 +31335,60 @@ fn a_datagram_receive_ends_when_its_read_side_is_shut_down() {
     }
 }
 
+/// A guest reads `TracerPid: 0` on every procfs path to a task's status, as a
+/// program run outside a debugger does natively (`task_state`,
+/// `fs/proc/array.c`). Detcore showed 1 on the task's own paths
+/// (`/proc/self`, `/proc/thread-self`, a second thread's, a forked child's)
+/// and 0 by number, so the same task had two answers and the own-path one
+/// told the program a debugger was attached. The guest's native output is the
+/// oracle (`tests/c/proc_status_tracer_pid.c`).
+#[test]
+fn procfs_status_shows_no_tracer_on_any_path() {
+    let _lock = hermit_run_guard();
+    let guest = compiled_c_guest(&PROC_STATUS_TRACER_PID_GUEST, "proc_status_tracer_pid");
+    let expected = "self 0\n\
+         thread-self 0\n\
+         by pid 0\n\
+         by pid and tid 0\n\
+         second thread's thread-self 0\n\
+         forked child's self 0\n";
+    assert_eq!(native_stdout(guest), expected);
+    let args = ["run", "--base-env=minimal", "--", guest.to_str().unwrap()];
+    let output = hermit(&args);
+    assert_success(&output, &args);
+    assert_eq!(stdout(&output), expected, "{args:?}");
+}
+
+/// A death test whose statement is a fatal assertion that looks for a
+/// debugger (`tests/c/death_test_tracer_check.c`, googletest's "fast" style)
+/// dies of SIGABRT under Hermit, as it does natively. When the guest read
+/// `TracerPid: 1`, the assertion raised SIGTRAP to break into a debugger
+/// instead. The ptrace backend used not to deliver a SIGTRAP a guest sends
+/// itself, so the child lived, and googletest's statement then waited: the
+/// death test hung under plain and chaos runs alike. This guest's child reports
+/// that it lived and exits, so that failure shows here at once. Now that the
+/// backend delivers the SIGTRAP, a child that reads `TracerPid: 1` dies of it
+/// (signal 5) instead of SIGABRT. Either way the output differs from the
+/// native one this test expects.
+#[test]
+fn a_death_test_that_looks_for_a_debugger_dies_as_it_does_natively() {
+    let _lock = hermit_run_guard();
+    let guest = compiled_c_guest(&DEATH_TEST_TRACER_CHECK_GUEST, "death_test_tracer_check");
+    let expected = "TracerPid 0\n\
+         status byte: none\n\
+         child: killed by signal 6\n";
+    assert_eq!(native_stdout(guest), expected);
+    let guest = guest.to_str().unwrap();
+    for schedule in [&[][..], &["--chaos", "--seed=1"][..]] {
+        let mut args = vec!["run", "--base-env=minimal"];
+        args.extend(schedule);
+        args.extend(["--", guest]);
+        let output = hermit(&args);
+        assert_success(&output, &args);
+        assert_eq!(stdout(&output), expected, "{args:?}");
+    }
+}
+
 /// Under DBT each guest `cpuid` is answered by Detcore, as under ptrace, so
 /// the two print the same CPUID rows (every basic leaf for subleaves 0 to 2 and
 /// every extended leaf), and DBT's `/proc/cpuinfo` lists HLE and RTM exactly
@@ -32320,9 +32376,9 @@ fn liteinst_in_guest_refuses_a_statically_linked_guest() {
 ///
 /// The guest is observed from OUTSIDE hermit. It cannot answer this question
 /// about itself: Detcore virtualizes `/proc/<pid>/status` and reports
-/// `TracerPid: 1` under every backend (`sanitize_status` in
-/// `detcore/src/procfs.rs`), so a guest-side probe reads 1 under in-guest
-/// LiteInst as well and cannot tell the backends apart.
+/// `TracerPid: 0` under every backend (`sanitize_status` in
+/// `detcore/src/procfs.rs`), so a guest-side probe reads 0 under ptrace as
+/// well and cannot tell the backends apart.
 ///
 /// The guest is `/bin/cat <fifo>`. Once a non-blocking open of the FIFO for
 /// writing stops failing with `ENXIO`, the guest has reached its own `open`,
@@ -35421,7 +35477,7 @@ fn the_4505_signal_guests_get_past_their_handlers_under_record() {
     };
     let mut metadata: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(&metadata_path).unwrap()).unwrap();
-    assert_eq!(metadata["version"], 0x189, "RECORD_VERSION moved");
+    assert_eq!(metadata["version"], 0x18a, "RECORD_VERSION moved");
     metadata["version"] = serde_json::json!(0x17f);
     fs::write(&metadata_path, serde_json::to_string(&metadata).unwrap()).unwrap();
     let replay_args = ["replay", "--autopilot", "--data-dir", directory];
