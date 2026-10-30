@@ -1279,6 +1279,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // and hermit-manifest-plan's copy of canonical_verdict::tests::
     // store_exclusive_retries_are_optional_and_strictly_typed (a verify
     // divergence names its store-exclusive retries): 1886.
+    // And hermit-verify's split_branches
+    // a_split_timer_stop_keeps_its_rip_on_the_second_half: 1883, listed.
     ("test.regular_crates", 1891),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
@@ -7322,6 +7324,7 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests moved from hermit-cli into Detcore and grew there; the aarch64
     // rewrite tests on top add none here: 1868, listed.
     // And the same three store-exclusive cause units: 1872.
+    // And the same split_branches unit: 1869, listed.
     ("test.regular_crates_on_host", 1877),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
