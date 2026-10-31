@@ -18230,12 +18230,17 @@ impl Scheduler {
     /// recorded its doom: another of its threads already left the scheduler
     /// without a committed exit, so it died of a signal or with its process
     /// (`committed_exits`, read the same way by `child_is_stuck`). A fatal
-    /// signal is recorded as a doom only under `--pipe-wake-latency`
-    /// (`record_committed_fatal_signal`); this sees one once its first
-    /// victim has gone, and the dying thread's removal is ordered, since the
-    /// scheduler waits for a running thread to quiesce. Siblings an exec
-    /// tore down also left without a committed exit, so such a process
-    /// counts as going down too.
+    /// signal is recorded as a doom at its delivery
+    /// (`Scheduler::commit_fatal_delivery`) for every default action that
+    /// ends the process, wherever the backend may retire the process's other
+    /// threads at that delivery (serialized threads, the guest's own kernel
+    /// signal state, no gdbserver: ptrace) or `--pipe-wake-latency` or
+    /// `--virtual-timeout` is on, except for a PID namespace's init and a
+    /// process with an exec in flight. Elsewhere this sees an unrecorded one
+    /// once its first victim has gone, and the dying thread's removal is
+    /// ordered, since the scheduler waits for a running thread to quiesce.
+    /// Siblings an exec tore down also left without a committed exit, so such
+    /// a process counts as going down too.
     fn process_is_going_down(&self, tid: DetTid) -> bool {
         let Some(process) = self.thread_tree.thread_to_leader.get(&tid).copied() else {
             return true;
