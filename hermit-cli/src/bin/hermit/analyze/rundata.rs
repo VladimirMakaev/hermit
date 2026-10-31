@@ -1260,31 +1260,30 @@ impl AnalyzeOpts {
     /// ([`Self::stamp_trial_record`]). The record carries the jumps of global
     /// time of the recorded schedule whose event prefix its events repeat
     /// furthest (`crate::time_skip_carry`), so its replay jumps where that
-    /// recording did, in the oldest format among the recordings read
-    /// (`TimeSkipSources::trial_format`): one in format 1, which lists no
-    /// jumps, makes the trial list none. The trial charges replayed
+    /// recording did, in that recording's format, when its events are a
+    /// prefix of that recording's and it lists its jumps. Otherwise (a trial
+    /// that goes on past where its events and the recording's part, or that
+    /// repeats a format-1 recording) it is written in format 1 with no list,
+    /// so its replay makes jumps as a replay of an older record does
+    /// (`TimeSkipMode::Legacy`): no recording lists the jumps of its events
+    /// past that point, and a driven replay would make none there, not even
+    /// where a run computes one. The trial charges replayed
     /// switch-ins as the recordings did (`TimeSkipSources::trial_charges`),
     /// whatever its format; recordings under different charges are refused
     /// before any trial (`Self::refuse_recordings_under_another_switch_in_charge`).
     /// An invalid record is refused before writing.
     pub fn write_trial_record(&self, record: PreemptionRecord, path: &Path) -> anyhow::Result<()> {
-        let (skips, format, charged, identity) = {
+        let (carried, charged, identity) = {
             let sources = self.time_skip_sources.lock().unwrap();
             (
                 sources.carried(record.schedevents()),
-                sources.trial_format(),
                 sources.trial_charges(),
                 sources.trial_identity_metadata(record.schedevents())?,
             )
         };
-        // A trial claims no more than the least complete recording read: in
-        // format 1 it lists no jumps.
-        let skips =
-            if format.is_some_and(|format| format >= detcore::preemptions::TIME_SKIPS_FORMAT) {
-                skips
-            } else {
-                Vec::new()
-            };
+        // A prefix of a recording that lists its jumps carries them in its
+        // format; any other trial is written in format 1 with no list.
+        let (skips, format) = carried.unwrap_or_default();
         let (guest_ids, reserved_input) = identity.unwrap_or_else(|| {
             (
                 record.guest_ids().unwrap_or_default(),
@@ -1646,15 +1645,15 @@ mod tests {
         );
     }
 
-    /// The actual writer keeps one recording's format, jumps and charge, and
-    /// writes a trial of recordings in several formats in the oldest of them,
-    /// with the recordings' charge. Test adapted: recordings of different
-    /// formats used to be refused here, because the format carried the charge
-    /// of replayed switch-ins; the charge is now a field of its own, and
-    /// recordings under different charges are refused before any trial
-    /// (`refuse_recordings_under_another_switch_in_charge`).
+    /// The actual writer keeps the format, jumps and charge of the recording a
+    /// trial repeats, and writes a trial that repeats a format-1 recording in
+    /// format 1 with no list. Test adapted: this pull request's previous
+    /// commit wrote a trial of several recordings in the oldest format among
+    /// them; a trial now takes the format of the recording whose prefix it
+    /// is, the one its jumps come from (ties go to the recording remembered
+    /// first), with the recordings' charge.
     #[test]
-    fn trial_record_writing_keeps_the_oldest_format_and_the_recordings_charge() {
+    fn trial_record_writing_keeps_the_repeated_recordings_format_and_the_charge() {
         use detcore::preemptions::TimeSkip;
         use detcore::preemptions::TimeSkipReason;
         use detcore::types::DetTid;
@@ -1715,15 +1714,141 @@ mod tests {
                     .write_trial_schedule(events.clone(), &output)
                     .unwrap();
                 let written = PreemptionReader::try_new(&output).unwrap().into_inner();
-                assert_eq!(written.format_version(), other, "{formats:?}");
+                assert_eq!(written.format_version(), formats[0], "{formats:?}");
                 assert_eq!(
                     written.time_skips(),
-                    other.map(|_| &jumps[..]),
+                    formats[0].map(|_| &jumps[..]),
                     "{formats:?}"
                 );
                 assert!(written.charges_replayed_switch_ins(), "{formats:?}");
             }
         }
+    }
+
+    /// A trial whose events are a prefix of a recording's carries that
+    /// recording's jumps of global time and lists them, in its format (a
+    /// replay of it is driven); one spliced past where its events and the
+    /// recording's part lists none and is written in format 1, so a replay of
+    /// it makes jumps as a replay of an older record does
+    /// (`TimeSkipMode::Legacy`). Past the recording's events a driven replay
+    /// would make no jump where a run computes one (detcore's
+    /// `past_its_list_a_driven_replay_makes_no_fifo_open_jump_a_legacy_one_makes`).
+    /// Both keep the recording's charge of replayed switch-ins, which is not
+    /// the format's (`SWITCH_IN_CHARGE_FORMAT`).
+    #[test]
+    fn a_trial_spliced_past_its_recording_lists_no_jumps() {
+        use detcore::preemptions::TimeSkip;
+        use detcore::preemptions::TimeSkipReason;
+        use detcore::types::DetTid;
+        use detcore::types::LogicalTime;
+        use detcore::types::SyscallPhase;
+        let events = |tids: &[i32]| -> Vec<SchedEvent> {
+            tids.iter()
+                .map(|&tid| {
+                    SchedEvent::syscall(
+                        DetTid::from_raw(tid),
+                        reverie::syscalls::Sysno::poll,
+                        SyscallPhase::Posthook,
+                    )
+                })
+                .collect()
+        };
+        let jump = TimeSkip {
+            event: 2,
+            target: LogicalTime::from_nanos(1_000_000),
+            reason: TimeSkipReason::IdleGuestPollers,
+        };
+        let recorded = events(&[3, 3, 5, 3, 5, 5]);
+        let mut options = AnalyzeOpts::try_parse_from(["analyze", "--", "/bin/true"]).unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        options.tmp_dir = Some(workspace.path().to_path_buf());
+        options.time_skip_sources.lock().unwrap().remember(
+            &PreemptionRecord::from_sched_events(recorded.clone())
+                .with_current_format()
+                .with_switch_ins_charged(true)
+                .with_time_skips(vec![jump]),
+        );
+        let written = |events: Vec<SchedEvent>, name: &str| -> PreemptionRecord {
+            let path = workspace.path().join(name);
+            options.write_trial_schedule(events, &path).unwrap();
+            PreemptionReader::new(&path).load_all()
+        };
+
+        let prefix = written(recorded[..3].to_vec(), "prefix.preempts");
+        assert_eq!(
+            prefix.format_version(),
+            Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
+        );
+        assert_eq!(prefix.time_skips(), Some(&[jump][..]));
+        assert!(prefix.lists_its_time_skips());
+        assert!(prefix.charges_replayed_switch_ins());
+
+        let mut events_past = recorded[..3].to_vec();
+        events_past.extend(events(&[5, 3, 3]));
+        let spliced = written(events_past, "spliced.preempts");
+        assert_eq!(spliced.format_version(), None);
+        assert_eq!(spliced.time_skips(), None);
+        assert!(!spliced.lists_its_time_skips());
+        assert!(spliced.charges_replayed_switch_ins());
+    }
+
+    /// A search goes on past a spliced trial: analyze and bisect remember
+    /// every completed trial's realized record, and a spliced trial's is in
+    /// format 1 (its replay follows a format-1 record), beside the format-3
+    /// recordings. The next trial, a prefix of a recording or another splice,
+    /// is still written, in the format of the recording it repeats or in
+    /// format 1. Main refused it ("cannot combine recordings with different
+    /// timing formats"), so a bisection stopped at its first round after a
+    /// splice.
+    #[test]
+    fn a_search_goes_on_past_a_spliced_trial_among_format_3_recordings() {
+        use detcore::types::DetTid;
+        let events = |tids: &[i32]| -> Vec<SchedEvent> {
+            tids.iter()
+                .map(|&tid| SchedEvent::branches(DetTid::from_raw(tid), 1))
+                .collect()
+        };
+        let good = events(&[3, 5, 3, 5]);
+        let bad = events(&[3, 3, 5, 5]);
+        let options = AnalyzeOpts::try_parse_from(["analyze", "--", "/bin/true"]).unwrap();
+        let workspace = tempfile::tempdir().unwrap();
+        for recorded in [&good, &bad] {
+            options.time_skip_sources.lock().unwrap().remember(
+                &PreemptionRecord::from_sched_events(recorded.clone())
+                    .with_current_format()
+                    .with_switch_ins_charged(true),
+            );
+        }
+        let path = workspace.path().join("trial.preempts");
+        let written = |events: Vec<SchedEvent>| -> PreemptionRecord {
+            options.write_trial_schedule(events, &path).unwrap();
+            PreemptionReader::new(&path).load_all()
+        };
+
+        // Round 1: a splice, written in format 1, charged; its replay's
+        // realized record follows that format and charge.
+        let mut splice = good[..2].to_vec();
+        splice.extend(events(&[5, 3]));
+        let first = written(splice.clone());
+        assert_eq!(first.format_version(), None);
+        assert!(first.charges_replayed_switch_ins());
+        options.time_skip_sources.lock().unwrap().remember(
+            &PreemptionRecord::from_sched_events(splice.clone()).with_switch_ins_charged(true),
+        );
+
+        // Round 2: a prefix of a format-3 recording, and another splice.
+        let prefix = written(bad[..3].to_vec());
+        assert_eq!(
+            prefix.format_version(),
+            Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
+        );
+        assert!(prefix.lists_its_time_skips());
+        assert!(prefix.charges_replayed_switch_ins());
+        let mut again = splice[..3].to_vec();
+        again.extend(events(&[5, 5]));
+        let second = written(again);
+        assert_eq!(second.format_version(), None);
+        assert!(second.charges_replayed_switch_ins());
     }
 
     /// Analyze and bisect run every trial under the timeslice a recording says

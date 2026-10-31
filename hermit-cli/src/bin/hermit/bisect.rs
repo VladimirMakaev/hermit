@@ -312,6 +312,49 @@ mod tests {
         }
     }
 
+    /// A format-1 schedule, as a spliced trial's realized record is, beside a
+    /// format-3 one: bisect admits them under one charge of replayed
+    /// switch-ins, and refuses them by name under different charges, whatever
+    /// their formats. Main refused both by their formats ("different timing
+    /// formats"), and so a search through a splice's realized record.
+    #[test]
+    fn bisect_admits_a_format_1_splice_beside_format_3_only_under_one_charge() {
+        let first = vec![SchedEvent::branches(DetTid::from_raw(3), 1)];
+        let second = vec![SchedEvent::branches(DetTid::from_raw(5), 1)];
+        let record = |events, format: Option<u32>, charged: bool| {
+            let mut value = search_record(events);
+            if let Some(format) = format {
+                value["format_version"] = serde_json::json!(format);
+            }
+            if charged {
+                value["switch_ins_charged"] = serde_json::json!(true);
+            }
+            value
+        };
+        prepare_search_records(
+            &record(first.clone(), None, true),
+            &record(second.clone(), Some(3), true),
+        )
+        .unwrap();
+        for (good, bad) in [(false, true), (true, false)] {
+            let error = prepare_search_records(
+                &record(first.clone(), None, good),
+                &record(second.clone(), Some(3), bad),
+            )
+            .unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<crate::container::PolicyRefusal>()
+                    .is_some(),
+                "{error:#}"
+            );
+            assert!(
+                format!("{error:#}").contains("switch_ins_charged"),
+                "{error:#}"
+            );
+        }
+    }
+
     #[test]
     fn bisect_search_removes_only_event_times_from_both_inputs() {
         let first = SchedEvent::syscall(DetTid::from_raw(3), Sysno::write, SyscallPhase::Prehook)

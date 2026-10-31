@@ -1907,7 +1907,14 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // units (a_trial_charges_only_when_every_recording_read_did,
     // bisect_refuses_schedules_under_another_switch_in_charge,
     // analyze_counts_its_own_endpoints_as_charging_switch_ins): 1290 + 3 = 1293.
-    ("test.hermit_unit", 1293),
+    // PR 4863's residual: its splice revision adds four hermit-run units
+    // (a_schedule_past_every_recording_carries_no_list,
+    // a_prefix_trial_takes_its_recordings_format,
+    // a_trial_spliced_past_its_recording_lists_no_jumps,
+    // a_search_goes_on_past_a_spliced_trial_among_format_3_recordings and
+    // bisect_admits_a_format_1_splice_beside_format_3_only_under_one_charge,
+    // less a_trial_takes_the_oldest_format_read): 1293 + 4 = 1297.
+    ("test.hermit_unit", 1297),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3161,7 +3168,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR 4864's residual after the guest-poll landing adds two detcore units
     // (record_serde's the_switch_in_charge_is_written_only_when_on_and_round_trips,
     // scheduler's a_charging_runs_record_is_refused_by_a_reader_of_format_2): 3242 + 2 = 3244.
-    ("test.detcore_unit", 3244),
+    // PR 4863's residual: its splice revision adds one detcore unit
+    // (scheduler's past_its_list_a_driven_replay_makes_no_fifo_open_jump_a_legacy_one_makes):
+    // 3244 + 1 = 3245.
+    ("test.detcore_unit", 3245),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5576,7 +5586,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same seventeen SCM_RIGHTS queue units: 3017 + 17 = 3034.
     // The same three inotify fault-boundary units: 3034 + 3 = 3037.
     // The same two PR 4864 residual units: 3037 + 2 = 3039.
-    ("test.detcore_unit_on_host", 3039),
+    // The same PR 4863 residual splice unit: 3039 + 1 = 3040.
+    ("test.detcore_unit_on_host", 3040),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -5971,7 +5982,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same PR 4912 unit: 1282 + 1 = 1283.
     // The same H1 path-fallback unit: 1283 + 1 = 1284.
     // The same three PR 4864 residual units: 1284 + 3 = 1287.
-    ("test.hermit_unit_on_host", 1287),
+    // The same four PR 4863 residual splice units: 1287 + 4 = 1291.
+    ("test.hermit_unit_on_host", 1291),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.

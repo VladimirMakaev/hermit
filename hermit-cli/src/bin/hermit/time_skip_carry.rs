@@ -15,9 +15,21 @@
 //! recorded schedule's events carries none of them by itself, so its replay
 //! would make no jump where the recording did and diverge there. This module
 //! remembers every recorded schedule, and gives a trial
-//! schedule the jumps of the one recording whose events it repeats furthest,
-//! up to where they part: one recording's history, never a mix of several,
-//! which could disagree.
+//! schedule the jumps of the one recording whose events it repeats furthest:
+//! one recording's history, never a mix of several, which could disagree.
+//!
+//! Only a trial whose events are a prefix of that recording's, one that lists
+//! its jumps, gets a list, and that recording's format with it. A trial that
+//! goes on past where its events and the recording's part (a bisection's
+//! splice, an edited or continued schedule) gets none, and is written in a
+//! format that lists no jumps, so its replay makes them as a replay of an
+//! older record does (`TimeSkipMode::Legacy`). No recording lists the jumps of
+//! its events past that point, and a replay that makes only listed jumps makes
+//! none there, not even where a run would compute one: a FIFO open that finds
+//! nothing else can run, with a timer pending, moves global time to that timer
+//! in a legacy replay and stays where it is in a driven one. The trial keeps
+//! its recordings' charge of replayed switch-ins, a field of its own
+//! (`TimeSkipSources::trial_charges`), whatever format it is written in.
 
 use std::hash::DefaultHasher;
 use std::hash::Hash;
@@ -36,9 +48,6 @@ use detcore_model::pid::GuestIds;
 #[derive(Debug, Default)]
 pub struct TimeSkipSources {
     sources: Vec<Source>,
-    /// The oldest format among the recordings remembered (`None` for format
-    /// 1), once one is (`trial_format`).
-    oldest_format: Option<Option<u32>>,
     /// Whether every recording remembered charged replayed switch-ins
     /// (`PreemptionRecord::charges_replayed_switch_ins`), once one is
     /// (`trial_charges`).
@@ -50,6 +59,9 @@ struct Source {
     /// Entry `i` hashes the recording's first `i` events (`prefix_hashes`).
     prefix_hashes: Vec<u64>,
     skips: Vec<TimeSkip>,
+    /// The recording's format (`None` for format 1): whether it lists every
+    /// jump of its run, and the format a trial that repeats its prefix takes.
+    format: Option<u32>,
     guest_ids: GuestIds,
     reserved_input: ReservedInputMetadata,
 }
@@ -106,38 +118,18 @@ impl TimeSkipSources {
     /// Remember `record`. One that made no jump counts as much as one that
     /// did: a trial that repeats it furthest makes no jump either.
     pub fn remember(&mut self, record: &PreemptionRecord) {
-        // `None` (format 1) orders before every numbered format.
-        let format = record.format_version();
-        self.oldest_format = Some(
-            self.oldest_format
-                .map_or(format, |oldest| oldest.min(format)),
-        );
         self.all_charged =
             Some(self.all_charged.unwrap_or(true) && record.charges_replayed_switch_ins());
         let source = Source {
             prefix_hashes: prefix_hashes(record.schedevents()),
             skips: record.time_skips().unwrap_or_default().to_vec(),
+            format: record.format_version(),
             guest_ids: record.guest_ids().unwrap_or_default(),
             reserved_input: record.reserved_input().clone(),
         };
         if !self.sources.contains(&source) {
             self.sources.push(source);
         }
-    }
-
-    /// The format a trial schedule built from the remembered recordings is
-    /// written in: the oldest among them, or the current format before any
-    /// is read. Formats say how complete a record's lists are (format 2 and
-    /// later list every jump of global time), and a trial claims no more than
-    /// the least complete of its recordings; a trial in format 1 lists no
-    /// jumps (`AnalyzeOpts::write_trial_record`). Recordings may differ there.
-    /// Their charge of replayed switch-ins may not: it is a field of its own
-    /// (`trial_charges`), and analyze and bisect refuse recordings under
-    /// different charges before any trial
-    /// (`AnalyzeOpts::refuse_recordings_under_another_switch_in_charge`).
-    pub fn trial_format(&self) -> Option<u32> {
-        self.oldest_format
-            .unwrap_or(Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT))
     }
 
     /// Whether a trial schedule built from the remembered recordings charges
@@ -204,23 +196,35 @@ impl TimeSkipSources {
         best
     }
 
-    /// The jumps a replay of `events` must make: those of the remembered
-    /// recording whose events `events` repeats furthest, up to the end of the
-    /// shared events, in stream order. The run that recorded a jump was in the
+    /// The jumps a replay of `events` must make, when a recording lists them
+    /// all, with that recording's format: those of the remembered recording
+    /// whose events `events` repeats furthest, in stream order, when `events`
+    /// is a prefix of that recording's events and the recording lists its
+    /// jumps (format 2 or later). The run that recorded a jump was in the
     /// state those events lead to when it jumped, so a replay of the same
     /// events is too. One recording's jumps, validated when it was read, are
     /// never mixed with another's, which could disagree. Ties go to the
     /// recording remembered first.
-    pub fn carried(&self, events: &[SchedEvent]) -> Vec<TimeSkip> {
-        let Some((shared, source)) = self.selected(events) else {
-            return Vec::new();
-        };
-        source
+    ///
+    /// `None` when `events` goes on past that recording's events, when the
+    /// recording lists no jumps (format 1), or when none was remembered: no
+    /// recording lists the jumps of the rest, so the trial must not claim to
+    /// list them (see the module's doc).
+    pub fn carried(&self, events: &[SchedEvent]) -> Option<(Vec<TimeSkip>, Option<u32>)> {
+        let (shared, source) = self.selected(events)?;
+        let lists = source
+            .format
+            .is_some_and(|format| format >= detcore::preemptions::TIME_SKIPS_FORMAT);
+        if shared < events.len() || !lists {
+            return None;
+        }
+        let skips = source
             .skips
             .iter()
             .take_while(|skip| usize::try_from(skip.event).is_ok_and(|event| event <= shared))
             .copied()
-            .collect()
+            .collect();
+        Some((skips, source.format))
     }
 }
 
@@ -250,8 +254,19 @@ mod tests {
         }
     }
 
-    /// A trial spliced from a recorded schedule's prefix carries the jumps that
-    /// prefix contains, at their positions, and none past the splice point.
+    /// The jumps `carried` gives, without the format.
+    fn jumps(carried: Option<(Vec<TimeSkip>, Option<u32>)>) -> Option<Vec<TimeSkip>> {
+        carried.map(|(skips, _)| skips)
+    }
+
+    /// A trial whose events are a prefix of a recorded schedule's carries the
+    /// jumps that prefix contains, at their positions, in the recording's
+    /// format. Test adapted: a trial spliced after event 3 used to carry the
+    /// prefix's jump and claim a complete list; it goes on past the
+    /// recording's events, which list none of its jumps there, and a driven
+    /// replay would make no jump where a run computes one (detcore's
+    /// `past_its_list_a_driven_replay_makes_no_fifo_open_jump_a_legacy_one_makes`),
+    /// so it now carries no list.
     #[test]
     fn a_spliced_prefix_carries_the_jumps_inside_it() {
         let recorded = events(&[3, 3, 5, 3, 5, 5]);
@@ -263,17 +278,76 @@ mod tests {
         // The whole schedule carries both.
         assert_eq!(
             sources.carried(&recorded),
-            vec![skip(2, 1_000), skip(5, 2_000)]
+            Some((
+                vec![skip(2, 1_000), skip(5, 2_000)],
+                Some(detcore::preemptions::TIME_SKIPS_FORMAT)
+            ))
         );
-        // Spliced after event 3: the first jump is inside the prefix, the second
-        // is not, because the trial's events diverge before it.
+        // A prefix of three events carries the jump inside it.
+        assert_eq!(
+            jumps(sources.carried(&recorded[..3])),
+            Some(vec![skip(2, 1_000)])
+        );
+        // Spliced after event 3: no list.
         let mut spliced = recorded[..3].to_vec();
         spliced.extend(events(&[5, 3, 3]));
-        assert_eq!(sources.carried(&spliced), vec![skip(2, 1_000)]);
-        // A jump exactly at the splice point is inside the prefix.
-        assert_eq!(sources.carried(&recorded[..2]), vec![skip(2, 1_000)]);
-        // A trial that differs from the first event on carries nothing.
-        assert!(sources.carried(&events(&[5, 3, 5])).is_empty());
+        assert_eq!(sources.carried(&spliced), None);
+        // A jump exactly at the prefix's end is inside it.
+        assert_eq!(
+            jumps(sources.carried(&recorded[..2])),
+            Some(vec![skip(2, 1_000)])
+        );
+        // A trial that differs from the first event on carries no list.
+        assert_eq!(sources.carried(&events(&[5, 3, 5])), None);
+    }
+
+    /// A schedule that goes on past every recording's events carries no list:
+    /// one continued past a recording's end, and any schedule when no
+    /// recording was remembered.
+    #[test]
+    fn a_schedule_past_every_recording_carries_no_list() {
+        let recorded = events(&[3, 5]);
+        let mut sources = TimeSkipSources::default();
+        assert_eq!(sources.carried(&recorded), None);
+        sources.remember(
+            &PreemptionRecord::from_sched_events(recorded.clone())
+                .with_time_skips(vec![skip(1, 1_000)]),
+        );
+        assert_eq!(
+            jumps(sources.carried(&recorded)),
+            Some(vec![skip(1, 1_000)])
+        );
+        let mut continued = recorded;
+        continued.extend(events(&[3]));
+        assert_eq!(sources.carried(&continued), None);
+    }
+
+    /// A prefix trial takes the format of the recording it repeats, whose list
+    /// it carries; one of a format-1 recording, which lists no jumps, carries
+    /// no list (main used one recording's missing list as a complete, empty
+    /// one).
+    #[test]
+    fn a_prefix_trial_takes_its_recordings_format() {
+        let current = events(&[3, 5]);
+        let second = events(&[4, 5]);
+        let legacy = events(&[6, 5]);
+        let mut sources = TimeSkipSources::default();
+        sources.remember(
+            &PreemptionRecord::from_sched_events(current.clone())
+                .with_current_format()
+                .with_time_skips(vec![skip(1, 1_000)]),
+        );
+        sources.remember(&PreemptionRecord::from_sched_events(second.clone()).with_format(Some(2)));
+        sources.remember(&PreemptionRecord::from_sched_events(legacy.clone()));
+        assert_eq!(
+            sources.carried(&current),
+            Some((
+                vec![skip(1, 1_000)],
+                Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
+            ))
+        );
+        assert_eq!(sources.carried(&second[..1]), Some((Vec::new(), Some(2))));
+        assert_eq!(sources.carried(&legacy), None);
     }
 
     /// Timestamps, which analyze and bisect strip, do not stop a prefix from
@@ -292,7 +366,10 @@ mod tests {
         for event in &mut stripped {
             event.end_time = None;
         }
-        assert_eq!(sources.carried(&stripped), vec![skip(1, 1_000)]);
+        assert_eq!(
+            jumps(sources.carried(&stripped)),
+            Some(vec![skip(1, 1_000)])
+        );
     }
 
     /// A record without jumps, and a jump past the end of its events, add
@@ -305,7 +382,7 @@ mod tests {
             &PreemptionRecord::from_sched_events(recorded.clone())
                 .with_time_skips(vec![skip(9, 1_000)]),
         );
-        assert!(sources.carried(&recorded).is_empty());
+        assert_eq!(jumps(sources.carried(&recorded)), Some(Vec::new()));
     }
 
     /// Two recordings that share their first events but jumped differently
@@ -325,7 +402,7 @@ mod tests {
             &PreemptionRecord::from_sched_events(second.clone())
                 .with_time_skips(vec![skip(2, 1_000)]),
         );
-        let carried = sources.carried(&first);
+        let carried = jumps(sources.carried(&first)).unwrap();
         assert_eq!(carried, vec![skip(1, 2_000)]);
         assert!(
             PreemptionRecord::from_sched_events(first)
@@ -333,7 +410,7 @@ mod tests {
                 .validate()
                 .is_ok()
         );
-        assert_eq!(sources.carried(&second), vec![skip(2, 1_000)]);
+        assert_eq!(jumps(sources.carried(&second)), Some(vec![skip(2, 1_000)]));
     }
 
     /// A recording that made no jump is a source like any other: a trial that
@@ -349,32 +426,8 @@ mod tests {
                 .with_time_skips(vec![skip(1, 2_000)]),
         );
         sources.remember(&PreemptionRecord::from_sched_events(plain.clone()).with_format(Some(2)));
-        assert!(sources.carried(&plain).is_empty());
-        assert_eq!(sources.carried(&jumped), vec![skip(1, 2_000)]);
-    }
-
-    /// A trial takes the oldest format among the recordings read, and the
-    /// current one before any is read. Test adapted: recordings of different
-    /// formats used to be refused here; their charge of replayed switch-ins,
-    /// which made the formats incompatible, is now a field of its own
-    /// (`a_trial_charges_only_when_every_recording_read_did`), and analyze and
-    /// bisect refuse recordings under different charges before any trial.
-    #[test]
-    fn a_trial_takes_the_oldest_format_read() {
-        let mut sources = TimeSkipSources::default();
-        assert_eq!(
-            sources.trial_format(),
-            Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
-        );
-        sources.remember(&PreemptionRecord::from_sched_events(events(&[3])).with_current_format());
-        assert_eq!(
-            sources.trial_format(),
-            Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
-        );
-        sources.remember(&PreemptionRecord::from_sched_events(events(&[4])).with_format(Some(2)));
-        assert_eq!(sources.trial_format(), Some(2));
-        sources.remember(&PreemptionRecord::from_sched_events(events(&[5])));
-        assert_eq!(sources.trial_format(), None);
+        assert_eq!(jumps(sources.carried(&plain)), Some(Vec::new()));
+        assert_eq!(jumps(sources.carried(&jumped)), Some(vec![skip(1, 2_000)]));
     }
 
     /// A trial charges replayed switch-ins when every recording read did, and
@@ -432,9 +485,8 @@ mod tests {
             assert_eq!(&metadata, source.reserved_input());
             assert_eq!(
                 sources.carried(source.schedevents()),
-                source.time_skips().unwrap()
+                Some((source.time_skips().unwrap().to_vec(), Some(3)))
             );
-            assert_eq!(sources.trial_format(), Some(3));
         }
     }
 
@@ -496,8 +548,7 @@ mod tests {
         );
         assert_eq!(
             sources.carried(qualified.schedevents()),
-            qualified.time_skips().unwrap()
+            Some((qualified.time_skips().unwrap().to_vec(), Some(3)))
         );
-        assert_eq!(sources.trial_format(), Some(3));
     }
 }

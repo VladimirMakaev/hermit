@@ -576,8 +576,8 @@ impl PreemptionRecord {
     }
 
     /// The same record in `format` (`None` for format 1). Analyze and bisect
-    /// write a trial in the oldest format among the recordings they read
-    /// (`hermit-cli`'s `time_skip_carry`).
+    /// write a trial in the format of the recording whose prefix it repeats,
+    /// or in format 1 with no list (`hermit-cli`'s `time_skip_carry`).
     pub fn with_format(mut self, format: Option<u32>) -> Self {
         self.format_version = format;
         self
