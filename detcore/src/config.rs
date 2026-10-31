@@ -168,10 +168,6 @@ mod tests {
         // `Found::unverified_pairs` (#4908), and the digest now covers the
         // StoreExclusive request's payload types.
         (23, "0f379ad36f04345c", "f013e36743d8d9e6"),
-        // `Report::Pairs` carries `ScannedMapping`s with a `Found` in place
-        // of tuples (#4779), and the digest now covers the StoreExclusive
-        // request's payload types.
-        (20, "db709ad93785cfa4", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
@@ -198,34 +194,6 @@ mod tests {
         "pub struct Found {",
         "pub struct Rewrite {",
         "pub struct LiveMapping {",
-    ];
-
-    /// The lines of code, as [`definition`] gives them, of the type that
-    /// `source` declares, indented, on the line `header`, through the brace
-    /// at that indentation that closes it.
-    fn nested_definition(source: &str, header: &str) -> Vec<String> {
-        let mut lines = source.lines().skip_while(|line| line.trim() != header);
-        let first = lines
-            .next()
-            .unwrap_or_else(|| panic!("{header} is declared"));
-        let close = format!("{}}}", &first[..first.len() - first.trim_start().len()]);
-        let mut code: Vec<String> = lines
-            .take_while(|line| *line != close)
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with("//"))
-            .map(str::to_owned)
-            .collect();
-        code.insert(0, header.to_owned());
-        code
-    }
-
-    /// The types `GlobalRequest::StoreExclusive` carries, declared in
-    /// `store_exclusive.rs` inside its modules. Their fields cross the RPC in
-    /// positional bincode as the enums' own do.
-    const STORE_EXCLUSIVE_PAYLOAD: [&str; 3] = [
-        "pub enum Report {",
-        "pub struct ScannedMapping {",
-        "pub struct Found {",
     ];
 
     /// The lines of code, as [`definition`] gives them, of the type that
