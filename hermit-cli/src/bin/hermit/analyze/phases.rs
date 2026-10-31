@@ -3761,7 +3761,7 @@ impl AnalyzeOpts {
             baseline_sched_name,
             target_sched_name,
         );
-        let crit_sched = match own_bisection_end(self.phase5_bisect_traces(target, baseline))? {
+        let crit_sched = match own_bisection_end(self.phase5_bisect_traces(&target, &baseline))? {
             OwnBisectionEnd::Critical(crit_sched) => crit_sched,
             OwnBisectionEnd::SearchPrefixes(error) => {
                 eprintln!(
