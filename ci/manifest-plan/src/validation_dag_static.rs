@@ -3171,7 +3171,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR 4863's residual: its splice revision adds one detcore unit
     // (scheduler's past_its_list_a_driven_replay_makes_no_fifo_open_jump_a_legacy_one_makes):
     // 3244 + 1 = 3245.
-    ("test.detcore_unit", 3245),
+    // PR 4863's residual: its position-bound revision adds two detcore units
+    // (preemptions' a_jump_past_its_records_stream_is_refused,
+    // boundary_recording's a_boundary_recordings_jumps_lie_within_its_records):
+    // 3245 + 2 = 3247.
+    ("test.detcore_unit", 3247),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5587,7 +5591,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same three inotify fault-boundary units: 3034 + 3 = 3037.
     // The same two PR 4864 residual units: 3037 + 2 = 3039.
     // The same PR 4863 residual splice unit: 3039 + 1 = 3040.
-    ("test.detcore_unit_on_host", 3040),
+    // The same two PR 4863 residual position-bound units: 3040 + 2 = 3042.
+    ("test.detcore_unit_on_host", 3042),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
