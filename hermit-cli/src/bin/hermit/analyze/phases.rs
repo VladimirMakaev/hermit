@@ -421,11 +421,16 @@ impl IntervalFiles {
 
     /// Record the interval `passing`, `failing`, at the start of `pass`
     /// with its edit and swap `distances` and the search's `state`, or
-    /// before the first pass. Each file is replaced whole (written aside,
-    /// then renamed), and the progress names the interval only after both.
+    /// before the first pass. Each schedule is written as a trial's is: with
+    /// the trial stamps and the source fields of `sources`, the search's
+    /// endpoint records ([`trial_record_from`](crate::analyze::rundata::trial_record_from)),
+    /// so a replay of it runs under the settings the endpoints did. Each file
+    /// is replaced whole (written aside, then renamed), and the progress names
+    /// the interval only after both.
     fn record(
         &mut self,
         opts: &AnalyzeOpts,
+        sources: &[&PreemptionRecord],
         pass: Option<usize>,
         [passing, failing]: [&[SchedEvent]; 2],
         distances: Option<(usize, usize)>,
@@ -442,7 +447,7 @@ impl IntervalFiles {
             let path = &self.paths[slot];
             let aside = path.with_extension("partial");
             let written = opts
-                .write_trial_schedule_from(events.to_vec(), &[], &aside)
+                .write_trial_schedule_from(events.to_vec(), sources, &aside)
                 .and_then(|()| Ok(std::fs::rename(&aside, path)?));
             match written {
                 Ok(()) => self.written[slot] = Some(hash),
@@ -3747,9 +3752,13 @@ impl AnalyzeOpts {
         target: &PreemptionRecord,
         baseline: &PreemptionRecord,
     ) -> anyhow::Result<CriticalSchedule> {
-        self.phase5_bisect_traces_with(target.schedevents(), baseline.schedevents(), |i, sched| {
-            let runname = format!("bisect_round_{:0wide$}", i, wide = 3);
-            let (launched, mut newrun, replaced) = self.decisive_trial_unless(
+        self.phase5_bisect_traces_with(
+            target.schedevents(),
+            baseline.schedevents(),
+            &[target, baseline],
+            |i, sched| {
+                let runname = format!("bisect_round_{:0wide$}", i, wide = 3);
+                let (launched, mut newrun, replaced) = self.decisive_trial_unless(
                 &runname,
                 |name| {
                     let mut run = RunData::new_baseline(self, name.to_owned())?
@@ -3773,39 +3782,40 @@ impl AnalyzeOpts {
                 // bound stopped it: it would leave it at the same event.
                 |run| run.departure().is_some(),
             )?;
-            // A replay that could not follow the spliced schedule ran
-            // another one, whatever its outcome, finished or stopped: it has
-            // none for this schedule, and the search tries another.
-            if let Some(departure) = newrun.departure() {
-                return Err(InfeasibleSchedule {
-                    run: newrun.name().to_owned(),
-                    event: departure.event,
-                    expected: departure.expected.as_raw(),
-                    running: departure.running.as_raw(),
-                    // A round stopped after it left its schedule has no
-                    // outcome at all.
-                    passed: launched.is_ok().then(|| !newrun.is_a_match()),
+                // A replay that could not follow the spliced schedule ran
+                // another one, whatever its outcome, finished or stopped: it has
+                // none for this schedule, and the search tries another.
+                if let Some(departure) = newrun.departure() {
+                    return Err(InfeasibleSchedule {
+                        run: newrun.name().to_owned(),
+                        event: departure.event,
+                        expected: departure.expected.as_raw(),
+                        running: departure.running.as_raw(),
+                        // A round stopped after it left its schedule has no
+                        // outcome at all.
+                        passed: launched.is_ok().then(|| !newrun.is_a_match()),
+                    }
+                    .into());
                 }
-                .into());
-            }
-            launched.map_err(|error| incomplete_trial(error, &newrun.root_path()))?;
-            let path = newrun.sched_path_out().to_path_buf();
-            let record = PreemptionReader::try_new(&path)?.into_inner();
-            RunData::require_complete_record(&record, &path)?;
-            // Only a completed trial contributes its realized schedule and jumps.
-            self.time_skip_sources.lock().unwrap().remember(&record);
-            let completed = CompletedScheduleTrial {
-                target_met: newrun.is_a_match(),
-                schedule: record.into_global(),
-            };
-            newrun.discard_schedules();
-            // The first run of a round that ran again has no outcome; its
-            // schedules go the same way.
-            if let Some(replaced) = &replaced {
-                replaced.discard_schedules();
-            }
-            Ok(completed)
-        })
+                launched.map_err(|error| incomplete_trial(error, &newrun.root_path()))?;
+                let path = newrun.sched_path_out().to_path_buf();
+                let record = PreemptionReader::try_new(&path)?.into_inner();
+                RunData::require_complete_record(&record, &path)?;
+                // Only a completed trial contributes its realized schedule and jumps.
+                self.time_skip_sources.lock().unwrap().remember(&record);
+                let completed = CompletedScheduleTrial {
+                    target_met: newrun.is_a_match(),
+                    schedule: record.into_global(),
+                };
+                newrun.discard_schedules();
+                // The first run of a round that ran again has no outcome; its
+                // schedules go the same way.
+                if let Some(replaced) = &replaced {
+                    replaced.discard_schedules();
+                }
+                Ok(completed)
+            },
+        )
     }
 
     /// Run the production trial adapter and search with the supplied launcher.
@@ -3814,6 +3824,7 @@ impl AnalyzeOpts {
         &self,
         target: &[SchedEvent],
         baseline: &[SchedEvent],
+        sources: &[&PreemptionRecord],
         mut launch: impl FnMut(usize, &[SchedEvent]) -> anyhow::Result<CompletedScheduleTrial>,
     ) -> anyhow::Result<CriticalSchedule> {
         self.progress.phase(Phase::Bisect);
@@ -3845,7 +3856,7 @@ impl AnalyzeOpts {
         if let Some(interval) = &mut interval
             && resumed.is_none()
         {
-            interval.record(self, None, [baseline, target], None, None);
+            interval.record(self, sources, None, [baseline, target], None, None);
         }
         // TODO: have search_for_critical_schedule borrow only.
         let (start, baseline, target) = match resumed {
@@ -3875,6 +3886,7 @@ impl AnalyzeOpts {
                     };
                     interval.record(
                         self,
+                        sources,
                         Some(at.pass),
                         [at.passing, at.failing],
                         Some((at.edit_distance, at.swap_distance)),
@@ -5653,27 +5665,28 @@ mod tests {
         let baseline = vec![a.clone(), b.clone(), c.clone()];
         let target = vec![c, b, a];
         let mut trials = 0;
-        let result = options.phase5_bisect_traces_with(&target, &baseline, |trial, requested| {
-            trials = trial;
-            match trial {
-                1 => {
-                    assert_eq!(requested, baseline);
-                    Ok(CompletedScheduleTrial {
-                        target_met: false,
-                        schedule: baseline.clone(),
-                    })
+        let result =
+            options.phase5_bisect_traces_with(&target, &baseline, &[], |trial, requested| {
+                trials = trial;
+                match trial {
+                    1 => {
+                        assert_eq!(requested, baseline);
+                        Ok(CompletedScheduleTrial {
+                            target_met: false,
+                            schedule: baseline.clone(),
+                        })
+                    }
+                    2 => {
+                        assert_eq!(requested, target);
+                        Ok(CompletedScheduleTrial {
+                            target_met: true,
+                            schedule: target.clone(),
+                        })
+                    }
+                    3 => Err(Error::new(RunTimeoutMarker)),
+                    _ => bail!("the search launched another trial after the midpoint timed out"),
                 }
-                2 => {
-                    assert_eq!(requested, target);
-                    Ok(CompletedScheduleTrial {
-                        target_met: true,
-                        schedule: target.clone(),
-                    })
-                }
-                3 => Err(Error::new(RunTimeoutMarker)),
-                _ => bail!("the search launched another trial after the midpoint timed out"),
-            }
-        });
+            });
         let error = result.expect_err("a timed-out midpoint must stop the analysis");
         assert!(
             error.downcast_ref::<RunTimeoutMarker>().is_some(),
@@ -5699,7 +5712,7 @@ mod tests {
         for contextual in [false, true] {
             let mut trials = 0;
             let result =
-                options.phase5_bisect_traces_with(&target, &baseline, |trial, requested| {
+                options.phase5_bisect_traces_with(&target, &baseline, &[], |trial, requested| {
                     trials = trial;
                     match trial {
                         1 => {
@@ -5781,7 +5794,7 @@ mod tests {
         assert!(!options.output_matches(&output(0)));
         assert!(options.output_matches(&output(122)));
         let completed = options
-            .phase5_bisect_traces_with(&target, &baseline, |_, requested| {
+            .phase5_bisect_traces_with(&target, &baseline, &[], |_, requested| {
                 Ok(CompletedScheduleTrial {
                     target_met: options.output_matches(&output(if requested == baseline {
                         0
@@ -5798,7 +5811,7 @@ mod tests {
         for kind in ["timeout", "refusal", "contextual refusal", "log limit"] {
             let mut trials = 0;
             let error = options
-                .phase5_bisect_traces_with(&target, &baseline, |_, _| {
+                .phase5_bisect_traces_with(&target, &baseline, &[], |_, _| {
                     trials += 1;
                     Err(stopped_trial(kind))
                 })
@@ -6172,6 +6185,87 @@ mod tests {
             "{}",
             run.to_repro()
         );
+    }
+
+    /// The search's interval files are written as its trials are: each takes
+    /// the callback checkpoints of the part it shares with an endpoint record
+    /// and that record's source fields (`trial_record_from`), so a replay of
+    /// one, as partial stack collection makes, ends its slices where the
+    /// recording's did and runs under the endpoints' settings.
+    #[test]
+    fn an_interval_file_keeps_its_endpoints_checkpoints_and_source_fields() {
+        let parent = tempfile::tempdir().unwrap();
+        let tmp_dir = format!("--tmp-dir={}", parent.path().display());
+        let mut options =
+            AnalyzeOpts::try_parse_from(["analyze", tmp_dir.as_str(), "--", "/bin/true"]).unwrap();
+        let _workspace = options
+            .phase0_initialize(Retention::Keep { because: None })
+            .unwrap();
+        let branches = |tid: i32, count: u32| {
+            serde_json::json!({
+                "dettid": tid, "op": "Branch", "count": count,
+                "start_rip": null, "end_rip": null, "end_time": null
+            })
+        };
+        let checkpoint = |row: usize, progress: u64, time: u64| {
+            serde_json::json!({
+                "history_index": row,
+                "origin": {
+                    "callback": "PmuTimer", "site": "Prehook", "progress": progress,
+                    "last_op": "Branch", "time": time, "rcbs": progress
+                }
+            })
+        };
+        let target: PreemptionRecord = serde_json::from_value(serde_json::json!({
+            "per_thread": {
+                "3": {
+                    "final_prio": 1000,
+                    "prio_changes": [[100, 1000], [300, 1000]],
+                    "preemption_rcbs": [10, 15]
+                },
+                "5": {"final_prio": 1000, "prio_changes": [[200, 1000]], "preemption_rcbs": [4]}
+            },
+            "global": [branches(3, 10), branches(5, 4), branches(3, 5)],
+            "chaos_timeslice": 7,
+            "callback_checkpoints": {
+                "3": [checkpoint(0, 10, 100), checkpoint(1, 15, 300)],
+                "5": [checkpoint(0, 4, 200)]
+            }
+        }))
+        .unwrap();
+        target.validate().unwrap();
+        let events = target.schedevents();
+        let mut interval = IntervalFiles::new(options.tmp_dir.as_ref().unwrap());
+        interval.record(
+            &options,
+            &[&target],
+            None,
+            [&events[..2], events],
+            None,
+            None,
+        );
+        for (slot, kept) in [(0, 1), (1, 3)] {
+            let written: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(&interval.paths[slot]).unwrap())
+                    .unwrap();
+            let points: usize = ["3", "5"]
+                .iter()
+                .map(|tid| {
+                    written["callback_checkpoints"][tid]
+                        .as_array()
+                        .map_or(0, |points| points.len())
+                })
+                .sum();
+            assert_eq!(points, kept, "interval file {slot}: {written}");
+            assert_eq!(
+                written["chaos_timeslice"], 7,
+                "interval file {slot}: {written}"
+            );
+            PreemptionReader::new(&interval.paths[slot])
+                .load_all()
+                .validate()
+                .unwrap();
+        }
     }
 
     /// The final prefix report repeats the trial's counter caveat in its
@@ -10081,6 +10175,7 @@ mod tests {
         let mut interval = IntervalFiles::new(options.tmp_dir.as_ref().unwrap());
         interval.record(
             &options,
+            &[],
             Some(3),
             [&passing, &failing],
             Some((2, 1)),
@@ -10109,7 +10204,7 @@ mod tests {
             .unwrap();
         assert!(options.resumable_interval(&endpoints).is_none());
         // And one recorded before the search's first pass, which has no state.
-        interval.record(&options, None, [&baseline, &target], None, None);
+        interval.record(&options, &[], None, [&baseline, &target], None, None);
         options.resumed_progress = Some(options.progress.snapshot());
         assert!(options.resumable_interval(&endpoints).is_none());
     }
@@ -11320,6 +11415,7 @@ mod tests {
         let mut interval = IntervalFiles::new(options.tmp_dir.as_ref().unwrap());
         interval.record(
             &options,
+            &[],
             Some(3),
             [&events(&[3, 3, 5, 3]), &events(&[3, 3, 3, 5])],
             Some((2, 1)),

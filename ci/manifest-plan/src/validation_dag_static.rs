@@ -2249,7 +2249,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_refusal_refused_again_or_deterministic_ends_the_analysis,
     // a_refused_search_round_or_minimize_replay_ends_the_analysis,
     // a_refused_recheck_ends_the_analysis}: 1577.
-    ("test.hermit_unit", 1577),
+    // And the interval file unit: 1578.
+    ("test.hermit_unit", 1578),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6899,7 +6900,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same three dispatch, stopped-departure and note tests: 1426.
     // And the same arming test: 1565.
     // And the same six refusal tests: 1571.
-    ("test.hermit_unit_on_host", 1571),
+    // And the interval file unit: 1572.
+    ("test.hermit_unit_on_host", 1572),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
