@@ -66,19 +66,33 @@ pub struct SchedEvent {
     /// it (see `Serialize`), so it is byte for byte what it was before.
     #[serde(default)]
     pub instruction_offset: Option<InstructionOffset>,
+    /// aarch64: the store-exclusives this thread failed during this run of
+    /// branches, in a run that counts them per segment (one that records or
+    /// replays preemptions, on a core that counts `STREX_FAIL_SPEC`). Each
+    /// failure retried a load/store-exclusive loop and so added branches to
+    /// this event's `count`. A diagnosis aid only: it never takes part in
+    /// comparing, hashing or printing events, so a replay that fails a
+    /// different number of store-exclusives is judged exactly as before.
+    /// A self-describing format (a JSON record) leaves a zero out; see the
+    /// `Serialize` impl.
+    #[serde(default)]
+    pub strex_fails: HostObserved,
 }
 
-/// Written by hand only to leave out an empty instruction offset from a written
-/// (human-readable) schedule, so that a schedule recorded without
-/// `--chaos-instruction-offset` is byte for byte what it was before the field
-/// existed. `SchedEvent` also crosses Detcore's RPC, whose encoding is not
-/// self-describing and needs every field, in declaration order.
+/// Written by hand to leave out an empty instruction offset and a zero
+/// `strex_fails` from a written (human-readable) schedule, so that a schedule
+/// recorded without `--chaos-instruction-offset`, and one of a run that counts
+/// no store-exclusive failures, is byte for byte what it was before the
+/// fields existed. `SchedEvent` also crosses Detcore's RPC, whose encoding is
+/// not self-describing and needs every field, in declaration order.
 impl Serialize for SchedEvent {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
         use serde::ser::SerializeStruct;
-        let omit_offset = serializer.is_human_readable() && self.instruction_offset.is_none();
-        let mut fields =
-            serializer.serialize_struct("SchedEvent", if omit_offset { 6 } else { 7 })?;
+        let readable = serializer.is_human_readable();
+        let omit_offset = readable && self.instruction_offset.is_none();
+        let omit_fails = readable && self.strex_fails.is_zero();
+        let fields_len = 6 + usize::from(!omit_offset) + usize::from(!omit_fails);
+        let mut fields = serializer.serialize_struct("SchedEvent", fields_len)?;
         fields.serialize_field("dettid", &self.dettid)?;
         fields.serialize_field("op", &self.op)?;
         fields.serialize_field("count", &self.count)?;
@@ -90,13 +104,47 @@ impl Serialize for SchedEvent {
         } else {
             fields.serialize_field("instruction_offset", &self.instruction_offset)?;
         }
+        if omit_fails {
+            fields.skip_field("strex_fails")?;
+        } else {
+            fields.serialize_field("strex_fails", &self.strex_fails)?;
+        }
         fields.end()
     }
 }
 
+/// A count a run observed on its host rather than decided, carried with a
+/// record for diagnosis. Whatever its value it compares and hashes as equal,
+/// so two runs of one schedule still compare equal; read the value itself,
+/// or the serialized record.
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct HostObserved(pub u32);
+
+impl HostObserved {
+    /// Whether nothing was observed (or nothing counted).
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
+}
+
+impl PartialEq for HostObserved {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Eq for HostObserved {}
+
+impl std::hash::Hash for HostObserved {
+    fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
+}
+
 /// Written by hand, as `Serialize` is, so that an event without an
 /// instruction offset prints exactly as it did before the field existed:
-/// INFO and DEBUG lines that show an event stay unchanged.
+/// INFO and DEBUG lines that show an event stay unchanged. It never prints
+/// `strex_fails`: a count the host decided must not change what two runs of
+/// one schedule log.
 impl fmt::Debug for SchedEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut event = f.debug_struct("SchedEvent");
@@ -154,6 +202,7 @@ impl SchedEvent {
             end_rip: None,
             end_time: None,
             instruction_offset: None,
+            strex_fails: HostObserved::default(),
         }
     }
 
@@ -167,6 +216,7 @@ impl SchedEvent {
             end_rip: None,
             end_time: None,
             instruction_offset: None,
+            strex_fails: HostObserved::default(),
         }
     }
 
