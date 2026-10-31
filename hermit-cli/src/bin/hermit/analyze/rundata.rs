@@ -1262,6 +1262,10 @@ impl AnalyzeOpts {
     /// furthest (`crate::time_skip_carry`), so its replay jumps where that
     /// recording did. All sources must share one timing format; mixing
     /// formats cannot preserve their different switch-in charging rules.
+    /// The trial states the format below the poll skips' list, unless the
+    /// record lists them itself (a prefix of a whole recorded schedule): such
+    /// a record keeps its own format and its own jumps, from the same
+    /// recording as its poll skips, never another source's jumps beside them.
     /// An incompatible format or invalid record is refused before writing.
     pub fn write_trial_record(&self, record: PreemptionRecord, path: &Path) -> anyhow::Result<()> {
         let (skips, format, identity) = {
@@ -1286,6 +1290,17 @@ impl AnalyzeOpts {
                 .reserved_input()
                 .require_same_for_chosen(&reserved_input)?;
         }
+        // A record that lists its poll skips is one recording's whole history:
+        // its jumps belong with those skips, whichever source the cache would
+        // pick for the same events.
+        let (format, skips) = if record.lists_its_poll_skips() {
+            (
+                record.format_version(),
+                record.time_skips().unwrap_or_default().to_vec(),
+            )
+        } else {
+            (format, skips)
+        };
         let record = self.stamp_trial_record(
             record
                 .with_format(format)
@@ -1582,7 +1597,10 @@ mod tests {
         };
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("trial.json");
-        for format in [None, Some(2), Some(3)] {
+        // A trial records no poll skips, so a source that lists them gives
+        // it the format below their list.
+        let listed = Some(detcore::preemptions::POLL_SKIPS_FORMAT);
+        for format in [None, Some(2), Some(3), listed] {
             let options = options();
             let source = record(format);
             options.time_skip_sources.lock().unwrap().remember(&source);
@@ -1590,9 +1608,12 @@ mod tests {
                 .write_trial_schedule(events.clone(), &output)
                 .unwrap();
             let written = PreemptionReader::try_new(&output).unwrap().into_inner();
-            assert_eq!(written.format_version(), format);
+            assert_eq!(
+                written.format_version(),
+                detcore::preemptions::format_without_poll_skips(format)
+            );
             assert_eq!(written.time_skips(), source.time_skips());
-            assert_eq!(written.charges_replayed_switch_ins(), format == Some(3));
+            assert_eq!(written.charges_replayed_switch_ins(), format >= Some(3));
         }
         for other in [None, Some(2)] {
             for formats in [[Some(3), other], [other, Some(3)]] {
@@ -1617,6 +1638,85 @@ mod tests {
                 );
             }
         }
+        // A whole recorded schedule that lists its poll skips keeps its own
+        // jumps beside them: two recordings of the same events, one in format
+        // 3 and one in format 4 with other jumps, never lend each other their
+        // jumps, in either order. The format-3 one, which lists no poll skips,
+        // takes one recording's jumps whole.
+        {
+            use detcore::preemptions::PollSkip;
+            let jump = |target| TimeSkip {
+                event: 1,
+                target: LogicalTime::from_nanos(target),
+                reason: TimeSkipReason::IdleGuestPollers,
+            };
+            let plain = PreemptionRecord::from_sched_events(events.clone())
+                .with_format(Some(3))
+                .with_time_skips(vec![jump(1000)]);
+            let polled: PreemptionRecord = serde_json::from_value(serde_json::json!({
+                "per_thread": {},
+                "global": events,
+                "format_version": detcore::preemptions::POLL_SKIPS_FORMAT,
+                "time_skips": [jump(2000)],
+                "poll_skips": [{"after": 1, "thread": 3}],
+            }))
+            .unwrap();
+            polled.validate().unwrap();
+            let skip = PollSkip {
+                after: 1,
+                thread: DetTid::from_raw(3),
+            };
+            for order in [[&plain, &polled], [&polled, &plain]] {
+                let options = options();
+                for source in order {
+                    options.time_skip_sources.lock().unwrap().remember(source);
+                }
+                let whole = |source: &PreemptionRecord| {
+                    options
+                        .write_trial_record(source.schedule_prefix(events.len()), &output)
+                        .unwrap();
+                    PreemptionReader::try_new(&output).unwrap().into_inner()
+                };
+                let written = whole(&polled);
+                assert_eq!(
+                    written.format_version(),
+                    Some(detcore::preemptions::POLL_SKIPS_FORMAT)
+                );
+                assert_eq!(written.time_skips(), Some(&[jump(2000)][..]));
+                assert_eq!(written.poll_skips(), &[skip][..]);
+                let written = whole(&plain);
+                assert_eq!(written.format_version(), Some(3));
+                assert!(written.poll_skips().is_empty());
+                let first = order[0].time_skips();
+                assert_eq!(written.time_skips(), first);
+            }
+        }
+        // A newer Hermit's format is not lowered to one this Hermit reads:
+        // the trial is refused, and the existing output survives.
+        let options = options();
+        options
+            .time_skip_sources
+            .lock()
+            .unwrap()
+            .remember(&record(Some(
+                detcore::preemptions::PREEMPTION_RECORD_FORMAT + 1,
+            )));
+        std::fs::write(&output, b"existing output must survive refusal").unwrap();
+        let message = options
+            .write_trial_schedule(events.clone(), &output)
+            .unwrap_err()
+            .to_string();
+        assert!(
+            message.contains(&format!(
+                "record format Some({})",
+                detcore::preemptions::PREEMPTION_RECORD_FORMAT + 1
+            )),
+            "{message}"
+        );
+        assert_eq!(
+            std::fs::read(&output).unwrap(),
+            b"existing output must survive refusal"
+        );
     }
 
     /// Analyze and bisect run every trial under the timeslice a recording says

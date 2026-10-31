@@ -91,16 +91,23 @@ pub(super) fn read_settings<T: serde::de::DeserializeOwned>(path: &Path) -> Resu
 
 impl BoundaryRecording {
     /// Combine a validated preemption history with the sole global record
-    /// stream. The legacy history must not contain another global stream. The
-    /// history's format is checked by [`Recording::decode`], which refuses it
-    /// as a policy refusal (`RecordFormatRefusal`): a deserializer would lose
-    /// that error's type.
+    /// stream. The legacy history must not contain another global stream, nor
+    /// poll skips (`PollSkip`), which only the legacy schedule replayer takes.
+    /// The history's format is checked by [`Recording::decode`], which refuses
+    /// it as a policy refusal (`RecordFormatRefusal`): a deserializer would
+    /// lose that error's type.
     pub fn new(preemptions: PreemptionRecord, schedule: Schedule) -> anyhow::Result<Self> {
         preemptions
             .validate_contents()
             .map_err(anyhow::Error::msg)?;
         if !preemptions.global.is_empty() {
             bail!("slice-boundary recording has a second, legacy global event stream");
+        }
+        if !preemptions.poll_skips.is_empty() {
+            bail!(
+                "slice-boundary recording lists poll skips, which a boundary replay does not take; \
+                 only a legacy schedule records and replays them"
+            );
         }
         Ok(Self {
             preemptions,
@@ -621,6 +628,73 @@ mod tests {
         std::fs::write(&path, serde_json::to_vec(&bad).unwrap()).unwrap();
         assert!(HistoryReader::read(&path).is_err());
         assert_ne!(std::fs::read(&path).unwrap(), before);
+    }
+
+    /// A boundary replay takes no poll skips, so a boundary recording that
+    /// lists any is refused by name, by the constructor and by the reader of
+    /// a serialized one. A legacy record keeps a skip at either end of its
+    /// events. The slice-boundary writer states no format that claims the
+    /// poll skips' list, keeps one this Hermit does not read as stated, and
+    /// refuses to start after noting a poll skip.
+    #[test]
+    fn a_boundary_recording_with_poll_skips_is_refused_by_name() {
+        use crate::preemptions::POLL_SKIPS_FORMAT;
+        use crate::preemptions::PREEMPTION_RECORD_FORMAT;
+        use crate::preemptions::PollSkip;
+        let Recording::Boundaries(valid) = sample(true) else {
+            unreachable!()
+        };
+        let skip = PollSkip {
+            after: 0,
+            thread: DetTid::from_raw(3),
+        };
+        let mut metadata = valid.preemptions.clone();
+        metadata.format_version = Some(POLL_SKIPS_FORMAT);
+        metadata.poll_skips.push(skip);
+        let error = BoundaryRecording::new(metadata, valid.schedule.clone()).unwrap_err();
+        assert!(error.to_string().contains("lists poll skips"), "{error}");
+        let mut wire: serde_json::Value =
+            serde_json::from_slice(&sample(true).encode().unwrap()).unwrap();
+        let preemptions = &mut wire["slice_boundary_recording"]["preemptions"];
+        preemptions["format_version"] = POLL_SKIPS_FORMAT.into();
+        preemptions["poll_skips"] = serde_json::json!([skip]);
+        let error = Recording::decode(&serde_json::to_vec(&wire).unwrap()).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("lists poll skips"),
+            "{error:#}"
+        );
+        let events = vec![SchedEvent::branches(DetTid::from_raw(3), 1)];
+        for after in [0, 1] {
+            let mut legacy = PreemptionRecord::from_sched_events(events.clone())
+                .with_format(Some(POLL_SKIPS_FORMAT));
+            legacy.poll_skips.push(PollSkip { after, ..skip });
+            let bytes = Recording::Legacy(legacy.clone()).encode().unwrap();
+            assert_eq!(
+                Recording::decode(&bytes).unwrap(),
+                Recording::Legacy(legacy)
+            );
+        }
+        let boundary_format = |writer: PreemptionWriter| writer.inner.format_version;
+        for format in [POLL_SKIPS_FORMAT, PREEMPTION_RECORD_FORMAT + 1, 0] {
+            let expected = crate::preemptions::format_without_poll_skips(Some(format));
+            let before = PreemptionWriter::new(None)
+                .with_format(Some(format))
+                .with_slice_boundaries()
+                .unwrap();
+            assert_eq!(boundary_format(before), expected, "format {format}");
+            let after = PreemptionWriter::new(None)
+                .with_slice_boundaries()
+                .unwrap()
+                .with_format(Some(format));
+            assert_eq!(boundary_format(after), expected, "format {format}");
+        }
+        assert_eq!(
+            crate::preemptions::format_without_poll_skips(Some(POLL_SKIPS_FORMAT)),
+            Some(POLL_SKIPS_FORMAT - 1)
+        );
+        let mut noted = PreemptionWriter::new(None);
+        noted.insert_poll_skip(DetTid::from_raw(3));
+        assert!(noted.with_slice_boundaries().is_err());
     }
 
     #[test]
