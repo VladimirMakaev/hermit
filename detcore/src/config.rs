@@ -191,7 +191,7 @@ mod tests {
         // Adds `GlobalRequest::ImplicitPort` (#4664).
         (31, "be74b30d0679813f", "f013e36743d8d9e6"),
         // Adds `GlobalRequest::CpuClockProcess` and `GlobalResponse::CpuClockProcess` (#4885).
-        (20, "ee39a50c882f2239", "f013e36743d8d9e6"),
+        (32, "0e4c373f62ab542e", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
