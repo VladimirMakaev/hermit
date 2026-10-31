@@ -2264,20 +2264,22 @@ impl AnalyzeOpts {
         name: &str,
         make: impl Fn(&str) -> anyhow::Result<RunData>,
     ) -> anyhow::Result<(anyhow::Result<()>, RunData)> {
-        self.decisive_trial_unless(name, make, |_| false)
+        let (launched, run, _) = self.decisive_trial_unless(name, make, |_| false)?;
+        Ok((launched, run))
     }
 
     /// [`Self::decisive_trial`], except that a run `settled` says is
     /// settled already, however it ended, is not run again: the bisection's
     /// round that left its spliced schedule has no outcome for that schedule
     /// whether or not it finished, and a rerun would leave it at the same
-    /// event.
+    /// event. Also returns the first run when a rerun replaced it, so that a
+    /// caller that removes a trial's files removes its files too.
     pub(super) fn decisive_trial_unless(
         &self,
         name: &str,
         make: impl Fn(&str) -> anyhow::Result<RunData>,
         settled: impl Fn(&RunData) -> bool,
-    ) -> anyhow::Result<(anyhow::Result<()>, RunData)> {
+    ) -> anyhow::Result<(anyhow::Result<()>, RunData, Option<RunData>)> {
         let mut run = make(name)?;
         self.show_trial_repro(&run);
         let launched = run.launch();
@@ -2288,7 +2290,7 @@ impl AnalyzeOpts {
         };
         match &launched {
             Err(error) if host_timed(&run, error) && !settled(&run) => {}
-            _ => return Ok((launched, run)),
+            _ => return Ok((launched, run, None)),
         }
         let retry_name = format!("{name}_retry");
         let mut retry = make(&retry_name)?.with_bound_factor(CONFIRM_BOUND_FACTOR);
@@ -2317,9 +2319,9 @@ impl AnalyzeOpts {
             if host_timed(&retry, &error) && !settled(&retry) {
                 return Err(incomplete_trial(error, &retry.root_path()));
             }
-            return Ok((Err(error), retry));
+            return Ok((Err(error), retry, Some(run)));
         }
-        Ok((launched, retry))
+        Ok((launched, retry, Some(run)))
     }
 
     /// [`Self::decisive_trial`] for a search trial: the completed run, or the
@@ -2473,11 +2475,8 @@ impl AnalyzeOpts {
         // The access trace taken is the one of the run that completed.
         let request = std::cell::RefCell::new(None);
         let mut run = self.completed_trial(runname, |name| {
-            let run = self.prefix_trial(name, schedule, len, continuation)?;
-            let (mut run, traced) = self.request_trace(run, "target", trace_from);
-            let stack_path = run.root_path().with_extension("stack");
-            run.runopts.det_opts.det_config.stacktrace_event =
-                vec![(position as u64, Some(stack_path))];
+            let (run, _) = self.prefix_stack_trial(name, schedule, len, position, continuation)?;
+            let (run, traced) = self.request_trace(run, "target", trace_from);
             *request.borrow_mut() = traced;
             Ok(run)
         })?;
@@ -2502,16 +2501,18 @@ impl AnalyzeOpts {
         Ok((is_match, stack, traced))
     }
 
-    /// The prefix trial `prefix_stack` launches, and the file its stack goes
-    /// to: the stack at schedule `position`, requested by position.
+    /// The prefix trial `prefix_stack` launches, with its `continuation`
+    /// ([`Self::prefix_trial`]), and the file its stack goes to: the stack at
+    /// schedule `position`, requested by position.
     fn prefix_stack_trial(
         &self,
         runname: &str,
         schedule: &PreemptionRecord,
         len: usize,
         position: usize,
+        continuation: MaybeTimeslice,
     ) -> anyhow::Result<(RunData, PathBuf)> {
-        let mut run = self.prefix_trial(runname, schedule, len)?;
+        let mut run = self.prefix_trial(runname, schedule, len, continuation)?;
         let stack_path = run.root_path().with_extension("stack");
         let config = &mut run.runopts.det_opts.det_config;
         config.stacktrace_event = vec![(position as u64, Some(stack_path.clone()))];
@@ -3673,7 +3674,6 @@ impl AnalyzeOpts {
                     .into_runopts();
                 let fakerun = RunData::from_schedule_trace(self, runname, runopts, path.clone());
                 return Ok(fakerun);
-                RunData::draw_no_instruction_offsets(ro);
             }
             let from_where = if self.run2_seed.is_some() {
                 "--run2-seed"
@@ -3699,12 +3699,14 @@ impl AnalyzeOpts {
                 } else if let Some(path) = &self.run2_preemptions {
                     // Replay from preemption record to record schedule.
                     ro.det_opts.det_config.replay_preemptions_from = Some(path.clone());
+                    RunData::draw_no_instruction_offsets(ro);
                     // TODO: if the file already contains a schedule, we don't need to
                     // rerun it. Unless selfcheck is specified.
                 } else {
                     // Otherwise we just assume that a *baseline* (non-chaos) run will do
                     // the trick.
                     ro.det_opts.det_config.chaos = false;
+                    RunData::draw_no_instruction_offsets(ro);
                 }
                 Ok(newrun)
             })?;
@@ -3747,14 +3749,24 @@ impl AnalyzeOpts {
     ) -> anyhow::Result<CriticalSchedule> {
         self.phase5_bisect_traces_with(target.schedevents(), baseline.schedevents(), |i, sched| {
             let runname = format!("bisect_round_{:0wide$}", i, wide = 3);
-            let (launched, mut newrun) = self.decisive_trial_unless(
+            let (launched, mut newrun, replaced) = self.decisive_trial_unless(
                 &runname,
                 |name| {
                     let mut run = RunData::new_baseline(self, name.to_owned())?
                         .with_schedule_replay() // Default input path
                         .with_schedule_recording(); // Default output path
                     // Prepare the next synthetic schedule on disk:
-                    self.write_trial_schedule(sched.to_owned(), run.sched_path_in())?;
+                    self.write_trial_schedule_from(
+                        sched.to_owned(),
+                        &[target, baseline],
+                        run.sched_path_in(),
+                    )?;
+                    if self.verbose && !self.keep_tmp {
+                        eprintln!(
+                            ":: {name}'s schedules are removed after the trial; --keep-tmp keeps \
+                             them"
+                        );
+                    }
                     Ok(run)
                 },
                 // A round that left its schedule is not run again when a
@@ -3787,6 +3799,11 @@ impl AnalyzeOpts {
                 schedule: record.into_global(),
             };
             newrun.discard_schedules();
+            // The first run of a round that ran again has no outcome; its
+            // schedules go the same way.
+            if let Some(replaced) = &replaced {
+                replaced.discard_schedules();
+            }
             Ok(completed)
         })
     }
@@ -4819,7 +4836,8 @@ impl AnalyzeOpts {
 
         // The other endpoint of the bisection search:
         // What we thought was the final_pr can change here:
-        let baseline_endpoint_run = self.phase4_choose_baseline_sched_events(target_preempts)?;
+        let mut baseline_endpoint_run =
+            self.phase4_choose_baseline_sched_events(target_preempts)?;
 
         // Endpoints recorded while replaying preemptions ran slices longer
         // than the bound, and the bisection's schedules must say so.
@@ -4858,7 +4876,7 @@ impl AnalyzeOpts {
         // program order only when the runs' per-thread traces agree; where
         // they diverge, every spliced round may leave its schedule, and the
         // decision is still within the failing schedule.
-        let divergence = trace_divergence(baseline, target);
+        let divergence = trace_divergence(baseline.schedevents(), target.schedevents());
         if divergence.diverges() {
             let why = DivergentTraces(divergence);
             eprintln!(
@@ -6142,7 +6160,7 @@ mod tests {
             SchedEvent::branches(tid, 5),
         ]);
         let (run, stack_path) = options
-            .prefix_stack_trial("final_target_for_stacktraces", &target, 3, 2)
+            .prefix_stack_trial("final_target_for_stacktraces", &target, 3, 2, None)
             .unwrap();
         let config = &run.runopts.det_opts.det_config;
         assert!(config.stacktrace_at_schedule_positions);
@@ -10862,8 +10880,8 @@ mod tests {
                 .collect()
         };
         // Thread 5 running before thread 3 finishes meets the target.
-        let target = events(&[3, 3, 5, 3, 5, 3]);
-        let baseline = events(&[3, 3, 3, 3, 5, 5]);
+        let target = PreemptionRecord::from_sched_events(events(&[3, 3, 5, 3, 5, 3]));
+        let baseline = PreemptionRecord::from_sched_events(events(&[3, 3, 3, 3, 5, 5]));
         let runner = |stop_first: bool, ran: RanTrials| {
             crate::analyze::rundata::TrialRunner(Some(Arc::new(move |run: &mut RunData| {
                 ran.lock().unwrap().push((
@@ -10915,9 +10933,38 @@ mod tests {
                 }
             }
             counts.push(ran.len());
+            // Each round's schedules are removed once its outcome is read,
+            // the first run's of a round that ran again too.
+            assert_eq!(round_schedules(options.tmp_dir.as_ref().unwrap()), 0);
         }
         assert_eq!(found[0], found[1]);
         assert_eq!(counts[1], 2 * counts[0]);
+
+        // With --keep-tmp both runs of every round keep them.
+        let (mut options, _workspace) = analysis_in(
+            &parent.path().join("keep"),
+            &["--target-stdout=FAILED", "--trial-timeout=10", "--keep-tmp"],
+        );
+        let ran = Arc::new(Mutex::new(Vec::new()));
+        options.trial_runner = runner(true, ran.clone());
+        options.phase5_bisect_traces(&target, &baseline).unwrap();
+        // Every run wrote the schedule it replays, and each rerun recorded one.
+        assert_eq!(
+            round_schedules(options.tmp_dir.as_ref().unwrap()),
+            ran.lock().unwrap().len() * 3 / 2
+        );
+    }
+
+    /// How many schedules of the bisection's rounds `workspace` holds: those
+    /// they replayed and those they recorded.
+    fn round_schedules(workspace: &Path) -> usize {
+        std::fs::read_dir(workspace)
+            .unwrap()
+            .filter_map(|entry| entry.unwrap().file_name().into_string().ok())
+            .filter(|name| {
+                name.starts_with("bisect_round_") && name.ends_with(&format!(".{PREEMPTS_EXT}"))
+            })
+            .count()
     }
 
     /// A round that leaves its schedule and is then stopped (by analyze's
@@ -10936,8 +10983,8 @@ mod tests {
                 .collect()
         };
         // Thread 5 running before thread 3 finishes meets the target.
-        let target = events(&[3, 3, 5, 3, 3, 5, 3, 3]);
-        let baseline = events(&[3, 3, 3, 3, 3, 3, 5, 5]);
+        let target = PreemptionRecord::from_sched_events(events(&[3, 3, 5, 3, 3, 5, 3, 3]));
+        let baseline = PreemptionRecord::from_sched_events(events(&[3, 3, 3, 3, 3, 3, 5, 5]));
         let departure = detcore_model::summary::ScheduleDeparture {
             event: 2,
             expected: DetTid::from_raw(5),
@@ -11158,8 +11205,8 @@ mod tests {
                 .collect()
         };
         // Thread 5 running before thread 3 finishes meets the target.
-        let target = events(&[3, 3, 5, 3, 3, 5, 3, 3]);
-        let baseline = events(&[3, 3, 3, 3, 3, 3, 5, 5]);
+        let target = PreemptionRecord::from_sched_events(events(&[3, 3, 5, 3, 3, 5, 3, 3]));
+        let baseline = PreemptionRecord::from_sched_events(events(&[3, 3, 3, 3, 3, 3, 5, 5]));
         let departure = detcore_model::summary::ScheduleDeparture {
             event: 2,
             expected: DetTid::from_raw(5),

@@ -346,8 +346,8 @@ pub struct AnalyzeOpts {
     /// With `auto`, the initial run and completed target/baseline endpoint runs are measured.
     /// Later runs are bounded at max(60 s, 10 times the slowest measured run, 4 times the
     /// slowest run that finished so far), rounded up to whole seconds. With
-    /// `--run1-preemptions`, no initial run is made: automatic bounds wait for a measured replay,
-    /// so use an explicit number to bound trials immediately. When this bound fires is the host's,
+    /// `--run1-preemptions`, the initial run is a replay of the record: it is measured like a
+    /// seed's, and an explicit number bounds it too. When this bound fires is the host's,
     /// so a run it stops has no outcome and is never counted: a `--prefix-search` trial, a
     /// default-search (bisection) trial or the baseline run runs again at once with 4 times the
     /// bound (within the run arguments' own `--timeout` and the time budget left), and only a

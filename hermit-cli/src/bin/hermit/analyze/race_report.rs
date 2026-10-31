@@ -635,7 +635,7 @@ impl AnalyzeOpts {
         }
         let met = match run.launch() {
             Ok(()) => run.is_a_match(),
-            Err(error) if guest_reached_a_refusal(&error) => {
+            Err(error) if guest_refusal(&error) == Some(Refusal::Deterministic) => {
                 return Err(refused_pass(number, role, &runname));
             }
             Err(error) if error.downcast_ref::<RunTimeoutMarker>().is_some() => {
