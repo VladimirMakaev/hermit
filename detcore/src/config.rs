@@ -171,7 +171,7 @@ mod tests {
         // `SchedEvent::strex_fails`, which the event's bincode always writes
         // (#4780), and the digest now covers the event `TraceSchedEvent`
         // carries: its fields, its `Serialize` and its count's representation.
-        (21, "c2640dec38993a57", "f013e36743d8d9e6"),
+        (24, "68e819ae4e60d5f1", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
