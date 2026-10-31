@@ -2444,13 +2444,13 @@ impl AnalyzeOpts {
             Some(ids) => record.with_guest_ids(ids),
             None => record,
         }
-            .with_rewrite_exclusives_in_memory(self.trial_rewrite_exclusives_in_memory())
-            .with_uncapped_slices(self.trial_schedules_uncapped.get())
-            .with_post_crash_timeslice(self.trial_post_crash_timeslice())
-            .with_queued_sleeps_registered_at_first_pass(
-                self.trial_sleep_registration() == SleepRegistration::FirstPass,
-            )
-            .with_rng_seed(Some(self.trial_rng_seed()));
+        .with_rewrite_exclusives_in_memory(self.trial_rewrite_exclusives_in_memory())
+        .with_uncapped_slices(self.trial_schedules_uncapped.get())
+        .with_post_crash_timeslice(self.trial_post_crash_timeslice())
+        .with_queued_sleeps_registered_at_first_pass(
+            self.trial_sleep_registration() == SleepRegistration::FirstPass,
+        )
+        .with_rng_seed(Some(self.trial_rng_seed()));
         // And the target's scheduler seed, once known.
         match self.trial_sched_seed {
             Some(seed) => record.with_sched_seed(Some(seed)),
@@ -6109,11 +6109,17 @@ mod tests {
             .unwrap()
             .with_schedule_replay();
         let path = run.sched_path_in().to_path_buf();
-        options.write_trial_schedule_from(events(5), &[], &path).unwrap();
+        options
+            .write_trial_schedule_from(events(5), &[], &path)
+            .unwrap();
         let first = run.journal_key();
-        options.write_trial_schedule_from(events(6), &[], &path).unwrap();
+        options
+            .write_trial_schedule_from(events(6), &[], &path)
+            .unwrap();
         assert_ne!(run.journal_key(), first);
-        options.write_trial_schedule_from(events(5), &[], &path).unwrap();
+        options
+            .write_trial_schedule_from(events(5), &[], &path)
+            .unwrap();
         assert_eq!(run.journal_key(), first);
     }
 
