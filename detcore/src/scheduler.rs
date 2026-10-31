@@ -1617,9 +1617,12 @@ pub struct Scheduler {
     /// The sequence number of each guest-state-only poller's latest grant,
     /// until the thread commits a turn of another kind.
     guest_state_polled_at: BTreeMap<DetTid, u64>,
-    /// The sequence number of each thread's latest committed turn: a poller's
-    /// failed attempt came no earlier.
-    last_commit_at: BTreeMap<DetTid, u64>,
+    /// The sequence number of each thread's latest polling grant: its latest
+    /// attempt. Another grant is no attempt, and runs no guest code before a
+    /// poller's retry: a schedule replay's `TraceReplay` grant, which only
+    /// hands a thread held after a traced event its turn back, can fall
+    /// between a poller's failed attempt and its retry.
+    last_attempt_at: BTreeMap<DetTid, u64>,
     /// Set at the commit of a FIFO open's poll, or of an idle guest-state
     /// poller's retry, when nothing else can run but a deadline is due at a
     /// finite time (`unblock_guest`): the next pass moves global time to that
@@ -5334,7 +5337,7 @@ impl Scheduler {
             last_progress: 0,
             retired_at: 0,
             guest_state_polled_at: Default::default(),
-            last_commit_at: Default::default(),
+            last_attempt_at: Default::default(),
             pending_time_skip: None,
             time_skip_mode,
             die_on_time_skip_desync: cfg.die_on_desync,
@@ -10509,7 +10512,7 @@ impl Scheduler {
             .and_then(|turn| turn.req.try_read())
             .and_then(Result::ok)
             .filter(|rs| self.is_idle_guest_poll(rs))?;
-        let others = self.alone_until(requester, self.last_commit_at.get(&requester).copied())?;
+        let others = self.alone_until(requester, self.last_attempt_at.get(&requester).copied())?;
         Some(others.into_iter().chain(own.poll_deadline).min())
     }
 
@@ -17807,6 +17810,49 @@ impl Scheduler {
         Self::retry_number(rs) > 1 && !rs.previous_attempt_made_progress
     }
 
+    /// The idle-poller bookkeeping of `dtid`'s committed turn (`unblock_guest`):
+    /// its sequence number; a polling grant's attempt (`last_attempt_at`); and
+    /// progress, which any grant but a guest-state-only poll and a replayed
+    /// switch-in (`switch_in`) is, and a guest-state-only poller's previous
+    /// grant is unless this request retries after an attempt that moved
+    /// nothing. Returns `dtid`'s latest attempt before this commit.
+    fn note_committed_turn(
+        &mut self,
+        dtid: DetTid,
+        polling: bool,
+        guest_state_poll: bool,
+        fruitless: bool,
+        switch_in: bool,
+    ) -> Option<u64> {
+        self.progress_epoch += 1;
+        let previous_attempt = if polling {
+            self.last_attempt_at.insert(dtid, self.progress_epoch)
+        } else {
+            self.last_attempt_at.get(&dtid).copied()
+        };
+        let previous_grant = self.guest_state_polled_at.remove(&dtid);
+        if guest_state_poll {
+            // This thread's previous grant moved something unless this request
+            // retries after an attempt that did not.
+            if let Some(previous) = previous_grant
+                && !fruitless
+            {
+                self.last_progress = self.last_progress.max(previous);
+            }
+            self.guest_state_polled_at.insert(dtid, self.progress_epoch);
+        } else if !switch_in || self.recordreplay_modes {
+            // Binary record/replay preserves its earlier progress accounting,
+            // including raw callers replaying a legacy schedule. Otherwise a
+            // replayed switch-in (`TraceReplay`) only resumes its thread,
+            // which changes guest state, if at all, by a later request that
+            // commits on its own; a replay hands idle pollers such turns
+            // where the recording only skipped them, so counting one would
+            // keep an opener that the recording found alone from ever being so.
+            self.last_progress = self.progress_epoch;
+        }
+        previous_attempt
+    }
+
     /// Whether nothing else can run ([`Self::alone_until`] answers `Some`).
     #[cfg(test)]
     fn nothing_else_can_run(&self, dtid: DetTid) -> bool {
@@ -17839,7 +17885,7 @@ impl Scheduler {
     ///   (`Resources::polls_guest_state_only`), whatever its backoff, whose
     ///   request retries after an attempt that moved nothing
     ///   (`waits_after_a_failed_attempt`), made no earlier than the latest
-    ///   progress: its latest attempt (`last_commit_at`) is at or after every
+    ///   progress: its latest attempt (`last_attempt_at`) is at or after every
     ///   turn known to be progress (`last_progress`) and every other poller's
     ///   grant whose thread's request does not repeat that call without
     ///   progress (`retries_its_call_without_progress`);
@@ -17856,11 +17902,11 @@ impl Scheduler {
     /// When it is "nothing", the caller first moves global time to the
     /// earliest finite deadline (`unblock_guest`).
     ///
-    /// `dtid` itself must be idle too: its previous commit (`own_previous_commit`),
-    /// after which its last attempt ran, is at or after that progress. A commit
-    /// lets `dtid` run its next attempt, and an attempt that can see newer
-    /// progress may succeed and run on into guest code, which must never see
-    /// global time jump.
+    /// `dtid` itself must be idle too: its latest attempt before this commit
+    /// (`own_previous_attempt`, from `last_attempt_at`) is at or after that
+    /// progress. A commit lets `dtid` run its next attempt, and an attempt that
+    /// can see newer progress may succeed and run on into guest code, which
+    /// must never see global time jump.
     ///
     /// `None` when something else can run; otherwise the earliest timeout
     /// among the idle pollers counted (`Resources::poll_deadline`), if any has
@@ -17869,9 +17915,9 @@ impl Scheduler {
     fn alone_until(
         &self,
         dtid: DetTid,
-        own_previous_commit: Option<u64>,
+        own_previous_attempt: Option<u64>,
     ) -> Option<Option<LogicalTime>> {
-        self.alone_until_with(dtid, own_previous_commit, true)
+        self.alone_until_with(dtid, own_previous_attempt, true)
     }
 
     /// [`Self::alone_until`], where `timed_polls_idle` false counts a poll with
@@ -17880,7 +17926,7 @@ impl Scheduler {
     fn alone_until_with(
         &self,
         dtid: DetTid,
-        own_previous_commit: Option<u64>,
+        own_previous_attempt: Option<u64>,
         timed_polls_idle: bool,
     ) -> Option<Option<LogicalTime>> {
         // A grant counts as progress unless the thread's current request
@@ -17900,16 +17946,13 @@ impl Scheduler {
             })
             .map(|(_, &grant)| grant)
             .fold(self.last_progress, u64::max);
-        if !own_previous_commit.is_some_and(|commit| commit >= progress) {
+        if !own_previous_attempt.is_some_and(|attempt| attempt >= progress) {
             return None;
         }
         let mut earliest_poll_deadline: Option<LogicalTime> = None;
         for &tid in self.next_turns.keys().filter(|&&tid| tid != dtid) {
-            let idle_poller = self.run_queue.contains_tid(tid)
-                && self
-                    .last_commit_at
-                    .get(&tid)
-                    .is_some_and(|&commit| commit >= progress);
+            let idle_poller =
+                self.run_queue.contains_tid(tid) && self.attempted_since(tid, progress);
             let idle_poll_deadline = idle_poller
                 .then(|| {
                     self.next_turns
@@ -18017,9 +18060,9 @@ impl Scheduler {
             && Self::waits_after_a_failed_attempt(rs)
     }
 
-    /// Whether `tid`'s latest attempt (`last_commit_at`) is at or after `progress`.
+    /// Whether `tid`'s latest attempt (`last_attempt_at`) is at or after `progress`.
     fn attempted_since(&self, tid: DetTid, progress: u64) -> bool {
-        self.last_commit_at
+        self.last_attempt_at
             .get(&tid)
             .is_some_and(|&commit| commit >= progress)
     }
@@ -18839,30 +18882,10 @@ impl Scheduler {
                     .and_then(Result::ok)
             })
             .flatten();
-        self.progress_epoch += 1;
-        // The committing thread's previous commit: its last attempt came no
-        // earlier, so whether that attempt could see the latest progress.
-        let previous_commit = self.last_commit_at.insert(dtid, self.progress_epoch);
-        let previous_grant = self.guest_state_polled_at.remove(&dtid);
-        if guest_state_poll {
-            // This thread's previous grant moved something unless this request
-            // retries after an attempt that did not.
-            if let Some(previous) = previous_grant
-                && !fruitless
-            {
-                self.last_progress = self.last_progress.max(previous);
-            }
-            self.guest_state_polled_at.insert(dtid, self.progress_epoch);
-        } else if !switch_in || self.recordreplay_modes {
-            // Binary record/replay preserves its earlier progress accounting,
-            // including raw callers replaying a legacy schedule. Otherwise a
-            // replayed switch-in (`TraceReplay`) only resumes its thread,
-            // which changes guest state, if at all, by a later request that
-            // commits on its own; a replay hands idle pollers such turns
-            // where the recording only skipped them, so counting one would
-            // keep an opener that the recording found alone from ever being so.
-            self.last_progress = self.progress_epoch;
-        }
+        // The committing thread's latest attempt before this commit: whether
+        // that attempt could see the latest progress.
+        let previous_attempt =
+            self.note_committed_turn(dtid, polling_grant, guest_state_poll, fruitless, switch_in);
         // A FIFO open's poll asks whether nothing else can run, and so does an
         // idle guest-state poller's retry: either way, when only a deadline can
         // still let a thread act, global time moves to it at the next pass. A
@@ -18886,7 +18909,7 @@ impl Scheduler {
             if legacy_poll_policy {
                 self.alone_until_with(dtid, Some(u64::MAX), false)
             } else {
-                self.alone_until(dtid, previous_commit)
+                self.alone_until(dtid, previous_attempt)
             }
         });
         if let (Some(reason), Some(others_poll_deadline)) = (reason, others) {
@@ -21281,7 +21304,7 @@ mod test {
         sched.default_signal_state_for_test(tid);
         sched.next_turns[&tid].req.put(Ok(resources));
         sched.run_queue.push_poller(tid, DEFAULT_PRIORITY, 1);
-        sched.last_commit_at.insert(tid, sched.progress_epoch);
+        sched.last_attempt_at.insert(tid, sched.progress_epoch);
         if guest_state_only {
             sched
                 .guest_state_polled_at
@@ -21577,7 +21600,7 @@ mod test {
         resources.poll_deadline = Some(LogicalTime::from_nanos(1_000_000));
         sched.next_turns[&poller].req.put(Ok(resources));
         sched.run_queue.push_poller(poller, DEFAULT_PRIORITY, 1);
-        sched.last_commit_at.insert(poller, sched.progress_epoch);
+        sched.last_attempt_at.insert(poller, sched.progress_epoch);
         sched
             .guest_state_polled_at
             .insert(poller, sched.progress_epoch);
@@ -21599,7 +21622,7 @@ mod test {
         resources.poll_deadline = Some(deadline);
         sched.next_turns[&tid].req.put(Ok(resources));
         sched.run_queue.push_poller(tid, DEFAULT_PRIORITY, 1);
-        sched.last_commit_at.insert(tid, sched.progress_epoch);
+        sched.last_attempt_at.insert(tid, sched.progress_epoch);
         sched
             .guest_state_polled_at
             .insert(tid, sched.progress_epoch);
@@ -21652,18 +21675,18 @@ mod test {
         let poller = DetTid::from_raw(5);
         register_known_thread(&mut sched, sibling);
         queued_poller(&mut sched, poller, true);
-        let old_commit = sched.last_commit_at[&poller];
+        let old_attempt = sched.last_attempt_at[&poller];
         assert!(sched.nothing_else_can_run(sibling));
         sched.next_turns[&sibling]
             .req
             .put(Ok(Resources::new(sibling)));
         let _ = turn_answer(&mut sched, sibling);
-        assert!(sched.last_progress > old_commit);
+        assert!(sched.last_progress > old_attempt);
         assert!(
             !sched.nothing_else_can_run(sibling),
             "the queued stale request is not idle"
         );
-        assert_eq!(sched.alone_until(poller, Some(old_commit)), None);
+        assert_eq!(sched.alone_until(poller, Some(old_attempt)), None);
         let _ = turn_answer(&mut sched, poller);
         assert!(
             sched.pending_time_skip.is_none(),
@@ -21687,6 +21710,27 @@ mod test {
         assert!(sched.nothing_else_can_run(sibling));
     }
 
+    /// A schedule replay's `TraceReplay` grant hands a thread held after a
+    /// traced event its turn back, and is no attempt. A pipe reader held that
+    /// way after its failed attempt, while the writer wrote and left, is not
+    /// idle: its retry may succeed. Before, the grant counted as the reader's
+    /// latest attempt, and a schedule replay of a reader whose writers had
+    /// exited reported a false guest deadlock. A further failed attempt makes
+    /// the reader idle again.
+    #[test]
+    fn a_trace_replay_grant_after_a_failed_attempt_is_no_attempt() {
+        let mut sched = Scheduler::new(&Config::default());
+        let reader = DetTid::from_raw(3);
+        queued_poller(&mut sched, reader, true);
+        sched.thread_tree.add_child(reader, reader, true);
+        assert!(sched.only_idle_guest_pollers_remain());
+        sched.note_committed_turn(DetTid::from_raw(7), false, false, false, false);
+        sched.note_committed_turn(reader, false, false, false, false);
+        assert!(!sched.only_idle_guest_pollers_remain());
+        sched.note_committed_turn(reader, true, true, true, false);
+        assert!(sched.only_idle_guest_pollers_remain());
+    }
+
     /// A partial pipe write's retry follows an attempt that moved bytes: the
     /// writer may move more (Claude review of
     /// https://github.com/rrnewton/hermit/pull/4329, F1).
@@ -21704,7 +21748,7 @@ mod test {
         resources.previous_attempt_made_progress = true;
         sched.next_turns[&writer].req.put(Ok(resources));
         sched.run_queue.push_poller(writer, DEFAULT_PRIORITY, 2);
-        sched.last_commit_at.insert(writer, sched.progress_epoch);
+        sched.last_attempt_at.insert(writer, sched.progress_epoch);
         sched
             .guest_state_polled_at
             .insert(writer, sched.progress_epoch);
@@ -21987,7 +22031,7 @@ mod test {
         grant_guest_poll(&mut sched, sibling, 0);
         sched.logically_kill_thread(&sibling, &DetPid::from_raw(5), MmId::initial(sibling));
         assert!(!sched.next_turns.contains_key(&sibling));
-        assert!(sched.retired_at > sched.last_commit_at[&reader]);
+        assert!(sched.retired_at > sched.last_attempt_at[&reader]);
         assert!(!sched.only_idle_guest_pollers_remain());
         grant_guest_poll(&mut sched, reader, 1);
         queue_guest_poll(&mut sched, reader, 2);
@@ -22403,7 +22447,7 @@ mod test {
                 _ => {
                     fifo_open_poll(&mut sched, poller);
                     sched.run_queue.push_poller(poller, DEFAULT_PRIORITY, 1);
-                    sched.last_commit_at.insert(poller, sched.progress_epoch);
+                    sched.last_attempt_at.insert(poller, sched.progress_epoch);
                 }
             }
             let writer = DetTid::from_raw(5);
@@ -22428,7 +22472,7 @@ mod test {
         resources.waits_until_nothing_else_can_run = true;
         sched.next_turns[&tid].req.put(Ok(resources));
         // Its previous poll, after which nothing moved.
-        sched.last_commit_at.insert(tid, sched.progress_epoch);
+        sched.last_attempt_at.insert(tid, sched.progress_epoch);
     }
 
     /// A sleeping thread cannot run before its deadline, so it does not keep a
@@ -22491,7 +22535,7 @@ mod test {
         resources.poll_deadline = deadline;
         sched.next_turns[&tid].req.put(Ok(resources));
         // Its previous, failed attempt, after which nothing moved.
-        sched.last_commit_at.insert(tid, sched.progress_epoch);
+        sched.last_attempt_at.insert(tid, sched.progress_epoch);
         sched
             .guest_state_polled_at
             .insert(tid, sched.progress_epoch);
@@ -22529,6 +22573,9 @@ mod test {
         fifo_open_poll(&mut sched, opener);
         let poller = DetTid::from_raw(5);
         register_known_thread(&mut sched, poller);
+        // Its failed attempt, after which nothing moved; the replay held it
+        // after that attempt.
+        sched.last_attempt_at.insert(poller, sched.progress_epoch);
         let mut switch_in = Resources::new(poller);
         switch_in.insert(ResourceID::TraceReplay, Permission::RW);
         sched.next_turns[&poller].req.put(Ok(switch_in));
@@ -22663,9 +22710,9 @@ mod test {
                 let opener = DetTid::from_raw(3);
                 fifo_open_poll(&mut sched, opener);
                 if let Some(previous) = previous {
-                    sched.last_commit_at.insert(opener, previous);
+                    sched.last_attempt_at.insert(opener, previous);
                 } else {
-                    sched.last_commit_at.remove(&opener);
+                    sched.last_attempt_at.remove(&opener);
                 }
                 let mut request = sched.next_turns[&opener].req.try_read().unwrap().unwrap();
                 // Even a stray new hint cannot shorten the old FIFO jump.
