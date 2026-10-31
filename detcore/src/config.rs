@@ -376,8 +376,8 @@ mod tests {
         assert_ne!(grown, schedule);
         assert_ne!(definition_digest(source, payload, &grown), digest);
         let carried = schedule.replacen(
-            "let carry = !strex_fails.is_zero() || !serializer.is_human_readable();",
-            "let carry = !strex_fails.is_zero();",
+            "let omit_fails = readable && self.strex_fails.is_zero();",
+            "let omit_fails = self.strex_fails.is_zero();",
             1,
         );
         assert_ne!(carried, schedule);
