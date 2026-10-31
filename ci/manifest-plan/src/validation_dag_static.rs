@@ -3154,7 +3154,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The kconc/4966 V4c replay-priority transplant adds fourteen detcore units: 3003 + 14 = 3017, re-measured at this integration head.
     // The in-flight SCM_RIGHTS queue (https://github.com/rrnewton/hermit/issues/4930) adds seventeen detcore units: 3017 + 17 = 3034, listed.
     // The inotify fault-boundary repair adds three detcore units: 3034 + 3 = 3037, by nextest list.
-    ("test.detcore_unit", 3242),
+    // And preemptions::tests::a_schedule_prefix_keeps_the_guest_numbering
+    // (PR 4947's restored prefix-record test for chosen guest IDs): 3243.
+    ("test.detcore_unit", 3243),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5568,7 +5570,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same fourteen kconc/4966 V4c replay-priority units: 3003 + 14 = 3017.
     // The same seventeen SCM_RIGHTS queue units: 3017 + 17 = 3034.
     // The same three inotify fault-boundary units: 3034 + 3 = 3037.
-    ("test.detcore_unit_on_host", 3037),
+    // And the same prefix guest-numbering unit: 3038.
+    ("test.detcore_unit_on_host", 3038),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
