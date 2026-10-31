@@ -174,6 +174,8 @@ mod tests {
         (24, "68e819ae4e60d5f1", "f013e36743d8d9e6"),
         // Adds `GlobalRequest::PostCrash`, `GlobalResponse::PostCrash` and `GlobalResponse::WithPostCrashBound` (#4867).
         (25, "2ea294f78e7e054c", "f013e36743d8d9e6"),
+        // Retypes `GlobalResponse::StartNewThread` (#4789).
+        (23, "f37995922d314411", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
