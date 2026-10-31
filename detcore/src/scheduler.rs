@@ -21577,7 +21577,9 @@ impl Scheduler {
         // Likewise name the recorded background starts the replay never took,
         // each by its thread, call and place in the record, and where the
         // replay passed it (https://github.com/rrnewton/hermit/issues/4876).
-        if let Some(replayer) = self.replayer.as_ref()
+        // A stopped run's replay is unfinished by definition.
+        if end == RunEnd::Finished
+            && let Some(replayer) = self.replayer.as_ref()
             && let untaken = replayer.untaken_background_starts()
             && !untaken.is_empty()
         {
@@ -21645,43 +21647,46 @@ impl Scheduler {
         }
         // Legacy EOF policy does not make an unconsumed suffix fatal. Name
         // incomplete callback metadata separately; do not invent guest events.
-        // The record puts each unconsumed checkpoint at the event ending its
-        // slice; the replay ended without reaching it.
-        let replay_ended_at = self.traced_replay_position();
-        for (tid, points) in &self.callback_checkpoints {
-            if !points.is_empty() {
-                let places: Vec<_> = points
-                    .iter()
-                    .map(|point| self.checkpoint_ref(*tid, point.history_index))
-                    .collect();
-                let message = format!(
-                    "DESYNC incomplete callback history for {tid}: {} unconsumed checkpoints \
-                     ({}){}",
-                    places.len(),
-                    places
+        // A stopped run's replay is unfinished by definition.
+        if end == RunEnd::Finished {
+            // The record puts each unconsumed checkpoint at the event ending its
+            // slice; the replay ended without reaching it.
+            let replay_ended_at = self.traced_replay_position();
+            for (tid, points) in &self.callback_checkpoints {
+                if !points.is_empty() {
+                    let places: Vec<_> = points
                         .iter()
-                        .map(|place| format!(
-                            "{} {}",
-                            place.number,
-                            Self::record_position_text(place.record_event)
-                        ))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    Self::reported_at_text(replay_ended_at, "the replay ended"),
-                );
-                tracing::warn!("{}", message);
-                desync_descrip
-                    .get_or_insert_with(String::new)
-                    .push_str(&format!("{message}\n"));
-                desync_notes.push(detcore_model::summary::DesyncNote {
-                    kind: detcore_model::summary::DesyncKind::IncompleteCallbackHistory,
-                    thread: Some(*tid),
-                    record_event: places.first().and_then(|place| place.record_event),
-                    checkpoints: places,
-                    background_starts: Vec::new(),
-                    reported_at: replay_ended_at,
-                    message,
-                });
+                        .map(|point| self.checkpoint_ref(*tid, point.history_index))
+                        .collect();
+                    let message = format!(
+                        "DESYNC incomplete callback history for {tid}: {} unconsumed checkpoints \
+                         ({}){}",
+                        places.len(),
+                        places
+                            .iter()
+                            .map(|place| format!(
+                                "{} {}",
+                                place.number,
+                                Self::record_position_text(place.record_event)
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(", "),
+                        Self::reported_at_text(replay_ended_at, "the replay ended"),
+                    );
+                    tracing::warn!("{}", message);
+                    desync_descrip
+                        .get_or_insert_with(String::new)
+                        .push_str(&format!("{message}\n"));
+                    desync_notes.push(detcore_model::summary::DesyncNote {
+                        kind: detcore_model::summary::DesyncKind::IncompleteCallbackHistory,
+                        thread: Some(*tid),
+                        record_event: places.first().and_then(|place| place.record_event),
+                        checkpoints: places,
+                        background_starts: Vec::new(),
+                        reported_at: replay_ended_at,
+                        message,
+                    });
+                }
             }
         }
         for note in &self.callback_checkpoint_desyncs {
