@@ -163,6 +163,8 @@ mod tests {
         (20, "3fb2388350b1a2fa", "f013e36743d8d9e6"),
         // Adds `GlobalRequest::PublishInstructionOffset` and `GlobalResponse::PublishInstructionOffset` (#4769).
         (21, "79155cee9baaa5cd", "f013e36743d8d9e6"),
+        // Adds `GlobalResponse::WithReplayInstructionOffset` (#4845).
+        (22, "7d5b706bc20b4b6d", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
