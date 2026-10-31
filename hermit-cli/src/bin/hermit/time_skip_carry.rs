@@ -105,15 +105,20 @@ fn shared_events(left: &[u64], right: &[u64]) -> usize {
 impl TimeSkipSources {
     /// Remember `record`. One that made no jump counts as much as one that
     /// did: a trial that repeats it furthest makes no jump either. Its format
-    /// counts below the instruction-offset format
+    /// counts below the background-starts format
+    /// (`detcore::preemptions::format_without_background_starts`): that format
+    /// and the one below it share their timing rules and differ only in a list
+    /// of starts no spliced trial keeps, so a recording that notes its starts
+    /// and the re-record of its schedule replay share one format here. Its
+    /// format counts below the instruction-offset format
     /// (`detcore::preemptions::format_without_instruction_offsets`): that
-    /// format and the one below it share their timing rules, and a trial
-    /// whose schedule holds offsets states it again when it is written
+    /// format and the one below it share their timing rules, and a trial whose
+    /// schedule holds offsets states it again when it is written
     /// (`PreemptionRecord::with_format`), so a recording with offsets and a
     /// trial's record without them share one format here.
     pub fn remember(&mut self, record: &PreemptionRecord) {
         self.formats
-            .insert(detcore::preemptions::format_without_instruction_offsets(
+            .insert(detcore::preemptions::format_without_background_starts(
                 record.format_version(),
             ));
         let source = Source {
@@ -128,7 +133,7 @@ impl TimeSkipSources {
     }
 
     /// The single timing format all sources share, or the current format
-    /// below the instruction-offset format before any source is read
+    /// below the background-starts format before any source is read
     /// (`remember`). There is no proved conversion between
     /// legacy, format 2 and format 3 charging rules, even when a selected
     /// prefix comes from just one of the sources.
@@ -143,7 +148,7 @@ impl TimeSkipSources {
                 .collect::<Vec<_>>()
         );
         Ok(self.formats.first().copied().unwrap_or(
-            detcore::preemptions::format_without_instruction_offsets(Some(
+            detcore::preemptions::format_without_background_starts(Some(
                 detcore::preemptions::PREEMPTION_RECORD_FORMAT,
             )),
         ))
@@ -354,7 +359,7 @@ mod tests {
     #[test]
     fn a_trial_refuses_mixed_timing_formats() {
         let mut sources = TimeSkipSources::default();
-        let current = detcore::preemptions::format_without_instruction_offsets(Some(
+        let current = detcore::preemptions::format_without_background_starts(Some(
             detcore::preemptions::PREEMPTION_RECORD_FORMAT,
         ));
         assert_eq!(sources.trial_format().unwrap(), current);

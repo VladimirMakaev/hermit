@@ -58539,7 +58539,10 @@ fn chosen_json_provenance_follows_real_target_setup_and_both_replay_loaders() {
         })
     );
     assert_eq!(original["guest_ids"]["Chosen"]["base"], 5000);
-    assert_eq!(original["format_version"], 3);
+    assert_eq!(
+        original["format_version"],
+        detcore::preemptions::PREEMPTION_RECORD_FORMAT
+    );
     let event_count = original["global"].as_array().unwrap().len();
     assert!(event_count > 0, "{original}");
     // Raw schedule replay records its own registration priority, rather
@@ -58570,6 +58573,13 @@ fn chosen_json_provenance_follows_real_target_setup_and_both_replay_loaders() {
         }
         history["final_prio"] = serde_json::json!(if tid == "5004" { 999 } else { 1000 });
     }
+    // A schedule replay notes no background starts, so its re-record states
+    // the format below the background-starts format, with the same timing
+    // rules; a priority replay notes them and keeps the recording's format.
+    let schedule_format =
+        serde_json::json!(detcore::preemptions::format_without_background_starts(
+            Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
+        ));
     let schedule_flag = format!("--replay-schedule-from={}", recording.display());
     let priority_flag = format!("--replay-preemptions-from={}", recording.display());
     for route in ["schedule", "priority", "both"] {
@@ -58625,6 +58635,8 @@ fn chosen_json_provenance_follows_real_target_setup_and_both_replay_loaders() {
         ] {
             let expected = if route == "schedule" && field == "per_thread" {
                 &schedule_per_thread
+            } else if route == "schedule" && field == "format_version" {
+                &schedule_format
             } else {
                 &original[field]
             };
