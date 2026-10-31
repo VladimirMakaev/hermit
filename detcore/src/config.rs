@@ -182,6 +182,8 @@ mod tests {
         // Retypes `GlobalResponse::StartNewThread`: the thread's replay
         // history with its check-in marks (#4902).
         (28, "b018ce6ee3d10754", "f013e36743d8d9e6"),
+        // Retypes `GlobalRequest::TraceSchedEvent`; adds `GlobalResponse::WithWatchOrder` (#4796).
+        (21, "d6fc2fcfa8a74a0c", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
