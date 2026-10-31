@@ -1260,18 +1260,31 @@ impl AnalyzeOpts {
     /// ([`Self::stamp_trial_record`]). The record carries the jumps of global
     /// time of the recorded schedule whose event prefix its events repeat
     /// furthest (`crate::time_skip_carry`), so its replay jumps where that
-    /// recording did. All sources must share one timing format; mixing
-    /// formats cannot preserve their different switch-in charging rules.
-    /// An incompatible format or invalid record is refused before writing.
+    /// recording did, in the oldest format among the recordings read
+    /// (`TimeSkipSources::trial_format`): one in format 1, which lists no
+    /// jumps, makes the trial list none. The trial charges replayed
+    /// switch-ins as the recordings did (`TimeSkipSources::trial_charges`),
+    /// whatever its format; recordings under different charges are refused
+    /// before any trial (`Self::refuse_recordings_under_another_switch_in_charge`).
+    /// An invalid record is refused before writing.
     pub fn write_trial_record(&self, record: PreemptionRecord, path: &Path) -> anyhow::Result<()> {
-        let (skips, format, identity) = {
+        let (skips, format, charged, identity) = {
             let sources = self.time_skip_sources.lock().unwrap();
             (
                 sources.carried(record.schedevents()),
-                sources.trial_format()?,
+                sources.trial_format(),
+                sources.trial_charges(),
                 sources.trial_identity_metadata(record.schedevents())?,
             )
         };
+        // A trial claims no more than the least complete recording read: in
+        // format 1 it lists no jumps.
+        let skips =
+            if format.is_some_and(|format| format >= detcore::preemptions::TIME_SKIPS_FORMAT) {
+                skips
+            } else {
+                Vec::new()
+            };
         let (guest_ids, reserved_input) = identity.unwrap_or_else(|| {
             (
                 record.guest_ids().unwrap_or_default(),
@@ -1290,6 +1303,9 @@ impl AnalyzeOpts {
             record
                 .with_format(format)
                 .with_time_skips(skips)
+                // The charge is the recordings', whatever format the trial is
+                // written in (`SWITCH_IN_CHARGE_FORMAT`).
+                .with_switch_ins_charged(charged)
                 .with_guest_ids(guest_ids)
                 .with_reserved_input(reserved_input),
         );
@@ -1378,6 +1394,87 @@ impl AnalyzeOpts {
             }
         }
         Ok(())
+    }
+
+    /// Refuse, before any trial, recordings whose runs charged replayed
+    /// switch-ins differently (`PreemptionRecord::switch_ins_charged`; a
+    /// record without the field did not charge them). Every trial replays its
+    /// schedule under one charge (`TimeSkipSources::trial_charges`), while
+    /// its jumps and format come from the recording it repeats: between a
+    /// recording that charged and one that did not, a trial built from one of
+    /// them replays by the other's rule, and global time drifts inside the
+    /// events it claims to repeat. Checked are the named `recordings`, a
+    /// schedule the run arguments replay (`--replay-schedule-from`), and the
+    /// `endpoints` analyze records itself, each named with its charge: a run
+    /// that follows no schedule, or replays only preemptions, charges every
+    /// stretch of guest code (https://github.com/rrnewton/hermit/pull/4864).
+    pub fn refuse_recordings_under_another_switch_in_charge(
+        &self,
+        recordings: &[(&str, &Path)],
+        endpoints: &[(String, bool)],
+    ) -> anyhow::Result<()> {
+        let trial = RunData::get_raw_runopts(self);
+        let replayed = trial
+            .det_opts
+            .det_config
+            .replay_schedule_from
+            .as_deref()
+            .map(|path| ("--replay-schedule-from", path));
+        let mut charges = Vec::new();
+        for (option, path) in recordings.iter().copied().chain(replayed) {
+            let charged = detcore::preemptions::boundary_recording::Recording::read(path)?
+                .charges_replayed_switch_ins();
+            charges.push((format!("{option} {}", path.display()), charged));
+        }
+        charges.extend(endpoints.iter().cloned());
+        let charged = charges.iter().find(|(_, charged)| *charged);
+        let uncharged = charges.iter().find(|(_, charged)| !*charged);
+        if let (Some((charged, _)), Some((uncharged, _))) = (charged, uncharged) {
+            return Err(
+                anyhow::Error::new(crate::container::PolicyRefusal).context(format!(
+                    "{charged} was made by a run that charged replayed switch-ins \
+                     (switch_ins_charged), and {uncharged} by one that did not: a trial replays \
+                     its schedule under one charge, so a trial built from either one's events \
+                     could not reproduce the run it repeats. Analyze recordings made under one \
+                     charge: re-record them with this Hermit."
+                )),
+            );
+        }
+        Ok(())
+    }
+
+    /// Each endpoint's switch-in charge, named, for
+    /// `refuse_recordings_under_another_switch_in_charge`. An endpoint given
+    /// by `--runN-schedule` carries its file's own; every other endpoint is a
+    /// run analyze records itself, from a seed, a chaos run or a preemption
+    /// record, which charges every stretch of guest code, or follows a
+    /// schedule the run arguments replay, whose charge it takes.
+    pub(crate) fn switch_in_charge_endpoints(&self) -> anyhow::Result<Vec<(String, bool)>> {
+        let own_charge = match RunData::get_raw_runopts(self)
+            .det_opts
+            .det_config
+            .replay_schedule_from
+            .as_deref()
+        {
+            Some(path) => detcore::preemptions::boundary_recording::Recording::read(path)?
+                .charges_replayed_switch_ins(),
+            None => true,
+        };
+        let mut endpoints = Vec::new();
+        for (option, schedule, run) in [
+            ("--run1-schedule", self.run1_schedule.clone(), "run 1"),
+            ("--run2-schedule", self.run2_schedule.clone(), "run 2"),
+        ] {
+            endpoints.push(match schedule {
+                Some(path) => (
+                    format!("{option} {}", path.display()),
+                    detcore::preemptions::boundary_recording::Recording::read(&path)?
+                        .charges_replayed_switch_ins(),
+                ),
+                None => (format!("{run}, which analyze records itself,"), own_charge),
+            });
+        }
+        Ok(endpoints)
     }
 
     /// The virtual-time epoch the target trial (run 1) starts from, in
@@ -1549,24 +1646,32 @@ mod tests {
         );
     }
 
-    /// The actual writer preserves one format's jumps/charging and refuses
-    /// mixed formats before touching its destination, even for an exact prefix.
+    /// The actual writer keeps one recording's format, jumps and charge, and
+    /// writes a trial of recordings in several formats in the oldest of them,
+    /// with the recordings' charge. Test adapted: recordings of different
+    /// formats used to be refused here, because the format carried the charge
+    /// of replayed switch-ins; the charge is now a field of its own, and
+    /// recordings under different charges are refused before any trial
+    /// (`refuse_recordings_under_another_switch_in_charge`).
     #[test]
-    fn trial_record_writing_preserves_one_timing_format_and_refuses_mixed_sources() {
+    fn trial_record_writing_keeps_the_oldest_format_and_the_recordings_charge() {
         use detcore::preemptions::TimeSkip;
         use detcore::preemptions::TimeSkipReason;
         use detcore::types::DetTid;
         use detcore::types::LogicalTime;
 
         let events = vec![SchedEvent::branches(DetTid::from_raw(3), 1)];
-        let record = |format| {
-            let record = PreemptionRecord::from_sched_events(events.clone()).with_format(format);
+        let jumps = vec![TimeSkip {
+            event: 1,
+            target: LogicalTime::from_nanos(1000),
+            reason: TimeSkipReason::IdleGuestPollers,
+        }];
+        let record = |format: Option<u32>, charged: bool| {
+            let record = PreemptionRecord::from_sched_events(events.clone())
+                .with_format(format)
+                .with_switch_ins_charged(charged);
             if format.is_some() {
-                record.with_time_skips(vec![TimeSkip {
-                    event: 1,
-                    target: LogicalTime::from_nanos(1000),
-                    reason: TimeSkipReason::IdleGuestPollers,
-                }])
+                record.with_time_skips(jumps.clone())
             } else {
                 record
             }
@@ -1583,16 +1688,18 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let output = directory.path().join("trial.json");
         for format in [None, Some(2), Some(3)] {
-            let options = options();
-            let source = record(format);
-            options.time_skip_sources.lock().unwrap().remember(&source);
-            options
-                .write_trial_schedule(events.clone(), &output)
-                .unwrap();
-            let written = PreemptionReader::try_new(&output).unwrap().into_inner();
-            assert_eq!(written.format_version(), format);
-            assert_eq!(written.time_skips(), source.time_skips());
-            assert_eq!(written.charges_replayed_switch_ins(), format == Some(3));
+            for charged in [false, true] {
+                let options = options();
+                let source = record(format, charged);
+                options.time_skip_sources.lock().unwrap().remember(&source);
+                options
+                    .write_trial_schedule(events.clone(), &output)
+                    .unwrap();
+                let written = PreemptionReader::try_new(&output).unwrap().into_inner();
+                assert_eq!(written.format_version(), format);
+                assert_eq!(written.time_skips(), source.time_skips());
+                assert_eq!(written.charges_replayed_switch_ins(), charged);
+            }
         }
         for other in [None, Some(2)] {
             for formats in [[Some(3), other], [other, Some(3)]] {
@@ -1602,19 +1709,19 @@ mod tests {
                         .time_skip_sources
                         .lock()
                         .unwrap()
-                        .remember(&record(format));
+                        .remember(&record(format, true));
                 }
-                std::fs::write(&output, b"existing output must survive refusal").unwrap();
-                let error = options
+                options
                     .write_trial_schedule(events.clone(), &output)
-                    .unwrap_err();
-                let message = error.to_string();
-                assert!(message.contains("different timing formats"), "{message}");
-                assert!(message.contains("record both inputs"), "{message}");
+                    .unwrap();
+                let written = PreemptionReader::try_new(&output).unwrap().into_inner();
+                assert_eq!(written.format_version(), other, "{formats:?}");
                 assert_eq!(
-                    std::fs::read(&output).unwrap(),
-                    b"existing output must survive refusal"
+                    written.time_skips(),
+                    other.map(|_| &jumps[..]),
+                    "{formats:?}"
                 );
+                assert!(written.charges_replayed_switch_ins(), "{formats:?}");
             }
         }
     }

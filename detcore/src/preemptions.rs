@@ -157,6 +157,13 @@ pub struct PreemptionRecord {
     /// Analyze and bisect carry a source record's jumps into the trial
     /// schedules they splice from it (`with_time_skips`).
     time_skips: Option<Vec<TimeSkip>>,
+    /// Whether the run that wrote the record charged a scheduler turn for
+    /// every stretch of guest code under a switch to its thread, so that its
+    /// schedule replay charges a replayed switch-in under which guest code
+    /// runs (`charges_replayed_switch_ins`, [`SWITCH_IN_CHARGE_FORMAT`]).
+    /// Absent, and false, for a run that did not, and for records written
+    /// before the field existed.
+    switch_ins_charged: bool,
 }
 
 /// A count a record's run observed on its host rather than decided: it is
@@ -206,9 +213,18 @@ pub const TIME_SKIPS_FORMAT: u32 = 2;
 /// replayed switch to a thread that then runs guest code
 /// (`Scheduler::bump_global_time`), as the run that wrote the record charged
 /// the yield turn the switch stands for. A run charges every such stretch when
-/// it follows no record, or follows one of this format. A replay of an older
-/// record charges as before: its writer cannot say whether its own run
-/// followed a schedule, and so left those stretches uncharged.
+/// it follows no record, or follows a record that says its run charged them. A
+/// replay of an older record charges as before: its writer cannot say whether
+/// its own run followed a schedule, and so left those stretches uncharged.
+///
+/// A record says so in `PreemptionRecord::switch_ins_charged`, never through
+/// its format, which says only which formats a Hermit must read to replay it:
+/// a record whose run charged is written in this format or a newer one, so a
+/// Hermit that reads only older formats refuses it by name. A trial that analyze
+/// or bisect writes below this format (`hermit-cli`'s `time_skip_carry`) keeps
+/// the field, and so its charge; a Hermit that reads only older formats reads
+/// such a trial without it
+/// (https://github.com/rrnewton/hermit/issues/4989).
 ///
 /// This restores the switch-in charge when guest events retire. A bare
 /// `TraceReplay` turn does not become `previous_turn_tid`: main's ordinary
@@ -293,6 +309,7 @@ impl PreemptionRecord {
             store_exclusive_failures: HostObservedCount::default(),
             format_version: None,
             time_skips: None,
+            switch_ins_charged: false,
         }
     }
 
@@ -360,6 +377,7 @@ impl PreemptionRecord {
             replay_departed_at,
             format_version,
             time_skips,
+            switch_ins_charged,
         } = self;
         let followed = len < global.len();
         let global = global[..len.min(global.len())].to_vec();
@@ -430,6 +448,8 @@ impl PreemptionRecord {
                         .collect::<Vec<_>>()
                 })
                 .filter(|skips| !skips.is_empty()),
+            // A prefix of a charging run's schedule replays by its rules.
+            switch_ins_charged: *switch_ins_charged,
         }
     }
 
@@ -556,7 +576,7 @@ impl PreemptionRecord {
     }
 
     /// The same record in `format` (`None` for format 1). Analyze and bisect
-    /// require one shared timing format across the recordings they read
+    /// write a trial in the oldest format among the recordings they read
     /// (`hermit-cli`'s `time_skip_carry`).
     pub fn with_format(mut self, format: Option<u32>) -> Self {
         self.format_version = format;
@@ -569,11 +589,18 @@ impl PreemptionRecord {
     }
 
     /// Whether a schedule replay of this record charges a replayed switch-in
-    /// under which guest code runs (format 3 or later,
-    /// [`SWITCH_IN_CHARGE_FORMAT`]).
+    /// under which guest code runs: whether the run that wrote it charged
+    /// (`switch_ins_charged`), whatever the record's format
+    /// ([`SWITCH_IN_CHARGE_FORMAT`]).
     pub fn charges_replayed_switch_ins(&self) -> bool {
-        self.format_version
-            .is_some_and(|format| format >= SWITCH_IN_CHARGE_FORMAT)
+        self.switch_ins_charged
+    }
+
+    /// The same record, saying whether its run charged replayed switch-ins
+    /// (`charges_replayed_switch_ins`). Its format is left as it is.
+    pub fn with_switch_ins_charged(mut self, charged: bool) -> Self {
+        self.switch_ins_charged = charged;
+        self
     }
 
     /// Whether the record lists every jump of global time its run made
@@ -765,6 +792,7 @@ impl PreemptionRecord {
             store_exclusive_failures: HostObservedCount::default(),
             format_version: None,
             time_skips: None,
+            switch_ins_charged: false,
         }
     }
 
@@ -836,6 +864,7 @@ impl PreemptionRecord {
             store_exclusive_failures: HostObservedCount::default(),
             format_version: None,
             time_skips: None,
+            switch_ins_charged: false,
         }
     }
 
@@ -902,6 +931,11 @@ impl PreemptionRecord {
     /// later and finite deadlines. A failure is a refusal of the record, not a
     /// malformed file (`RecordFormatRefusal`).
     pub fn validate_format(&self) -> Result<(), String> {
+        self.validate_format_up_to(PREEMPTION_RECORD_FORMAT)
+    }
+
+    /// `validate_format` for a Hermit whose newest format is `newest`.
+    pub(crate) fn validate_format_up_to(&self, newest: u32) -> Result<(), String> {
         if let Some(skip) = self
             .time_skips
             .iter()
@@ -920,11 +954,11 @@ impl PreemptionRecord {
         };
         let known = self
             .format_version
-            .is_none_or(|format| (TIME_SKIPS_FORMAT..=PREEMPTION_RECORD_FORMAT).contains(&format));
+            .is_none_or(|format| (TIME_SKIPS_FORMAT..=newest).contains(&format));
         if !known || (!skips.is_empty() && !self.lists_its_time_skips()) {
             return Err(format!(
                 "record format {:?} with {} time skips: this Hermit reads formats 1 to \
-                 {PREEMPTION_RECORD_FORMAT}, and time skips need format {TIME_SKIPS_FORMAT} or later",
+                 {newest}, and time skips need format {TIME_SKIPS_FORMAT} or later",
                 self.format_version,
                 skips.len()
             ));
@@ -2446,6 +2480,14 @@ impl PreemptionWriter {
     /// format of the record a replay follows, whose rules it ran by.
     pub fn with_format(mut self, format: Option<u32>) -> Self {
         self.inner.format_version = format;
+        self
+    }
+
+    /// Say whether this run charges replayed switch-ins
+    /// (`PreemptionRecord::switch_ins_charged`): a run that follows no record
+    /// does, and a replay does when the record it follows says so.
+    pub fn with_switch_ins_charged(mut self, charged: bool) -> Self {
+        self.inner.switch_ins_charged = charged;
         self
     }
 

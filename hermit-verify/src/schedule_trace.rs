@@ -469,6 +469,9 @@ mod tests {
                 .unwrap();
         value["epoch"] = serde_json::json!("2026-01-01T00:00:00Z");
         value["cap_preemption_charge"] = serde_json::json!(true);
+        // A charging run's record (test adapted: the charge of replayed
+        // switch-ins is a field of its own, no longer the format's).
+        value["switch_ins_charged"] = serde_json::json!(true);
         value["chaos_timeslice"] = serde_json::json!(123_456);
         value["rng_seed"] = serde_json::json!(987);
         value["store_exclusive_failures"] = serde_json::json!(7);
@@ -582,6 +585,7 @@ mod tests {
                 ("rng_seed", serde_json::json!(988)),
                 ("chaos_timeslice", serde_json::json!(123_457)),
                 ("cap_preemption_charge", serde_json::json!(false)),
+                ("switch_ins_charged", serde_json::json!(false)),
                 (
                     "host_inputs",
                     serde_json::json!({"digest": "other-inputs", "files": []}),

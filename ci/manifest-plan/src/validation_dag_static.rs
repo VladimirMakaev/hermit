@@ -1903,7 +1903,11 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Its detlog correction adds one hermit-run unit: 1287 + 1 = 1288, re-measured at this integration head.
     // PR 4912 adds one hermit-run unit: 1288 + 1 = 1289, re-measured at this integration head.
     // H1 host-input evidence adds one hermit-run unit: 1289 + 1 = 1290.
-    ("test.hermit_unit", 1290),
+    // PR 4864's residual after the guest-poll landing adds three hermit-run
+    // units (a_trial_charges_only_when_every_recording_read_did,
+    // bisect_refuses_schedules_under_another_switch_in_charge,
+    // analyze_counts_its_own_endpoints_as_charging_switch_ins): 1290 + 3 = 1293.
+    ("test.hermit_unit", 1293),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3154,7 +3158,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The kconc/4966 V4c replay-priority transplant adds fourteen detcore units: 3003 + 14 = 3017, re-measured at this integration head.
     // The in-flight SCM_RIGHTS queue (https://github.com/rrnewton/hermit/issues/4930) adds seventeen detcore units: 3017 + 17 = 3034, listed.
     // The inotify fault-boundary repair adds three detcore units: 3034 + 3 = 3037, by nextest list.
-    ("test.detcore_unit", 3242),
+    // PR 4864's residual after the guest-poll landing adds two detcore units
+    // (record_serde's the_switch_in_charge_is_written_only_when_on_and_round_trips,
+    // scheduler's a_charging_runs_record_is_refused_by_a_reader_of_format_2): 3242 + 2 = 3244.
+    ("test.detcore_unit", 3244),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5568,7 +5575,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same fourteen kconc/4966 V4c replay-priority units: 3003 + 14 = 3017.
     // The same seventeen SCM_RIGHTS queue units: 3017 + 17 = 3034.
     // The same three inotify fault-boundary units: 3034 + 3 = 3037.
-    ("test.detcore_unit_on_host", 3037),
+    // The same two PR 4864 residual units: 3037 + 2 = 3039.
+    ("test.detcore_unit_on_host", 3039),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -5962,7 +5970,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same detlog correction unit: 1281 + 1 = 1282.
     // The same PR 4912 unit: 1282 + 1 = 1283.
     // The same H1 path-fallback unit: 1283 + 1 = 1284.
-    ("test.hermit_unit_on_host", 1284),
+    // The same three PR 4864 residual units: 1284 + 3 = 1287.
+    ("test.hermit_unit_on_host", 1287),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.

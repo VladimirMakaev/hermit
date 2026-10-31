@@ -172,15 +172,17 @@ impl BisectOpts {
             ("--good", &self.good),
             ("--bad", &self.bad),
         ])?;
+        // Every trial replays under the endpoints' one switch-in charge.
+        analyzer.refuse_recordings_under_another_switch_in_charge(
+            &[("--good", &self.good), ("--bad", &self.bad)],
+            &[],
+        )?;
         // A trial spliced from either schedule's prefix makes the jumps of
         // global time that prefix contains (`crate::time_skip_carry`).
         {
             let mut sources = analyzer.time_skip_sources.lock().unwrap();
             sources.remember(&good);
             sources.remember(&bad);
-            // Refuse before the first trial, rather than silently downgrading
-            // a format-3 prefix's charging rule to a legacy/format-2 rule.
-            sources.trial_format()?;
             sources.validate_reserved_inputs()?;
         }
         let mut good = good.into_global();
@@ -277,9 +279,13 @@ mod tests {
         result
     }
 
-    /// Admission reaches the real source-format check before any trial.
+    /// Bisect admits endpoints in different formats under one charge of
+    /// replayed switch-ins. Test adapted: it used to refuse them before any
+    /// trial, because the format carried the charge; the charge is now a field
+    /// of its own, and endpoints under different charges are refused
+    /// (`bisect_refuses_schedules_under_another_switch_in_charge`).
     #[test]
-    fn bisect_refuses_mixed_timing_formats_before_starting_a_trial() {
+    fn bisect_admits_endpoints_of_different_formats_under_one_charge() {
         let first = vec![SchedEvent::branches(DetTid::from_raw(3), 1)];
         let second = vec![SchedEvent::branches(DetTid::from_raw(5), 1)];
         let record = |events, format| {
@@ -289,24 +295,20 @@ mod tests {
             }
             value
         };
-        for format in [None, Some(2), Some(3)] {
+        for formats in [
+            [None, None],
+            [Some(2), Some(2)],
+            [Some(3), Some(3)],
+            [Some(3), None],
+            [None, Some(3)],
+            [Some(3), Some(2)],
+            [Some(2), Some(3)],
+        ] {
             prepare_search_records(
-                &record(first.clone(), format),
-                &record(second.clone(), format),
+                &record(first.clone(), formats[0]),
+                &record(second.clone(), formats[1]),
             )
-            .unwrap();
-        }
-        for other in [None, Some(2)] {
-            for formats in [[Some(3), other], [other, Some(3)]] {
-                let error = prepare_search_records(
-                    &record(first.clone(), formats[0]),
-                    &record(second.clone(), formats[1]),
-                )
-                .unwrap_err();
-                let message = format!("{error:#}");
-                assert!(message.contains("different timing formats"), "{message}");
-                assert!(message.contains("record both inputs"), "{message}");
-            }
+            .unwrap_or_else(|error| panic!("{formats:?}: {error:#}"));
         }
     }
 
@@ -854,6 +856,74 @@ mod tests {
             assert!(
                 format!("{error:#}").contains("--expired-wait-charge"),
                 "{error:#}"
+            );
+        }
+    }
+
+    /// Bisect refuses, before any trial and naming both, endpoints whose runs
+    /// charged replayed switch-ins differently (`switch_ins_charged`; a record
+    /// without it did not), and a schedule its run arguments replay under the
+    /// other charge; endpoints under one charge, charged or not, are admitted.
+    /// Every trial replays under one charge, so a prefix trial of the charging
+    /// endpoint would otherwise replay uncharged inside the events it repeats
+    /// (Codex review of #4864's revision).
+    #[test]
+    fn bisect_refuses_schedules_under_another_switch_in_charge() {
+        let resources = Path::new(env!("CARGO_MANIFEST_DIR")).join("test-resources");
+        let dir = tempfile::tempdir().unwrap();
+        let write = |fixture: &str, name: &str, charged: bool| {
+            let source = resources.join(format!("flaky_cas_sequence_schedules-{fixture}.json"));
+            let mut record: serde_json::Value =
+                serde_json::from_str(&fs::read_to_string(source).unwrap()).unwrap();
+            if charged {
+                record["switch_ins_charged"] = serde_json::Value::from(true);
+            }
+            let path = dir.path().join(name);
+            fs::write(&path, record.to_string()).unwrap();
+            path
+        };
+        let prepare = |good: &Path, bad: &Path, run_args: &[&str]| {
+            let good = format!("--good={}", good.display());
+            let bad = format!("--bad={}", bad.display());
+            let mut argv = vec!["hermit", "bisect", good.as_str(), bad.as_str(), "--"];
+            argv.extend(run_args);
+            argv.push("/bin/true");
+            let args = crate::Args::try_parse_from(&argv).unwrap();
+            let crate::Subcommand::Bisect(options) = args.command else {
+                panic!("{argv:?} is not bisect")
+            };
+            options.prepare(&args.global).map(|_| ())
+        };
+        let good_on = write("passing", "good-on.json", true);
+        let bad_on = write("failing", "bad-on.json", true);
+        let good_off = write("passing", "good-off.json", false);
+        let bad_off = write("failing", "bad-off.json", false);
+        let replay_off = format!("--replay-schedule-from={}", good_off.display());
+
+        prepare(&good_on, &bad_on, &[]).unwrap();
+        prepare(&good_off, &bad_off, &[]).unwrap();
+        for (good, bad, run_args, named) in [
+            (&good_on, &bad_off, vec![], ["--good", "--bad"]),
+            (&good_off, &bad_on, vec![], ["--bad", "--good"]),
+            (
+                &good_on,
+                &bad_on,
+                vec![replay_off.as_str()],
+                ["--good", "--replay-schedule-from"],
+            ),
+        ] {
+            let error = prepare(good, bad, &run_args).unwrap_err();
+            assert!(
+                error
+                    .downcast_ref::<crate::container::PolicyRefusal>()
+                    .is_some(),
+                "{error:#}"
+            );
+            let message = format!("{error:#}");
+            assert!(
+                named.iter().all(|option| message.contains(option))
+                    && message.contains("switch_ins_charged"),
+                "{run_args:?}: {message}"
             );
         }
     }
