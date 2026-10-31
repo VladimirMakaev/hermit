@@ -1288,7 +1288,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's detcore-model tests: 1983.
     // And hermit-verify's splitting_branches_keeps_no_store_exclusive_count:
     // 1934 + 1 = 1984.
-    ("test.regular_crates", 1984),
+    // And hermit-verify's mixed_interpolation_keeps_no_segment_store_exclusive_counts:
+    // 1935 + 1 = 1985.
+    ("test.regular_crates", 1985),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -3397,7 +3399,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And preemptions' a_split_schedule_keeps_no_store_exclusive_counts,
     // an_edited_schedule_keeps_no_store_exclusive_counts and
     // a_replaced_schedule_keeps_no_store_exclusive_counts: 3247 + 3 = 3444.
-    ("test.detcore_unit", 3444),
+    // And preemptions' an_interpolated_schedule_keeps_no_store_exclusive_counts:
+    // 3250 + 1 = 3445.
+    ("test.detcore_unit", 3445),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5397,7 +5401,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And this change's tests, as at this node's second entry below: 1967.
     // Kept equal to the second test.regular_crates_on_host entry below: 1969.
     // Kept equal to the second test.regular_crates_on_host entry below: 1970.
-    ("test.regular_crates_on_host", 1970),
+    // Kept equal to the second test.regular_crates_on_host entry below: 1971.
+    ("test.regular_crates_on_host", 1971),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5963,7 +5968,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same prefix-record unit: 3440.
     // And the same record_serde unit: 3441.
     // And the same three transformed-record units: 3444.
-    ("test.detcore_unit_on_host", 3444),
+    // And the same interpolated-record unit: 3445.
+    ("test.detcore_unit_on_host", 3445),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6632,7 +6638,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same skid-overshoot summary test: 1967, listed.
     // And the same tests: 1969.
     // And the same split-branches test: 1970.
-    ("test.regular_crates_on_host", 1970),
+    // And the same interpolation test: 1971.
+    ("test.regular_crates_on_host", 1971),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
