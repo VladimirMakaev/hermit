@@ -172,6 +172,8 @@ mod tests {
         // (#4780), and the digest now covers the event `TraceSchedEvent`
         // carries: its fields, its `Serialize` and its count's representation.
         (24, "68e819ae4e60d5f1", "f013e36743d8d9e6"),
+        // Adds `GlobalRequest::PostCrash`, `GlobalResponse::PostCrash` and `GlobalResponse::WithPostCrashBound` (#4867).
+        (21, "e9074b57ce9758b4", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
