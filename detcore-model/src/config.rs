@@ -4110,7 +4110,7 @@ mod legacy_backend_json {
     /// unset.
     /// `replay_adopted_seeds` came after it too: only the run's summary reads
     /// it, so it is never written and reads as unset.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 58] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 59] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -5733,11 +5733,12 @@ mod tests {
         // `rewrite_exclusives_in_memory`, `count_store_exclusives`,
         // `rewrite_exclusives_overlay`, `strict_binder`,
         // `post_crash_timeslice`, `watch`, `watch_from`,
-        // `untrap_passthrough_syscalls`, `property_snapshot` and
-        // `strict_schedule_boundaries` none: fourteen more keys and fifty-seven
-        // fewer, so forty-three keys fewer than fields.
+        // `untrap_passthrough_syscalls`, `property_snapshot`,
+        // `replay_adopted_seeds` and `strict_schedule_boundaries` none:
+        // fourteen more keys and fifty-eight fewer, so forty-four keys fewer
+        // than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 43);
+        assert_eq!(fields.len(), keys.len() + 44);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
