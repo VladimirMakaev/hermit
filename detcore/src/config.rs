@@ -167,7 +167,7 @@ mod tests {
         (22, "7d5b706bc20b4b6d", "f013e36743d8d9e6"),
         // `Found::unverified_pairs` (#4908), and the digest now covers the
         // StoreExclusive request's payload types.
-        (21, "749d11504d809183", "f013e36743d8d9e6"),
+        (23, "0f379ad36f04345c", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
