@@ -8548,7 +8548,12 @@ impl<T> ThreadState<T> {
     /// preemption record ends its slices where that record says), and ending
     /// it at the bound would leave the record.
     pub(crate) fn max_slice_length(&self, cfg: &Config) -> Option<u64> {
-        self.slice_length_within(cfg.max_timeslice, cfg.replay_schedule_from.is_some())
+        // A guest crash raises the bound (`after_post_crash`) before a
+        // schedule replay's backstop is weighed against it.
+        self.slice_length_within(
+            cfg.max_timeslice.map(|bound| self.after_post_crash(bound)),
+            cfg.replay_schedule_from.is_some(),
+        )
     }
 
     fn slice_length_within(

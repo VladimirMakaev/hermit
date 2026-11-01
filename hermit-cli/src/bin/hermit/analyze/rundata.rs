@@ -1268,9 +1268,10 @@ impl AnalyzeOpts {
     }
 
     /// `record` stamped with the trials' `--pipe-wake-latency`, signal-state
-    /// copy setting, `--expired-wait-charge` and in-memory exclusive rewrite,
-    /// as every record analyze writes must be: a record that omitted one would
-    /// be accepted, or refused, when replayed under another value
+    /// copy setting, `--expired-wait-charge`, in-memory exclusive rewrite and
+    /// post-crash bound, as every record analyze writes must be: a record that
+    /// omitted one would be accepted, or refused, when replayed under another
+    /// value
     /// (<https://github.com/rrnewton/hermit/issues/4380>).
     /// It also carries the uncapped-slices mark of the schedules the trials
     /// come from (`trial_schedules_uncapped`): a trial's schedule has no event
