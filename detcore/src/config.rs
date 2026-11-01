@@ -187,7 +187,7 @@ mod tests {
         // Adds `GlobalRequest::TakeSleepInterruption` and its response, and
         // `ObservationFinish::InterruptForCaught`'s `dequeue`, which the
         // digest does not cover (https://github.com/rrnewton/hermit/issues/4931).
-        (21, "a26a19716aa915db", "f013e36743d8d9e6"),
+        (30, "f8619458d107ec2b", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
