@@ -123,7 +123,7 @@ syn = { version = "2.0.119", features = ["full", "visit"] }
 [target.'cfg(target_arch = "x86_64")'.dev-dependencies]
 # Same exact host source pin as the shared physical launcher and codec consumer.
 # Keep the shared physical-launcher regression in the ordinary unit gate.
-reverie-inguest = { version = "0.5.4", git = "https://github.com/rrnewton/reverie.git", rev = "9443a6b2825711294852a75a955744c027684f16", default-features = false, features = ["exec-stop"] }
+reverie-inguest = { version = "0.5.4", git = "https://github.com/rrnewton/reverie.git", rev = "a09bc2932007af8e9820b9364d623f85c87cdc89", default-features = false, features = ["exec-stop"] }
 
 # Always selected with the existing backend feature; fixture exports are a
 # separate producer input, never an exemption from required execution.
