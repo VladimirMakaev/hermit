@@ -30485,7 +30485,7 @@
       "env": {
         "HERMIT_E2E_EMPTY_WORKDIR": "/test",
         "HERMIT_PREPARED_NEXTEST_REQUIRED": "1",
-        "NEXTEST_EXPECTED_EXECUTED": "3540",
+        "NEXTEST_EXPECTED_EXECUTED": "3538",
         "NEXTEST_PREPARED_BUILD_SELECTION": "[\"-p\",\"hermit-detcore\",\"--lib\",\"--bins\"]"
       },
       "networkonly": false,
@@ -32430,7 +32430,7 @@
         "HERMIT_PREPARED_NEXTEST_REQUIRED": "1",
         "HERMIT_TEST_CPU_TIMEOUT_MULTIPLIER": "4",
         "HERMIT_TEST_WALL_TIMEOUT_MULTIPLIER": "3",
-        "NEXTEST_EXPECTED_EXECUTED": "26",
+        "NEXTEST_EXPECTED_EXECUTED": "27",
         "NEXTEST_PREPARED_BUILD_SELECTION": "[\"-p\",\"hermit-run\",\"--features\",\"third-party-backends\",\"--test\",\"cli\"]"
       },
       "networkonly": false,
@@ -58884,7 +58884,7 @@
       ],
       "env": {
         "HERMIT_PREPARED_NEXTEST_REQUIRED": "1",
-        "NEXTEST_EXPECTED_EXECUTED": "3540",
+        "NEXTEST_EXPECTED_EXECUTED": "3538",
         "NEXTEST_PREPARED_BUILD_SELECTION": "[\"-p\",\"hermit-detcore\",\"--lib\",\"--bins\"]"
       },
       "networkonly": false,
