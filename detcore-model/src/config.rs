@@ -4012,7 +4012,7 @@ mod legacy_backend_json {
     /// runtime, so it is never written and reads as unset.
     /// `untrap_passthrough_syscalls` came after it too. `hermit run` refuses it
     /// on every backend but ptrace, so it is never written and reads as false.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 56] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 57] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -5626,11 +5626,12 @@ mod tests {
         // `standard_stream_aliases`, `chaos_instruction_offset`,
         // `rewrite_exclusives_in_memory`, `count_store_exclusives`,
         // `rewrite_exclusives_overlay`, `strict_binder`,
-        // `post_crash_timeslice`, `watch`, `watch_from` and
-        // `strict_schedule_boundaries` none: fourteen more keys and fifty-five
-        // fewer, so forty-one keys fewer than fields.
+        // `post_crash_timeslice`, `watch`, `watch_from`,
+        // `untrap_passthrough_syscalls` and `strict_schedule_boundaries` none:
+        // fourteen more keys and fifty-six fewer, so forty-two keys fewer than
+        // fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 41);
+        assert_eq!(fields.len(), keys.len() + 42);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
