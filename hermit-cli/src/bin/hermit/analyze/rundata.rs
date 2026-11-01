@@ -1032,14 +1032,9 @@ impl RunData {
         Ok(())
     }
 
-    /// The raw, unvarnished, RunOpts, for a caller that needs the run
-    /// arguments themselves (the guest program, its working directory).
-    pub fn raw_runopts(aopts: &AnalyzeOpts) -> RunOpts {
-        Self::get_raw_runopts(aopts)
-    }
-
     /// The run arguments as `hermit run` parses them, before analyze changes
-    /// anything.
+    /// anything, for a caller that needs the run arguments themselves (the
+    /// guest program, its working directory).
     pub fn raw_runopts(aopts: &AnalyzeOpts) -> RunOpts {
         Self::get_raw_runopts(aopts)
     }
@@ -1115,7 +1110,7 @@ impl RunData {
         // --run1-preemptions: `new_run1_target` replays a workspace copy.
         if let Some(seed) = aopts.run1_seed {
             ro.det_opts.det_config.seed = seed;
-            Self::draw_no_instruction_offsets(&mut ro);
+            Self::draw_no_instruction_offsets(ro);
         }
     }
 
@@ -2173,7 +2168,7 @@ impl AnalyzeOpts {
         // Under `--no-namespace`, the guest IDs every trial takes, resolved
         // before the first (`prepare_trial_guest_ids`): a record without them
         // reads as numbered by a PID namespace, which no trial can replay.
-        match crate::run::resolved_trial_guest_ids() {
+        let record = match crate::run::resolved_trial_guest_ids() {
             Some(ids) => record.with_guest_ids(ids),
             None => record,
         }
@@ -3106,7 +3101,7 @@ mod tests {
         let read = || PreemptionReader::try_new(&output).unwrap().into_inner();
 
         options
-            .write_trial_schedule(events.clone(), &output)
+            .write_trial_schedule_from(events.clone(), &[], &output)
             .unwrap();
         let spliced = read();
         assert_eq!(spliced.format_version(), below);
@@ -3174,7 +3169,7 @@ mod tests {
             &PreemptionRecord::from_sched_events(events.clone()).with_format(Some(newer)),
         );
         let refusal = options
-            .write_trial_schedule(events.clone(), &output)
+            .write_trial_schedule_from(events.clone(), &[], &output)
             .unwrap_err();
         assert!(
             format!("{refusal:#}").contains(&format!("record format Some({newer})")),
@@ -4845,7 +4840,7 @@ mod tests {
         // As the bisection writes a trial's schedule (`event_level_search`).
         let schedule = workspace.path().join("bisect_round_001.preempts");
         options
-            .write_trial_schedule(events.clone(), &schedule)
+            .write_trial_schedule_from(events.clone(), &[], &schedule)
             .unwrap();
         states_the_trials_ids(&schedule);
         // As the baseline search writes a prefix of the target's record.
@@ -5516,7 +5511,7 @@ mod tests {
                 .with_schedule_recording();
             let replayed = run.sched_path_in().to_path_buf();
             options
-                .write_trial_schedule(events.clone(), &replayed)
+                .write_trial_schedule_from(events.clone(), &[], &replayed)
                 .unwrap();
             run
         };
@@ -5544,7 +5539,8 @@ mod tests {
         let mut again = make();
         again.launch().unwrap();
         assert!(!again.is_a_match());
-        assert_eq!(again.sched_out().unwrap(), &events);
+        again.require_complete_output().unwrap();
+        assert_eq!(again.preempts_out().schedevents(), &events);
     }
 
     /// The budget shortens a run's `--timeout` to the time it has left,
@@ -5598,11 +5594,11 @@ mod tests {
             .unwrap()
             .with_schedule_replay();
         let path = run.sched_path_in().to_path_buf();
-        options.write_trial_schedule(events(5), &path).unwrap();
+        options.write_trial_schedule_from(events(5), &[], &path).unwrap();
         let first = run.journal_key();
-        options.write_trial_schedule(events(6), &path).unwrap();
+        options.write_trial_schedule_from(events(6), &[], &path).unwrap();
         assert_ne!(run.journal_key(), first);
-        options.write_trial_schedule(events(5), &path).unwrap();
+        options.write_trial_schedule_from(events(5), &[], &path).unwrap();
         assert_eq!(run.journal_key(), first);
     }
 

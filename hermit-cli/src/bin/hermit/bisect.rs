@@ -421,7 +421,7 @@ mod tests {
         };
         let (mut analyzer, _, bad_events) = prepare(&bad_path).unwrap();
         assert!(analyzer.replays_instruction_offsets);
-        assert_eq!(bad_events[0].instruction_offset, Some(offset));
+        assert_eq!(bad_events.schedevents()[0].instruction_offset, Some(offset));
         analyzer.tmp_dir = Some(dir.path().to_path_buf());
         let raw = crate::analyze::rundata::RunData::get_raw_runopts(&analyzer);
         assert!(raw.det_opts.det_config.chaos);

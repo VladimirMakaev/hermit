@@ -17449,11 +17449,6 @@ impl RunOpts {
         self.timeout = seconds;
     }
 
-    /// The guest program, as the run arguments name it.
-    pub(crate) fn program(&self) -> &Path {
-        &self.program
-    }
-
     /// `--strict` promises a deterministic run, and on the ptrace and e9patch
     /// backends the virtual clock and the preemption points are the guest's
     /// retired conditional branches, read from a performance counter. Where

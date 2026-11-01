@@ -435,7 +435,7 @@ impl IntervalFiles {
             let path = &self.paths[slot];
             let aside = path.with_extension("partial");
             let written = opts
-                .write_trial_schedule(events.to_vec(), &aside)
+                .write_trial_schedule_from(events.to_vec(), &[], &aside)
                 .and_then(|()| Ok(std::fs::rename(&aside, path)?));
             match written {
                 Ok(()) => self.written[slot] = Some(hash),
@@ -5893,7 +5893,9 @@ mod tests {
         let tmp_dir = format!("--tmp-dir={}", parent.path().display());
         let mut options =
             AnalyzeOpts::try_parse_from(["analyze", tmp_dir.as_str(), "--", "/bin/true"]).unwrap();
-        options.phase0_initialize().unwrap();
+        let _workspace = options
+            .phase0_initialize(Retention::Keep { because: None })
+            .unwrap();
         let tid = detcore::types::DetTid::from_raw(3);
         let target = PreemptionRecord::from_sched_events(vec![
             SchedEvent::branches(tid, 10),
@@ -6019,7 +6021,9 @@ mod tests {
         let tmp_dir = format!("--tmp-dir={}", parent.path().display());
         let mut options =
             AnalyzeOpts::try_parse_from(["analyze", tmp_dir.as_str(), "--", "/bin/true"]).unwrap();
-        options.phase0_initialize().unwrap();
+        let _workspace = options
+            .phase0_initialize(Retention::Keep { because: None })
+            .unwrap();
         let branches = |tid: u64, count: u32| {
             serde_json::json!({
                 "dettid": tid, "op": "Branch", "count": count,
@@ -8447,8 +8451,10 @@ mod tests {
                 dir.path().join("final-passing.json"),
                 dir.path().join("trial.json"),
             );
-            options.write_final_schedules(Vec::new(), &failing, Vec::new(), &passing);
-            options.write_trial_schedule(Vec::new(), &trial).unwrap();
+            options.write_final_schedules(Vec::new(), &failing, Vec::new(), &passing, &[]);
+            options
+                .write_trial_schedule_from(Vec::new(), &[], &trial)
+                .unwrap();
             [failing, passing, trial].map(|path| {
                 detcore::preemptions::read_recorded_queued_sleeps_registered_at_first_pass(&path)
                     .unwrap()
@@ -8658,7 +8664,9 @@ mod tests {
         // replay of one by `hermit run` gives the guest the same values.
         let seeded = prepared_with(dir, &[run1(Some(7))], &[]).unwrap();
         let schedule = dir.join("trial.json");
-        seeded.write_trial_schedule(Vec::new(), &schedule).unwrap();
+        seeded
+            .write_trial_schedule_from(Vec::new(), &[], &schedule)
+            .unwrap();
         assert_eq!(
             detcore::preemptions::read_recorded_rng_seed(&schedule).unwrap(),
             Some(7)
@@ -8957,9 +8965,10 @@ mod tests {
             &failing,
             vec![batch(None)],
             &passing,
+            &[],
         );
         options
-            .write_trial_schedule(vec![batch(None), batch(Some(offset))], &trial)
+            .write_trial_schedule_from(vec![batch(None), batch(Some(offset))], &[], &trial)
             .unwrap();
         // A schedule without offsets keeps the sources' timing format, below
         // the offsets format.
@@ -9269,7 +9278,7 @@ mod tests {
                 .unwrap()
                 .with_schedule_replay();
             options
-                .write_trial_schedule(Vec::new(), trial.sched_path_in())
+                .write_trial_schedule_from(Vec::new(), &[], trial.sched_path_in())
                 .unwrap();
             let seeds = prepared_seeds(&mut trial);
             (seeds, trial.repro_command())
@@ -9800,7 +9809,7 @@ mod tests {
         // So does one whose file no longer holds what the interval names.
         let recorded = options.progress.snapshot().interval.unwrap();
         options
-            .write_trial_schedule(events(&[5, 3, 3, 5]), &recorded.passing)
+            .write_trial_schedule_from(events(&[5, 3, 3, 5]), &[], &recorded.passing)
             .unwrap();
         assert!(options.resumable_interval(&endpoints).is_none());
         // And one recorded before the search's first pass, which has no state.
