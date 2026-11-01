@@ -3337,6 +3337,7 @@ impl AnalyzeOpts {
                 self.do_search()
             })?;
             self.record_endpoint(&target);
+            self.adopt_found_target_sched_seed(&target);
             Ok(target)
         } else if self.has_filters() {
             eprintln!(
