@@ -3350,7 +3350,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // preemptions::tests::callback_checkpoints_are_placed_at_the_event_ending_their_slice
     // and scheduler::callback_history_scheduler_tests::desync_notes_collect_every_producers_note
     // (https://github.com/rrnewton/hermit/issues/4876, #4878): 3412.
-    ("test.detcore_unit", 3412),
+    // And train 3's eight format-ladder units (the record-format resolution between #4845 and #4847): 3420.
+    ("test.detcore_unit", 3420),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5881,7 +5882,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two binder policy units: 3408.
     // And the same binder record-file unit: 3409.
     // And the same three summarized-desync units: 3412.
-    ("test.detcore_unit_on_host", 3412),
+    // And train 3's eight format-ladder units (the record-format resolution between #4845 and #4847): 3420.
+    ("test.detcore_unit_on_host", 3420),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
