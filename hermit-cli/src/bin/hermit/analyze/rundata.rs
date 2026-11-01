@@ -1313,10 +1313,10 @@ impl AnalyzeOpts {
     }
 
     /// `record` stamped with the trials' `--pipe-wake-latency`, signal-state
-    /// copy setting, `--expired-wait-charge`, in-memory exclusive rewrite and
-    /// post-crash bound, as every record analyze writes must be: a record that
-    /// omitted one would be accepted, or refused, when replayed under another
-    /// value
+    /// copy setting, `--expired-wait-charge`, in-memory exclusive rewrite,
+    /// post-crash bound and `--sleep-registration`, as every record analyze
+    /// writes must be: a record that omitted one would be accepted, or refused,
+    /// when replayed under another value
     /// (<https://github.com/rrnewton/hermit/issues/4380>).
     /// It also carries the uncapped-slices mark of the schedules the trials
     /// come from (`trial_schedules_uncapped`): a trial's schedule has no event
@@ -1453,9 +1453,11 @@ impl AnalyzeOpts {
     /// (`--no-signal-state-copy`), which a record without that field does not
     /// state, so it is accepted under either, and for the trials'
     /// `--expired-wait-charge` ([`Self::adopt_expired_wait_charge`]), which a
-    /// record without that field states as `each`, and for the in-memory
+    /// record without that field states as `each`, for the in-memory
     /// exclusive-loop rewrite, which a record without that field was made
-    /// without.
+    /// without, and for the trials' `--sleep-registration`
+    /// ([`Self::adopt_sleep_registration`]), which a record without that field
+    /// states as `when-chosen`.
     pub fn refuse_recordings_under_another_pipe_wake_latency(
         &self,
         recordings: &[(&str, &Path)],
