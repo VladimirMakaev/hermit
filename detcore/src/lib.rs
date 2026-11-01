@@ -77,8 +77,8 @@ pub mod netlink_route;
 pub mod nonwaiting_write;
 mod page;
 mod pipe_wake;
-pub mod post_crash;
 mod port_allocator;
+pub mod post_crash;
 #[cfg(test)]
 mod predicted_death_tests;
 mod procfs;
