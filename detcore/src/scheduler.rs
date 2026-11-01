@@ -5536,13 +5536,13 @@ impl Scheduler {
             } else {
                 writer
             }
-                .with_queued_sleeps_registered_at_first_pass(queued_sleeps_registered_at_first_pass)
-                .with_timed_wait_spread(cfg.chaos_timed_wait_spread.map(|spread| {
-                    crate::preemptions::RecordedTimedWaitSpread {
-                        spread,
-                        seed: Some(cfg.sched_seed()),
-                    }
-                }));
+            .with_queued_sleeps_registered_at_first_pass(queued_sleeps_registered_at_first_pass)
+            .with_timed_wait_spread(cfg.chaos_timed_wait_spread.map(|spread| {
+                crate::preemptions::RecordedTimedWaitSpread {
+                    spread,
+                    seed: Some(cfg.sched_seed()),
+                }
+            }));
             // A run that follows no record writes the newest format. A replay
             // writes the format of the record it follows, whose rules it ran
             // by. A replay of a format-1 record (`TimeSkipMode::Legacy`) takes
