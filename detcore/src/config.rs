@@ -189,7 +189,7 @@ mod tests {
         // digest does not cover (https://github.com/rrnewton/hermit/issues/4931).
         (30, "f8619458d107ec2b", "f013e36743d8d9e6"),
         // Adds `GlobalRequest::ImplicitPort` (#4664).
-        (21, "3f7ca89cbccc93ad", "f013e36743d8d9e6"),
+        (31, "be74b30d0679813f", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
