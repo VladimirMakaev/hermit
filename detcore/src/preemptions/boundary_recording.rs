@@ -1110,7 +1110,7 @@ pub(super) mod tests {
         use crate::preemptions::BACKGROUND_STARTS_FORMAT;
         use crate::preemptions::BackgroundStart;
         use crate::preemptions::PREEMPTION_RECORD_FORMAT;
-        use crate::preemptions::format_without_background_starts;
+        use crate::preemptions::format_below_noted_features;
         let Recording::Boundaries(valid) = sample(true) else {
             unreachable!()
         };
@@ -1153,7 +1153,8 @@ pub(super) mod tests {
         }
         let boundary_format = |writer: PreemptionWriter| writer.inner.format_version;
         for format in [BACKGROUND_STARTS_FORMAT, PREEMPTION_RECORD_FORMAT + 1, 0] {
-            let expected = format_without_background_starts(Some(format));
+            // A slice-boundary writer notes neither starts nor offsets.
+            let expected = format_below_noted_features(Some(format));
             let before = PreemptionWriter::new(None)
                 .with_format(Some(format))
                 .with_slice_boundaries()
@@ -1171,7 +1172,7 @@ pub(super) mod tests {
             .noting_background_starts();
         assert_eq!(
             boundary_format(noting),
-            format_without_background_starts(Some(PREEMPTION_RECORD_FORMAT))
+            format_below_noted_features(Some(PREEMPTION_RECORD_FORMAT))
         );
         let mut noted = PreemptionWriter::new(None).noting_background_starts();
         noted.insert_background_start(DetTid::from_raw(3), 1);

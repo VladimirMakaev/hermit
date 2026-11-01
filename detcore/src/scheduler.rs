@@ -24230,8 +24230,9 @@ mod test {
     }
 
     /// A schedule replay notes no background starts, so its re-record of a
-    /// record that notes them states the format below
-    /// `BACKGROUND_STARTS_FORMAT`, with the same timing rules, and a replay of
+    /// record that notes them states a format below
+    /// `BACKGROUND_STARTS_FORMAT`, with the same timing rules (below the
+    /// offsets format too, as these events hold no offset), and a replay of
     /// that re-record counts no call it begins as a desync, where a replay of
     /// the noting record counts an unrecorded start. A fresh legacy recording
     /// still states the newest format and notes its starts.
@@ -24239,6 +24240,8 @@ mod test {
     fn a_replay_re_records_a_background_starts_record_below_its_format() {
         use crate::preemptions::BACKGROUND_STARTS_FORMAT;
         use crate::preemptions::PreemptionRecord;
+        use crate::preemptions::format_below_noted_features;
+        let below = format_below_noted_features(Some(BACKGROUND_STARTS_FORMAT));
         let dir = tempfile::tempdir().unwrap();
         let tid = DetTid::from_raw(3);
         let events = vec![
@@ -24273,10 +24276,7 @@ mod test {
         let mut noting = replay(serde_json::to_value(&recorded).unwrap());
         assert!(noting.charge_replayed_switch_ins);
         let re_record = written(&mut noting);
-        assert_eq!(
-            re_record.format_version(),
-            Some(BACKGROUND_STARTS_FORMAT - 1)
-        );
+        assert_eq!(re_record.format_version(), below);
         assert!(!re_record.notes_background_starts());
         assert!(re_record.charges_replayed_switch_ins());
         noting.record_or_replay_background_start(tid, 1);
@@ -24297,10 +24297,7 @@ mod test {
                 .get(&tid)
                 .is_none_or(|counts| counts.hard == 0)
         );
-        assert_eq!(
-            written(&mut again).format_version(),
-            Some(BACKGROUND_STARTS_FORMAT - 1)
-        );
+        assert_eq!(written(&mut again).format_version(), below);
     }
 
     fn register_known_thread(sched: &mut Scheduler, tid: DetTid) {

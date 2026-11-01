@@ -2047,6 +2047,10 @@ mod tests {
         use detcore::preemptions::BackgroundStart;
         use detcore::types::DetTid;
 
+        // Neither the starts nor an instruction offset: the format below both
+        // (#4845's offsets format sits below the starts format in the train).
+        let below =
+            detcore::preemptions::format_below_noted_features(Some(BACKGROUND_STARTS_FORMAT));
         let tid = DetTid::from_raw(3);
         let events = vec![SchedEvent::branches(tid, 1), SchedEvent::branches(tid, 2)];
         let mut value =
@@ -2061,8 +2065,7 @@ mod tests {
         let noting: PreemptionRecord = serde_json::from_value(value).unwrap();
         noting.validate().unwrap();
         assert!(noting.notes_background_starts());
-        let re_record = PreemptionRecord::from_sched_events(events.clone())
-            .with_format(Some(BACKGROUND_STARTS_FORMAT - 1));
+        let re_record = PreemptionRecord::from_sched_events(events.clone()).with_format(below);
         let args = crate::Args::try_parse_from(["hermit", "analyze", "--", "/bin/true"]).unwrap();
         let crate::Subcommand::Analyze(mut options) = args.command else {
             panic!("not analyze")
@@ -2082,14 +2085,14 @@ mod tests {
             .write_trial_schedule(events.clone(), &output)
             .unwrap();
         let spliced = read();
-        assert_eq!(spliced.format_version(), Some(BACKGROUND_STARTS_FORMAT - 1));
+        assert_eq!(spliced.format_version(), below);
         assert!(spliced.background_starts().is_empty());
 
         options
             .write_trial_record(noting.schedule_prefix(1), &output)
             .unwrap();
         let shorter = read();
-        assert_eq!(shorter.format_version(), Some(BACKGROUND_STARTS_FORMAT - 1));
+        assert_eq!(shorter.format_version(), below);
         assert!(shorter.background_starts().is_empty());
 
         options
@@ -2101,7 +2104,7 @@ mod tests {
 
         // A whole recorded schedule that notes its starts keeps its own jumps
         // beside them: two recordings of the same events, S in format 3 and T
-        // in format 4 with its starts and other jumps, never lend each other
+        // in the starts format with its starts and other jumps, never lend each other
         // their jumps in a whole-schedule trial, in either order. S, which
         // notes no starts, takes one recording's jumps whole.
         let jump = |target| detcore::preemptions::TimeSkip {
@@ -2110,7 +2113,7 @@ mod tests {
             reason: detcore::preemptions::TimeSkipReason::IdleGuestPollers,
         };
         let s = PreemptionRecord::from_sched_events(events.clone())
-            .with_format(Some(BACKGROUND_STARTS_FORMAT - 1))
+            .with_format(below)
             .with_time_skips(vec![jump(1000)]);
         let mut value = serde_json::to_value(&noting).unwrap();
         value["time_skips"] = serde_json::to_value(vec![jump(2000)]).unwrap();
@@ -2133,7 +2136,7 @@ mod tests {
             assert_eq!(written.time_skips(), Some(&[jump(2000)][..]));
             assert_eq!(written.background_starts(), t.background_starts());
             let written = whole(&s);
-            assert_eq!(written.format_version(), Some(BACKGROUND_STARTS_FORMAT - 1));
+            assert_eq!(written.format_version(), below);
             assert!(written.background_starts().is_empty());
             assert_eq!(written.time_skips(), order[0].time_skips());
         }

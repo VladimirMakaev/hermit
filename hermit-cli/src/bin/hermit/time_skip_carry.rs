@@ -118,7 +118,7 @@ impl TimeSkipSources {
     /// trial's record without them share one format here.
     pub fn remember(&mut self, record: &PreemptionRecord) {
         self.formats
-            .insert(detcore::preemptions::format_without_background_starts(
+            .insert(detcore::preemptions::format_below_noted_features(
                 record.format_version(),
             ));
         let source = Source {
@@ -133,7 +133,8 @@ impl TimeSkipSources {
     }
 
     /// The single timing format all sources share, or the current format
-    /// below the background-starts format before any source is read
+    /// below the instruction-offset and background-starts formats before any
+    /// source is read
     /// (`remember`). There is no proved conversion between
     /// legacy, format 2 and format 3 charging rules, even when a selected
     /// prefix comes from just one of the sources.
@@ -148,7 +149,7 @@ impl TimeSkipSources {
                 .collect::<Vec<_>>()
         );
         Ok(self.formats.first().copied().unwrap_or(
-            detcore::preemptions::format_without_background_starts(Some(
+            detcore::preemptions::format_below_noted_features(Some(
                 detcore::preemptions::PREEMPTION_RECORD_FORMAT,
             )),
         ))
@@ -359,7 +360,7 @@ mod tests {
     #[test]
     fn a_trial_refuses_mixed_timing_formats() {
         let mut sources = TimeSkipSources::default();
-        let current = detcore::preemptions::format_without_background_starts(Some(
+        let current = detcore::preemptions::format_below_noted_features(Some(
             detcore::preemptions::PREEMPTION_RECORD_FORMAT,
         ));
         assert_eq!(sources.trial_format().unwrap(), current);

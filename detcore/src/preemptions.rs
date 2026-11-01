@@ -60,7 +60,10 @@ pub const INSTRUCTION_OFFSET_FORMAT: u32 = 4;
 /// (`INSTRUCTION_OFFSET_FORMAT..=PREEMPTION_RECORD_FORMAT`). A run without
 /// `--chaos-instruction-offset` decisions, a schedule replay's re-record of a
 /// schedule without them, and an analyze or bisect trial without them keep
-/// the timing rules of their format and claim no offsets. Any other stated
+/// the timing rules of their format and claim no offsets. Every format above
+/// the offsets format holds them too, so the lowered format claims none of
+/// those features either, and a record lowered so drops their lists
+/// (`PreemptionRecord::drop_instruction_offsets_claim`). Any other stated
 /// format, newer than this Hermit or invalid (0), stays as stated, so that
 /// reading the record still refuses it (`PreemptionRecord::validate_format`):
 /// lowered, a newer Hermit's record would read as one without what it may
@@ -77,14 +80,15 @@ pub fn format_without_instruction_offsets(format: Option<u32>) -> Option<u32> {
 
 /// The first format whose records note every background start
 /// (`BackgroundStart`), so that a call such a record does not start at a point
-/// did not start there: the next number above [`SWITCH_IN_CHARGE_FORMAT`] on
-/// the record-format counter ([`PREEMPTION_RECORD_FORMAT`]).
+/// did not start there: the next number above [`INSTRUCTION_OFFSET_FORMAT`] on
+/// the record-format counter ([`PREEMPTION_RECORD_FORMAT`]), so a record of
+/// this format also holds every instruction offset of its run.
 ///
 /// Only a writer that notes every start it takes may state this format or a
 /// newer one (`PreemptionWriter::noting_background_starts`). Any other
 /// writer, and any record that drops its starts, states at most the format
 /// below it ([`format_without_background_starts`]).
-pub const BACKGROUND_STARTS_FORMAT: u32 = 4;
+pub const BACKGROUND_STARTS_FORMAT: u32 = 5;
 
 /// The newest format a record may state when it does not hold every
 /// background start of its run: `format`, lowered below
@@ -93,6 +97,8 @@ pub const BACKGROUND_STARTS_FORMAT: u32 = 4;
 /// replay's re-record, a slice-boundary recording, an edit or a shorter
 /// prefix of a schedule, and an analyze or bisect trial note no starts, so
 /// they keep the timing rules of their format and claim no list of starts.
+/// The lowered format still claims the features below the starts format: the
+/// instruction offsets ([`INSTRUCTION_OFFSET_FORMAT`]) the record holds.
 /// Any other stated format, newer than this Hermit or invalid (0), stays as
 /// stated, so that reading the record still refuses it
 /// (`PreemptionRecord::validate_format`): lowered, a newer Hermit's record
@@ -105,6 +111,16 @@ pub fn format_without_background_starts(format: Option<u32>) -> Option<u32> {
             format
         }
     })
+}
+
+/// The format below every feature a writer notes as it goes: `format` lowered
+/// below [`BACKGROUND_STARTS_FORMAT`] and then below
+/// [`INSTRUCTION_OFFSET_FORMAT`]. Formats from [`SWITCH_IN_CHARGE_FORMAT`] up
+/// share their timing rules, so analyze and bisect compare recordings by this
+/// format (`hermit-cli`'s `time_skip_carry`): a recording with offsets or
+/// starts and a trial without them run by the same rules.
+pub fn format_below_noted_features(format: Option<u32>) -> Option<u32> {
+    format_without_instruction_offsets(format_without_background_starts(format))
 }
 
 /// The turn that began a kernel-run blocking call
@@ -318,9 +334,15 @@ impl std::hash::Hash for HostObservedCount {
 /// - Format 4 ([`INSTRUCTION_OFFSET_FORMAT`]) records every
 ///   `--chaos-instruction-offset` decision in its schedule trace as well as in
 ///   its rows, so a schedule replay arms each where the recording did.
-/// - Format 4 ([`BACKGROUND_STARTS_FORMAT`]) notes every background start its
+/// - Format 5 ([`BACKGROUND_STARTS_FORMAT`]) notes every background start its
 ///   run took (`background_starts`), so its schedule replay begins each
 ///   kernel-run call where the recording did.
+///
+/// A record states the newest format whose features it holds. Dropping one
+/// feature lowers it to the format below that feature, and clears the list and
+/// the claim of every newer one: a record without its starts states format 4,
+/// keeping its offsets, and one without its offsets states format 3, keeping
+/// no starts either.
 ///
 /// A record of a newer format is refused (`PreemptionRecord::validate_format`).
 pub const PREEMPTION_RECORD_FORMAT: u32 = BACKGROUND_STARTS_FORMAT;
@@ -761,25 +783,44 @@ impl PreemptionRecord {
     }
 
     /// The same record in the newest format ([`PREEMPTION_RECORD_FORMAT`]),
-    /// which a record from a run of this Hermit has, or the newest one below
-    /// [`BACKGROUND_STARTS_FORMAT`] when the record does not note its run's
-    /// background starts ([`format_without_background_starts`]). A stated
-    /// format this Hermit does not read (an explicit 1, 0, or one newer than
+    /// which a record from a run of this Hermit has, or the newest one whose
+    /// features it holds: below [`BACKGROUND_STARTS_FORMAT`] when the record
+    /// does not note its run's background starts
+    /// ([`format_without_background_starts`]), and below
+    /// [`INSTRUCTION_OFFSET_FORMAT`] as well when its schedule trace holds no
+    /// instruction offset either ([`format_without_instruction_offsets`];
+    /// `with_format` raises it again for one that does). A record that notes
+    /// its starts keeps the newest format whether or not its run made an
+    /// offset decision: its writer traced every one it made. A record that
+    /// already states the offsets format and whose rows carry an offset keeps
+    /// it, though its schedule trace holds none (a prefix that ends before the
+    /// first offset event, or an empty one): the rows of a run of this Hermit
+    /// hold every offset. A record of an older format whose rows carry
+    /// offsets ([`RecordedOffsets::RowsOnly`], written before the trace held
+    /// them) is not promoted. A stated format this Hermit does not read
+    /// ([`reads_format`]: an explicit 1, 0, or one newer than
     /// [`PREEMPTION_RECORD_FORMAT`]) stays as stated, so that reading the
     /// record still refuses it (`validate_format`).
     pub fn with_current_format(self) -> Self {
-        if self
-            .format_version
-            .is_some_and(|format| !(TIME_SKIPS_FORMAT..=PREEMPTION_RECORD_FORMAT).contains(&format))
-        {
+        if !reads_format(self.format_version) {
             return self;
         }
+        let current_rows = self
+            .format_version
+            .is_some_and(|format| format >= INSTRUCTION_OFFSET_FORMAT)
+            && self.rows_carry_instruction_offsets();
         let format = if self.notes_background_starts() {
             Some(PREEMPTION_RECORD_FORMAT)
         } else {
-            format_without_background_starts(Some(PREEMPTION_RECORD_FORMAT))
+            format_without_instruction_offsets(format_without_background_starts(Some(
+                PREEMPTION_RECORD_FORMAT,
+            )))
         };
-        self.with_format(format)
+        let mut record = self.with_format(format);
+        if current_rows {
+            record.raise_format(INSTRUCTION_OFFSET_FORMAT);
+        }
+        record
     }
 
     /// The same record in `format` (`None` for format 1), raised to
@@ -1202,6 +1243,40 @@ impl PreemptionRecord {
     /// The background starts the record holds, in order (`BackgroundStart`).
     pub fn background_starts(&self) -> &[BackgroundStart] {
         &self.background_starts
+    }
+
+    /// Stop claiming the schedule trace's instruction offsets: the format goes
+    /// below [`INSTRUCTION_OFFSET_FORMAT`] ([`format_without_instruction_offsets`]),
+    /// and, as every newer format holds the offsets too, the record drops the
+    /// lists those formats claim: its background starts. A format below the
+    /// offsets' cannot hold them in the schedule trace (`validate`), so the
+    /// trace's events drop theirs. A thread's rows keep theirs, as a record
+    /// written before the trace held offsets does ([`RecordedOffsets::RowsOnly`]):
+    /// a preemption replay still arms them, and a schedule replay stops each
+    /// such slice at a branch. A stated format this Hermit does not read stays
+    /// as stated, and keeps what it holds, so that reading the record still
+    /// refuses it.
+    pub fn drop_instruction_offsets_claim(&mut self) {
+        if !reads_format(self.format_version) {
+            return;
+        }
+        self.format_version = format_without_instruction_offsets(self.format_version);
+        self.background_starts.clear();
+        for event in &mut self.global {
+            event.instruction_offset = None;
+        }
+    }
+
+    /// Stop claiming the run's background starts: the format goes below
+    /// [`BACKGROUND_STARTS_FORMAT`] ([`format_without_background_starts`]) and
+    /// keeps the instruction offsets it holds, and the record drops its list
+    /// of starts. A stated format this Hermit does not read stays as stated.
+    pub fn drop_background_starts_claim(&mut self) {
+        if !reads_format(self.format_version) {
+            return;
+        }
+        self.format_version = format_without_background_starts(self.format_version);
+        self.background_starts.clear();
     }
 
     /// Whether the record notes every background start its run took: a
@@ -2030,6 +2105,7 @@ mod tests {
             start_rip: None,
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(5)),
+            instruction_offset: None,
         };
         let read = |writer: PreemptionWriter| -> PreemptionRecord {
             serde_json::from_str(&writer.into_string()).unwrap()
@@ -2093,6 +2169,10 @@ mod tests {
     #[test]
     fn only_a_record_that_notes_its_background_starts_states_their_format() {
         let below = Some(BACKGROUND_STARTS_FORMAT - 1);
+        // A writer that notes neither feature, and a record that holds
+        // neither, state the format below both.
+        let neither = format_below_noted_features(Some(PREEMPTION_RECORD_FORMAT));
+        assert_eq!(neither, Some(INSTRUCTION_OFFSET_FORMAT - 1));
         assert_eq!(
             format_without_background_starts(Some(PREEMPTION_RECORD_FORMAT)),
             below
@@ -2111,7 +2191,7 @@ mod tests {
         plain.insert_schedevent(SchedEvent::branches(tid, 10));
         plain.insert_background_start(tid, 1);
         let plain = read(plain);
-        assert_eq!(plain.format_version(), below);
+        assert_eq!(plain.format_version(), neither);
         assert!(!plain.notes_background_starts());
         assert!(plain.background_starts().is_empty());
 
@@ -2133,7 +2213,7 @@ mod tests {
             PreemptionRecord::from_sched_events(Vec::new())
                 .with_current_format()
                 .format_version(),
-            below
+            neither
         );
 
         let mut edited = noting.clone();
@@ -2624,7 +2704,7 @@ mod tests {
         plain.insert_schedevent(branch(None));
         assert_eq!(
             plain.into_string(),
-            r#"{"per_thread":{},"global":[{"dettid":3,"op":"Branch","count":20,"start_rip":null,"end_rip":null,"end_time":null}]}"#
+            r#"{"per_thread":{},"global":[{"dettid":3,"op":"Branch","count":20,"start_rip":null,"end_rip":null,"end_time":null}],"rejoins":[]}"#
         );
         let unedited = PreemptionRecord::from_sched_events(vec![branch(None)]);
         assert_eq!(unedited.format_version, None);
@@ -2636,7 +2716,7 @@ mod tests {
         let json = writer.into_string();
         assert!(
             json.ends_with(&format!(
-                r#""instruction_offset":{{"rcb_target":18,"instructions":4}}}}],"format_version":{INSTRUCTION_OFFSET_FORMAT}}}"#
+                r#""instruction_offset":{{"rcb_target":18,"instructions":4}}}}],"format_version":{INSTRUCTION_OFFSET_FORMAT},"rejoins":[]}}"#
             )),
             "{json}"
         );
@@ -2654,7 +2734,11 @@ mod tests {
         assert_eq!(rebuilt.schedevents()[1].instruction_offset, Some(offset));
         let mut split = record.clone();
         split.split_map(|event, _| vec![event]);
-        assert_eq!(split, record);
+        // An edit drops the readmissions, points of the recorded run (#4751's
+        // `forget_run_points`), and keeps the rest.
+        let mut unrejoined = record.clone();
+        unrejoined.rejoins = None;
+        assert_eq!(split, unrejoined);
         let mut stripped = record.clone();
         stripped.strip_event_times();
         assert_eq!(stripped.format_version, Some(INSTRUCTION_OFFSET_FORMAT));
@@ -2812,6 +2896,217 @@ mod tests {
             refused(&record.clone().with_current_format(), "with_current_format");
             refused(&record.schedule_prefix(1), "prefix");
         }
+    }
+
+    /// A record of the newest format with an instruction offset in its
+    /// schedule trace and a background start: what the units of the lowering
+    /// rule below take apart.
+    fn a_record_with_offsets_and_starts() -> PreemptionRecord {
+        let tid = DetTid::from_raw(3);
+        let mut writer = PreemptionWriter::new(None).noting_background_starts();
+        writer.insert_schedevent(SchedEvent::branches(tid, 20));
+        writer.insert_background_start(tid, 1);
+        writer.insert_schedevent(SchedEvent::branches(tid, 20).with_instruction_offset(Some(
+            InstructionOffset {
+                rcb_target: 18,
+                instructions: 4,
+            },
+        )));
+        let record: PreemptionRecord = serde_json::from_str(&writer.into_string()).unwrap();
+        assert_eq!(record.format_version(), Some(BACKGROUND_STARTS_FORMAT));
+        assert!(record.schedule_carries_instruction_offsets());
+        assert_eq!(record.background_starts().len(), 1);
+        record.validate().unwrap();
+        record
+    }
+
+    /// The format counter in landing order: the instruction offsets (#4845)
+    /// take the number above main's switch-in charge, and the background
+    /// starts (#4847) the one above that, the newest.
+    #[test]
+    fn the_background_starts_format_follows_the_offsets_format() {
+        assert_eq!(INSTRUCTION_OFFSET_FORMAT, SWITCH_IN_CHARGE_FORMAT + 1);
+        assert_eq!(BACKGROUND_STARTS_FORMAT, INSTRUCTION_OFFSET_FORMAT + 1);
+        assert_eq!(PREEMPTION_RECORD_FORMAT, BACKGROUND_STARTS_FORMAT);
+    }
+
+    /// Dropping the background starts lowers a record to the format below
+    /// theirs, which still claims the instruction offsets it holds.
+    #[test]
+    fn dropping_the_background_starts_keeps_the_offsets_claim() {
+        let mut record = a_record_with_offsets_and_starts();
+        record.drop_background_starts_claim();
+        assert_eq!(record.format_version(), Some(INSTRUCTION_OFFSET_FORMAT));
+        assert!(record.background_starts().is_empty());
+        assert!(record.schedule_carries_instruction_offsets());
+        record.validate().unwrap();
+    }
+
+    /// Dropping the instruction offsets' claim lowers a record to the format
+    /// below them and drops the background starts too: every newer format
+    /// holds the offsets, so the record cannot keep a newer claim without
+    /// them.
+    #[test]
+    fn dropping_the_offsets_claim_drops_the_starts_too() {
+        let mut record = a_record_with_offsets_and_starts();
+        record.drop_instruction_offsets_claim();
+        assert_eq!(record.format_version(), Some(SWITCH_IN_CHARGE_FORMAT));
+        assert!(record.background_starts().is_empty());
+        assert!(!record.notes_background_starts());
+        // The schedule trace drops its offsets with their claim, so the
+        // record is a valid one of the lower format, read back as such.
+        assert!(!record.schedule_carries_instruction_offsets());
+        record.validate().unwrap();
+        let read: PreemptionRecord = serde_json::from_str(&record.to_string()).unwrap();
+        read.validate().unwrap();
+        assert_eq!(read, record);
+        assert_eq!(read.recorded_offsets(), RecordedOffsets::None);
+    }
+
+    /// A thread's rows keep their offsets when the record stops claiming the
+    /// schedule trace's: the record reads as one written before the trace
+    /// held them (`RecordedOffsets::RowsOnly`), which a preemption replay
+    /// still arms.
+    #[test]
+    fn dropping_the_offsets_claim_keeps_the_rows_offsets() {
+        let tid = DetTid::from_raw(3);
+        let offset = InstructionOffset {
+            rcb_target: 18,
+            instructions: 4,
+        };
+        let mut writer = PreemptionWriter::new(None).noting_background_starts();
+        writer.register_thread(tid, DEFAULT_PRIORITY);
+        writer.insert_reprioritization(
+            tid,
+            LogicalTime::from_nanos(20),
+            20,
+            DEFAULT_PRIORITY,
+            6,
+            Some(offset),
+        );
+        writer
+            .insert_schedevent(SchedEvent::branches(tid, 20).with_instruction_offset(Some(offset)));
+        let mut record: PreemptionRecord = serde_json::from_str(&writer.into_string()).unwrap();
+        assert_eq!(record.recorded_offsets(), RecordedOffsets::Recorded);
+        record.drop_instruction_offsets_claim();
+        assert_eq!(record.format_version(), Some(SWITCH_IN_CHARGE_FORMAT));
+        assert!(!record.schedule_carries_instruction_offsets());
+        assert!(record.rows_carry_instruction_offsets());
+        record.validate().unwrap();
+        let read: PreemptionRecord = serde_json::from_str(&record.to_string()).unwrap();
+        read.validate().unwrap();
+        assert_eq!(read.recorded_offsets(), RecordedOffsets::RowsOnly);
+    }
+
+    /// Dropping both claims, in either order, leaves the format below both.
+    #[test]
+    fn dropping_both_claims_leaves_the_format_below_both() {
+        let mut starts_first = a_record_with_offsets_and_starts();
+        starts_first.drop_background_starts_claim();
+        starts_first.drop_instruction_offsets_claim();
+        let mut offsets_first = a_record_with_offsets_and_starts();
+        offsets_first.drop_instruction_offsets_claim();
+        offsets_first.drop_background_starts_claim();
+        for record in [starts_first, offsets_first] {
+            assert_eq!(record.format_version(), Some(SWITCH_IN_CHARGE_FORMAT));
+            assert!(record.background_starts().is_empty());
+            assert!(!record.schedule_carries_instruction_offsets());
+            record.validate().unwrap();
+        }
+        assert_eq!(
+            format_below_noted_features(Some(PREEMPTION_RECORD_FORMAT)),
+            Some(SWITCH_IN_CHARGE_FORMAT)
+        );
+    }
+
+    /// A stated format this Hermit does not read (0, an explicit 1, or one
+    /// newer than it writes) survives both drops as stated, with what it
+    /// holds, and stays refused.
+    #[test]
+    fn an_unread_format_survives_both_drops() {
+        for stated in [0, 1, PREEMPTION_RECORD_FORMAT + 1] {
+            let mut record = a_record_with_offsets_and_starts();
+            record.format_version = Some(stated);
+            record.drop_background_starts_claim();
+            record.drop_instruction_offsets_claim();
+            assert_eq!(record.format_version(), Some(stated));
+            assert_eq!(record.background_starts().len(), 1);
+            assert_eq!(
+                format_below_noted_features(Some(stated)),
+                Some(stated),
+                "format {stated}"
+            );
+            assert!(record.validate().is_err(), "format {stated}");
+        }
+    }
+
+    /// A record keeps the newest feature it holds as its current format:
+    /// one that notes its starts keeps the newest format whether or not its
+    /// run made an offset decision; one without starts states the offsets
+    /// format only when its schedule trace holds an offset.
+    #[test]
+    fn a_current_format_is_the_newest_feature_the_record_holds() {
+        let record = a_record_with_offsets_and_starts();
+        assert_eq!(
+            record.clone().with_current_format().format_version(),
+            Some(BACKGROUND_STARTS_FORMAT)
+        );
+        let mut no_starts = record.clone();
+        no_starts.drop_background_starts_claim();
+        assert_eq!(
+            no_starts.with_current_format().format_version(),
+            Some(INSTRUCTION_OFFSET_FORMAT)
+        );
+        let plain = PreemptionRecord::from_sched_events(vec![SchedEvent::branches(
+            DetTid::from_raw(3),
+            20,
+        )])
+        .with_format(Some(TIME_SKIPS_FORMAT));
+        assert_eq!(
+            plain.with_current_format().format_version(),
+            Some(SWITCH_IN_CHARGE_FORMAT)
+        );
+    }
+
+    /// A record of the offsets format whose rows carry an offset keeps the
+    /// format as its current one though its schedule trace holds none, as a
+    /// prefix that ends before the first offset event does; a record of an
+    /// older format with offsets in its rows alone, written before the trace
+    /// held them, stays below it (`RecordedOffsets::RowsOnly`).
+    #[test]
+    fn a_current_format_keeps_a_current_records_row_offsets() {
+        let tid = DetTid::from_raw(3);
+        let offset = InstructionOffset {
+            rcb_target: 18,
+            instructions: 4,
+        };
+        let mut writer = PreemptionWriter::new(None);
+        writer.register_thread(tid, DEFAULT_PRIORITY);
+        writer.insert_reprioritization(
+            tid,
+            LogicalTime::from_nanos(20),
+            20,
+            DEFAULT_PRIORITY,
+            6,
+            Some(offset),
+        );
+        writer.insert_schedevent(SchedEvent::branches(tid, 10));
+        let current: PreemptionRecord = serde_json::from_str(&writer.into_string()).unwrap();
+        assert_eq!(current.format_version(), Some(INSTRUCTION_OFFSET_FORMAT));
+        assert!(!current.schedule_carries_instruction_offsets());
+        for record in [current.clone(), current.schedule_prefix(0)] {
+            let current = record.with_current_format();
+            assert_eq!(current.format_version(), Some(INSTRUCTION_OFFSET_FORMAT));
+            assert_eq!(current.recorded_offsets(), RecordedOffsets::Recorded);
+            current.validate().unwrap();
+        }
+        // The negative control: the same rows in a record of no format.
+        let mut legacy = current;
+        legacy.format_version = None;
+        let legacy = legacy.with_current_format();
+        assert_eq!(legacy.format_version(), Some(SWITCH_IN_CHARGE_FORMAT));
+        assert_eq!(legacy.recorded_offsets(), RecordedOffsets::RowsOnly);
+        legacy.validate().unwrap();
     }
 
     /// A slice-boundary recording holds no instruction offset
@@ -3581,7 +3876,7 @@ mod tests {
     #[test]
     fn a_schedule_prefix_keeps_its_sources_record_format() {
         let tid = DetTid::from_raw(3);
-        for format in [None, Some(PREEMPTION_RECORD_FORMAT)] {
+        for format in [None, Some(INSTRUCTION_OFFSET_FORMAT)] {
             let mut record = PreemptionRecord::from_sched_events(vec![
                 SchedEvent::branches(tid, 10),
                 SchedEvent::branches(tid, 20),
@@ -4066,9 +4361,11 @@ impl PreemptionWriter {
     /// rules without a list of starts. Until the writer records an
     /// instruction-offset decision, which raises it to
     /// [`INSTRUCTION_OFFSET_FORMAT`] (`raise_format`), it states at most the
-    /// format below that ([`format_without_instruction_offsets`]).
+    /// format below that ([`format_without_instruction_offsets`]), which
+    /// claims neither feature.
     pub fn with_format(mut self, format: Option<u32>) -> Self {
-        self.inner.format_version = format_without_background_starts(format);
+        self.inner.format_version =
+            format_without_instruction_offsets(format_without_background_starts(format));
         self
     }
 
@@ -4098,11 +4395,17 @@ impl PreemptionWriter {
     /// event. Metadata stays in the legacy history, with exactly one global
     /// stream in the new envelope. Existing writers remain legacy by default.
     pub fn with_slice_boundaries(mut self) -> Result<Self, String> {
-        // A boundary replay takes no background starts
-        // (`BoundaryRecording::new`), so a writer that noted one cannot
-        // become a boundary writer, and a boundary writer states no format
-        // that claims their list.
+        // A slice-boundary recording holds no instruction offset and takes
+        // no background starts (`BoundaryRecording::new`), so a writer that
+        // noted either (an offset in a thread's rows can come before any
+        // event) cannot become a boundary writer, and a boundary writer states
+        // no format that claims them.
         if !self.inner.global.is_empty()
+            || self
+                .inner
+                .per_thread
+                .values()
+                .any(|history| history.has_instruction_offsets())
             || !self.inner.background_starts.is_empty()
             || self.boundary_records.is_some()
         {
@@ -4221,10 +4524,13 @@ impl PreemptionWriter {
     /// takes (`insert_background_start`), and a record without any says its
     /// run began none.
     pub fn noting_background_starts(mut self) -> Self {
-        // A slice-boundary writer notes no starts (`insert_background_start`),
-        // so it states the format below theirs.
+        // A slice-boundary writer notes no starts (`insert_background_start`)
+        // and holds no instruction offset (`BoundaryRecording::new`), so it
+        // states the format below both.
         self.inner.format_version = if self.boundary_records.is_some() {
-            format_without_background_starts(Some(PREEMPTION_RECORD_FORMAT))
+            format_without_instruction_offsets(format_without_background_starts(Some(
+                PREEMPTION_RECORD_FORMAT,
+            )))
         } else {
             Some(PREEMPTION_RECORD_FORMAT)
         };

@@ -21416,11 +21416,12 @@ fn an_instruction_offset_record_replays_from_its_schedule_and_analyze_verifies_i
         assert_eq!(lost == 0, fixed, "{label} seed {seed}: {recorded}");
         let json: serde_json::Value =
             serde_json::from_slice(&fs::read(&record).expect("no preemption record")).unwrap();
-        // Both guests record offset decisions, so each record states the
-        // offsets format; a record without one states the format below it.
+        // Both guests record offset decisions in a fresh recording, which
+        // notes its background starts too, so each record states the newest
+        // format, which holds the offsets format's.
         assert_eq!(
             json["format_version"],
-            detcore::preemptions::INSTRUCTION_OFFSET_FORMAT,
+            detcore::preemptions::PREEMPTION_RECORD_FORMAT,
             "{label}"
         );
         let events = json["global"].as_array().expect("schedule trace");
@@ -58573,13 +58574,13 @@ fn chosen_json_provenance_follows_real_target_setup_and_both_replay_loaders() {
         }
         history["final_prio"] = serde_json::json!(if tid == "5004" { 999 } else { 1000 });
     }
-    // A schedule replay notes no background starts, so its re-record states
-    // the format below the background-starts format, with the same timing
-    // rules; a priority replay notes them and keeps the recording's format.
-    let schedule_format =
-        serde_json::json!(detcore::preemptions::format_without_background_starts(
-            Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
-        ));
+    // A schedule replay notes no background starts, and this run makes no
+    // instruction-offset decision, so its re-record states the format below
+    // both, with the same timing rules; a priority replay notes them and
+    // keeps the recording's format.
+    let schedule_format = serde_json::json!(detcore::preemptions::format_below_noted_features(
+        Some(detcore::preemptions::PREEMPTION_RECORD_FORMAT)
+    ));
     let schedule_flag = format!("--replay-schedule-from={}", recording.display());
     let priority_flag = format!("--replay-preemptions-from={}", recording.display());
     for route in ["schedule", "priority", "both"] {
