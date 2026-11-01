@@ -1281,6 +1281,7 @@ async fn a_schedule_replay_arms_a_recorded_instruction_offset() {
             end_rip: std::num::NonZeroUsize::new(1),
             end_time: None,
             instruction_offset: None,
+            strex_fails: Default::default(),
         });
         writer.insert_schedevent(SchedEvent::branches(tid, 1));
         let record = writer.into_string();

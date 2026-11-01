@@ -39548,6 +39548,7 @@ mod test {
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(1)),
             instruction_offset: None,
+            strex_fails: Default::default(),
         };
         let branch =
             |tid, count| SchedEvent::branches(tid, count).with_time(LogicalTime::from_nanos(1));

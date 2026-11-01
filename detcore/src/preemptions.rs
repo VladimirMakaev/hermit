@@ -2456,6 +2456,7 @@ mod tests {
             end_rip: None,
             end_time: Some(LogicalTime::from_nanos(5)),
             instruction_offset: None,
+            strex_fails: Default::default(),
         };
         let read = |writer: PreemptionWriter| -> PreemptionRecord {
             serde_json::from_str(&writer.into_string()).unwrap()
@@ -3057,6 +3058,8 @@ mod tests {
                 start_rip: None,
                 end_rip: None,
                 end_time: end.map(LogicalTime::from_nanos),
+                instruction_offset: None,
+                strex_fails: Default::default(),
             });
         }
         let marked = writer.into_string();

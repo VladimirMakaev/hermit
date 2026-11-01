@@ -1154,6 +1154,8 @@ mod tests {
                     start_rip: None,
                     end_rip: None,
                     end_time: None,
+                    instruction_offset: None,
+                    strex_fails: Default::default(),
                 })
                 .collect::<Vec<_>>()
         };
