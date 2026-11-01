@@ -7353,6 +7353,8 @@ mod tests {
             start_rip: None,
             end_rip: detcore::types::InstructionPointer::new(rip),
             end_time: None,
+            instruction_offset: None,
+            strex_fails: Default::default(),
         };
         let requested = vec![
             other(3, 0x10),
@@ -7419,6 +7421,8 @@ mod tests {
             start_rip: None,
             end_rip: detcore::types::InstructionPointer::new(rip),
             end_time: None,
+            instruction_offset: None,
+            strex_fails: Default::default(),
         };
         let requested = vec![
             other(3, 0x10),
