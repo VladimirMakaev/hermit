@@ -3698,7 +3698,7 @@ mod legacy_backend_json {
     /// `rewrite_exclusives_overlay` likewise: the run's global state names the
     /// files the overlay rewrite left, so it is never written and reads as
     /// empty.
-    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 49] = [
+    const FIELDS_WITHOUT_A_LEGACY_KEY: [&str; 50] = [
         "backend",
         "strict_schedule_boundaries",
         "record_host_inputs",
@@ -5221,11 +5221,12 @@ mod tests {
         // `access_trace`, `access_trace_from`, `access_trace_max_records`,
         // `access_trace_max_bytes`, `replay_continue_fairly`,
         // `standard_stream_aliases`, `chaos_instruction_offset`,
-        // `rewrite_exclusives_in_memory`, `count_store_exclusives` and
-        // `strict_schedule_boundaries` none: fourteen more keys and forty-eight
-        // fewer, so thirty-four keys fewer than fields.
+        // `rewrite_exclusives_in_memory`, `count_store_exclusives`,
+        // `rewrite_exclusives_overlay` and `strict_schedule_boundaries` none:
+        // fourteen more keys and forty-nine fewer, so thirty-five keys fewer
+        // than fields.
         assert!(!fields.iter().any(|field| field == "shared_dequeue_timers"));
-        assert_eq!(fields.len(), keys.len() + 34);
+        assert_eq!(fields.len(), keys.len() + 35);
     }
 
     /// `record_host_inputs` never enters the legacy form, whatever its value:
