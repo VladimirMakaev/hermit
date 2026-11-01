@@ -175,13 +175,13 @@ mod tests {
         // Adds `GlobalRequest::PostCrash`, `GlobalResponse::PostCrash` and `GlobalResponse::WithPostCrashBound` (#4867).
         (25, "2ea294f78e7e054c", "f013e36743d8d9e6"),
         // Retypes `GlobalResponse::StartNewThread` (#4789).
-        (23, "f37995922d314411", "f013e36743d8d9e6"),
+        (26, "f37995922d314411", "f013e36743d8d9e6"),
         // Retypes `GlobalResponse::StartNewThread`: the boxed history, the
         // first slice and its instruction offset.
-        (24, "0cc959f6e203eaa7", "f013e36743d8d9e6"),
+        (27, "0cc959f6e203eaa7", "f013e36743d8d9e6"),
         // Retypes `GlobalResponse::StartNewThread`: the thread's replay
         // history with its check-in marks (#4902).
-        (25, "765f20d6713fa52d", "f013e36743d8d9e6"),
+        (28, "b018ce6ee3d10754", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
