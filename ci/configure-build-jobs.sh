@@ -3181,8 +3181,23 @@ fi
 # reverie-dbt/native and third-party/ are byte-identical by git object id
 # between the pins (4e4afaa7, 3f2abba1, d582607c, fb49c0ba), so the existing
 # SDK budget carries, not runtime equivalence.
-if [[ ${REVERIE_DBT_BUDGET_BOUND_PIN:-} != a09bc2932007af8e9820b9364d623f85c87cdc89 ]]; then
-    echo "configure-build-jobs.sh: DECLINED (no_result, exit 75): DBT budget is not bound to Reverie a09bc2932007af8e9820b9364d623f85c87cdc89 (bound pin: ${REVERIE_DBT_BUDGET_BOUND_PIN:-<unset>})" >&2
+# CARRY TO a6f6508abab44d73f2fdac4bfc259ba2fa9028b3 (2026-10-31): from
+# a09bc2932007af8e9820b9364d623f85c87cdc89. The train22 cluster-2 Reverie
+# branch (train22/2-aarch64): reverie#1137, reverie#1141, reverie#1145,
+# reverie#1157, reverie#1149, reverie#1150, reverie#1156, reverie#1158,
+# reverie#1167, reverie#1168, reverie#1172 on top of it, plus three train
+# resolution commits. Not on Reverie's main branch yet; it lands there first
+# and the pin then moves to the landed revision.
+# git diff is empty under reverie-dbt/ and third-party/ and for the root
+# Cargo.toml, Cargo.lock and rust-toolchain.toml; the repository inputs to
+# the DynamoRIO content key are byte-identical by git object id:
+#     reverie-dbt/vendor/dynamorio  4e4afaa7cb1a -> 4e4afaa7cb1a
+#     reverie-dbt/build.rs          3f2abba1b74a -> 3f2abba1b74a
+#     reverie-dbt/native            d582607c5e45 -> d582607c5e45
+# so the inventory, SDK and native inputs, calibrated budget, job width and
+# limits carry unchanged from the a09bc293 entry.
+if [[ ${REVERIE_DBT_BUDGET_BOUND_PIN:-} != a6f6508abab44d73f2fdac4bfc259ba2fa9028b3 ]]; then
+    echo "configure-build-jobs.sh: DECLINED (no_result, exit 75): DBT budget is not bound to Reverie a6f6508abab44d73f2fdac4bfc259ba2fa9028b3 (bound pin: ${REVERIE_DBT_BUDGET_BOUND_PIN:-<unset>})" >&2
     return 75
 fi
 
