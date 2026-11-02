@@ -293,6 +293,7 @@ root.
 | language-runtime determinism | `hermit-cli/tests/language_runtime_determinism.rs` | Optional toolchains (Go, Ruby, Node.js, OpenJDK, OCaml, CPython) | `#[ignore]` per missing toolchain |
 | `python_stdlib` | `hermit-cli/tests/python_stdlib.rs` | System CPython 3 + full `Lib/test` | |
 | `redis_strict`, `sqlite_veryquick` | `hermit-cli/tests/` | Network/build to fetch+build pinned Redis/SQLite | Slow; `#[ignore]` by default |
+| `store_exclusive::runtime::tests::` `the_rewrite_writes_only_this_private_mapping_through_proc_mem`, `a_mapping_whose_name_now_leads_elsewhere_is_not_written`, `the_plan_follows_the_files_bytes_through_the_cache` (`--ignored`, aarch64 only) | `detcore/src/store_exclusive.rs` | `/dev/shm` mounted without `noexec`; the first two also a forced write to a read-only private page through `/proc/self/mem`, which Linux 6.12's `proc_mem.force_override` can refuse | `#[ignore]`. Run with `cargo nextest run -p hermit-detcore --lib --run-ignored all -E 'test(store_exclusive::runtime::tests::)'`; on a host without these each fails with "this host cannot run this test: <reason>" |
 
 `#[ignore]` tests are excluded from a plain `cargo test`. Scheduled or explicit
 local validation may opt into them; running them requires the matching
