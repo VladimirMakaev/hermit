@@ -1910,7 +1910,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Includes 29 inherited additions missed by the old pin and six fix regressions.
     // Recount at a7ecd1755834d559c82c6ee633bf4e6eeef6ee3f: ten timing-report
     // tests and three review regressions retain all 1328 prior names: 1341.
-    ("test.hermit_unit", 1341),
+    // phases::tests::an_empty_prefix_that_meets_the_target_claims_nothing_about_longer_ones
+    // retains all 1341 prior names: 1342.
+    ("test.hermit_unit", 1342),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -5978,7 +5980,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 3cb2f62f64de85ee7e9a7deabb9802dc9ee250b8: 1322 active names.
     // The same thirteen additions, measured with this host selection at
     // a7ecd1755834d559c82c6ee633bf4e6eeef6ee3f: 1335 active names.
-    ("test.hermit_unit_on_host", 1335),
+    // And the same empty-prefix claim regression: 1336.
+    ("test.hermit_unit_on_host", 1336),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
