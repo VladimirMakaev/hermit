@@ -1912,7 +1912,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // tests and three review regressions retain all 1328 prior names: 1341.
     // phases::tests::an_empty_prefix_that_meets_the_target_claims_nothing_about_longer_ones
     // retains all 1341 prior names: 1342.
-    ("test.hermit_unit", 1342),
+    // phases::tests::a_prefix_report_refuses_a_continuation_its_checkpoints_do_not_attach_to
+    // and phases::tests::a_timing_report_refuses_continuations_their_checkpoints_do_not_attach_to
+    // retain all 1342 prior names: 1344.
+    ("test.hermit_unit", 1344),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -5981,7 +5984,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same thirteen additions, measured with this host selection at
     // a7ecd1755834d559c82c6ee633bf4e6eeef6ee3f: 1335 active names.
     // And the same empty-prefix claim regression: 1336.
-    ("test.hermit_unit_on_host", 1336),
+    // And the same two unattached-checkpoint report regressions: 1338.
+    ("test.hermit_unit_on_host", 1338),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
