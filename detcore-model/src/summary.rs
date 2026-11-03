@@ -316,6 +316,21 @@ pub struct RunSummary {
     /// and in older summaries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub run_timeout_secs: Option<u64>,
+
+    /// aarch64: whether the run's `--rewrite-exclusives` rewrote files that
+    /// have no ARM mapping symbols by the stripped-file heuristic
+    /// (`--rewrite-exclusives-stripped=heuristic`), whose classification of
+    /// code is not proved and can be mistaken. Shown in the INFO view and the
+    /// full report. Absent when off.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exclusive_rewrite_stripped_heuristic: bool,
+
+    /// aarch64: the files the run's `--rewrite-exclusives` left unchanged
+    /// because they have no ARM mapping symbols, under the default
+    /// (`--rewrite-exclusives-stripped=refuse`). Shown in the INFO view and
+    /// the full report. Absent when there were none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exclusive_rewrite_unmarked: Vec<String>,
 }
 
 fn is_zero(count: &u64) -> bool {
@@ -524,6 +539,8 @@ impl RunSummary {
             desync_notes: _,
             binder_external_calls,
             run_timeout_secs,
+            exclusive_rewrite_stripped_heuristic,
+            exclusive_rewrite_unmarked,
         } = self;
         if let Some(bound) = run_timeout_secs {
             writeln!(
@@ -612,6 +629,24 @@ impl RunSummary {
             )?;
             for (path, reads) in counter_reads {
                 writeln!(f, "  {path}: {reads}")?;
+            }
+        }
+        if *exclusive_rewrite_stripped_heuristic {
+            writeln!(
+                f,
+                "Exclusive loops in files without mapping symbols were rewritten by the \
+                 stripped-file heuristic (--rewrite-exclusives-stripped=heuristic): what it took \
+                 for code is not proved"
+            )?;
+        }
+        if !exclusive_rewrite_unmarked.is_empty() {
+            writeln!(
+                f,
+                "--rewrite-exclusives left {} file(s) without mapping symbols unchanged:",
+                exclusive_rewrite_unmarked.len()
+            )?;
+            for path in exclusive_rewrite_unmarked {
+                writeln!(f, "  {path}")?;
             }
         }
 
@@ -928,6 +963,34 @@ mod tests {
     /// back; a summary without notes, or written before the field existed,
     /// omits it; a kind from a later Hermit still parses
     /// (https://github.com/rrnewton/hermit/issues/4876).
+    /// The stripped-file rewrite's mark and the files the default left
+    /// unchanged are in the JSON and the INFO view, and absent when unset.
+    #[test]
+    fn the_stripped_rewrite_is_stated_in_the_summary() {
+        let quiet = RunSummary::default();
+        let json = serde_json::to_string(&quiet).unwrap();
+        assert!(!json.contains("exclusive_rewrite_"), "{json}");
+        assert!(!quiet.info(None).to_string().contains("rewrite-exclusives"));
+        let stated = RunSummary {
+            exclusive_rewrite_stripped_heuristic: true,
+            exclusive_rewrite_unmarked: vec!["/lib64/libstdc++.so.6".to_owned()],
+            ..RunSummary::default()
+        };
+        let json = serde_json::to_string(&stated).unwrap();
+        let back: RunSummary = serde_json::from_str(&json).unwrap();
+        assert!(back.exclusive_rewrite_stripped_heuristic);
+        assert_eq!(
+            back.exclusive_rewrite_unmarked,
+            stated.exclusive_rewrite_unmarked
+        );
+        let info = stated.info(None).to_string();
+        assert!(
+            info.contains("--rewrite-exclusives-stripped=heuristic"),
+            "{info}"
+        );
+        assert!(info.contains("\n  /lib64/libstdc++.so.6\n"), "{info}");
+    }
+
     #[test]
     fn desync_notes_round_trip_through_summary_json() {
         use super::BackgroundStartRef;
