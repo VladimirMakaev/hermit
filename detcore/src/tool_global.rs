@@ -8020,7 +8020,9 @@ pub enum SignalScope {
 /// current revision, adds `Rewrite::unmarked` to the `StoreExclusive`
 /// payload, above 33 to 40, which the queued drains' allocation table
 /// reserves.
-pub(crate) const GLOBAL_RPC_REVISION: u32 = 41;
+/// 43 adds `Rewrite::not_written`, above 42, which
+/// https://github.com/rrnewton/hermit/pull/4769's queued drain claims.
+pub(crate) const GLOBAL_RPC_REVISION: u32 = 43;
 
 /// A guest thread's descriptor table, which `GlobalRequest::HoldTable`
 /// carries to the global state, for the terminal receipt of a death by a

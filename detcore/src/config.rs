@@ -91,13 +91,14 @@ mod tests {
     /// drains' allocation table reserves (33 for
     /// https://github.com/rrnewton/hermit/pull/4909, 34 for #4907, 35 for
     /// #4796, 36 for #4791, 37 for #4759 and 39 for the KVM 2b-1 change),
-    /// and 40 for https://github.com/rrnewton/hermit/pull/4885. 28 is
+    /// 40 for https://github.com/rrnewton/hermit/pull/4885, and 42 for
+    /// https://github.com/rrnewton/hermit/pull/4769's queued drain. 28 is
     /// https://github.com/rrnewton/hermit/pull/4789's, 29 is
     /// https://github.com/rrnewton/hermit/pull/4884's, 30 and 32 are
     /// https://github.com/rrnewton/hermit/pull/4728's, and 31 is
     /// https://github.com/rrnewton/hermit/pull/4867's. Remove an entry when
     /// its change lands, with its row.
-    const RESERVED_GLOBAL_RPC_REVISIONS: &[u32] = &[33, 34, 35, 36, 37, 38, 39, 40];
+    const RESERVED_GLOBAL_RPC_REVISIONS: &[u32] = &[33, 34, 35, 36, 37, 38, 39, 40, 42];
 
     /// Every revision of the global RPC, oldest first, with the digest of the
     /// code of its two enums and its `Resources` payload. A change to any of
@@ -271,6 +272,11 @@ mod tests {
         // The first revision above those the queued drains' allocation table
         // reserves (33 to 40; digest measured at this head).
         (41, "ff21b45b2eaff958", "f013e36743d8d9e6"),
+        // The `StoreExclusive` payload's `Rewrite` says why loops were not
+        // written (`not_written`); its fields cross the wire positionally.
+        // After the code/data proof's 41, with 33 to 40 and 42 reserved
+        // (digest measured at this head).
+        (43, "843bcd44c92effc8", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
