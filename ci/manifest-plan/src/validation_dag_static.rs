@@ -1294,7 +1294,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (--chaos-instruction-offset): 1964 + 2 = 1966.
     // And detcore-model's untrap_passthrough_syscalls_is_opt_in_and_round_trips and
     // untrap_passthrough_syscalls_never_enters_the_legacy_form: 1968 + 2 = 1970, listed.
-    ("test.regular_crates", 1970),
+    // And summary::tests::a_file_the_in_memory_rewrite_could_not_write_says_why:
+    // 1971, listed.
+    ("test.regular_crates", 1971),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -5468,7 +5470,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset detcore-model units:
     // 1950 + 2 = 1952.
     // PR #4764: the same two detcore-model untrap units: 1954 + 2 = 1956.
-    ("test.regular_crates_on_host", 1956),
+    // And the same not-written summary unit: 1957, listed.
+    ("test.regular_crates_on_host", 1957),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6736,7 +6739,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset detcore-model units:
     // 1950 + 2 = 1952.
     // PR #4764: the same two detcore-model untrap units: 1954 + 2 = 1956.
-    ("test.regular_crates_on_host", 1956),
+    // And the same not-written summary unit: 1957, listed.
+    ("test.regular_crates_on_host", 1957),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
