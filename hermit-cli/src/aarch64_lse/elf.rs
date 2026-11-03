@@ -156,6 +156,7 @@ fn refusal_name(reason: &Refusal) -> &'static str {
         Refusal::NoMappingSymbols => "no-mapping-symbols",
         Refusal::UnsupportedMappingSymbol(_) => "unsupported-mapping-symbol",
         Refusal::CompareExit => "compare-exit",
+        Refusal::UnknownDirectBranch => "unknown-direct-branch",
     }
 }
 
@@ -381,6 +382,23 @@ pub fn rewrite_bytes(
     // Compare idioms are left alone as compare-exit whether or not any
     // other section holds a store-exclusive (scope cut), so no
     // external-store scan is needed here.
+    //
+    // The fail-closed entry rule across the image: a word that might be a
+    // direct branch with an unknown target, anywhere but in bytes marked
+    // data, could be aimed into any executable section, so no section's
+    // sequences are rewritten. Bytes marked data are not executed; a
+    // section nothing proves is scanned whole, and one that cannot be read
+    // could hold anything.
+    let unknown_direct_branch = sections.iter().any(|section| {
+        let Some(words) = &section.words else {
+            return true;
+        };
+        words.iter().enumerate().any(|(index, word)| {
+            let addr = section.vaddr + 4 * index as u64;
+            (in_spans(&section.code, addr) || in_spans(&section.unknown, addr))
+                && rewrite::unknown_direct_branch_possible(*word)
+        })
+    });
     let mut report = FileReport::default();
     if relr_unreadable {
         report
@@ -421,13 +439,7 @@ pub fn rewrite_bytes(
         // each sequence the planner finds is named as left alone for that
         // reason, whatever else it would have said of it.
         if let Some(reason) = unproven {
-            let plan = rewrite::plan_with_external_store(
-                &words,
-                vaddr,
-                &external_targets,
-                &known_entries,
-                false,
-            );
+            let plan = rewrite::plan_section(&words, vaddr, &external_targets, &known_entries);
             report.exclusive_instructions += plan.exclusive_instructions;
             let mut sites: Vec<u64> = plan
                 .patched
@@ -459,16 +471,13 @@ pub fn rewrite_bytes(
             ));
             continue;
         }
-        let mut plan = rewrite::plan_with_external_store(
-            &words,
-            vaddr,
-            &external_targets,
-            &known_entries,
-            false,
-        );
+        let mut plan = rewrite::plan_section(&words, vaddr, &external_targets, &known_entries);
         restrict_to_code(&mut plan, &words, vaddr, &code);
         refuse_literals(&mut plan, &literals);
         refuse_overlapping(&mut plan, &extents, Refusal::AddressedData);
+        if unknown_direct_branch {
+            rewrite::refuse_patched(&mut plan, Refusal::UnknownDirectBranch);
+        }
         if unknown != 0 {
             report.skipped_segments.push(format!(
                 "executable section at {vaddr:#x}: {unknown} exclusive instructions in bytes not \

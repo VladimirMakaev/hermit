@@ -125,6 +125,10 @@ pub enum Refusal {
     /// nor `$d` (AArch32's `$a` or `$t`, or an unknown one), so its mapping
     /// symbols do not prove where its code is, under either policy.
     UnsupportedMappingSymbol(String),
+    /// The scanned range (or another executable section) holds an
+    /// instruction that is not positively known not to be a direct
+    /// branch, so an interior entry cannot be ruled out.
+    UnknownDirectBranch,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,12 +203,35 @@ pub fn plan_with_entries(
 /// decides anything: compare idioms are left alone as `compare-exit`
 /// whether or not any other store-exclusive is known, because the set
 /// of executable bytes a compare exit can reach is not proved.
+///
+/// The entry protection fails closed: a word in the range that might be a
+/// direct branch with an unknown target
+/// ([`unknown_direct_branch_possible`]) refuses every rewrite in it.
 pub fn plan_with_external_store(
     words: &[u32],
     base: u64,
     external_targets: &HashSet<u64>,
     known_entries: &HashSet<u64>,
     _external_store_exclusive: bool,
+) -> Report {
+    let mut report = plan_section(words, base, external_targets, known_entries);
+    if words
+        .iter()
+        .any(|word| unknown_direct_branch_possible(*word))
+    {
+        refuse_patched(&mut report, Refusal::UnknownDirectBranch);
+    }
+    report
+}
+
+/// [`plan_with_external_store`] without its fail-closed entry rule, which
+/// the caller applies itself over the words it may execute: an image's
+/// executable sections also hold data, whose words decode as anything.
+pub fn plan_section(
+    words: &[u32],
+    base: u64,
+    external_targets: &HashSet<u64>,
+    known_entries: &HashSet<u64>,
 ) -> Report {
     let decoded: Vec<Insn> = words.iter().copied().map(decode).collect();
     let branches = direct_branches(&decoded, base);
@@ -275,6 +302,59 @@ pub fn plan_with_external_store(
     report
 }
 
+/// Move every planned rewrite of `report` to its refusals, for `reason`.
+pub fn refuse_patched(report: &mut Report, reason: Refusal) {
+    let refused: Vec<RefusedSite> = report
+        .patched
+        .drain(..)
+        .map(|site| RefusedSite {
+            addr: site.addr,
+            reason: reason.clone(),
+        })
+        .collect();
+    report.refused.extend(refused);
+}
+
+/// Whether `word` might be a direct branch whose target is unknown.
+///
+/// The entry protection fails closed. Every PC-relative direct branch
+/// in the A64 ISA lives in the branch/exception/system group (bits
+/// 28:26 = 101) or is one of the families the decoder knows; the data
+/// processing and load/store groups contain no direct branch at all.
+/// So a word the decoder does not positively recognise is a possible
+/// direct branch when it falls in that group — beyond the positively
+/// known non-direct members (system/hint space and exception
+/// generation, which have no image target, and the indirect
+/// branch/return space) — or in the reserved top-level space (bits
+/// 28:25 = 0000), which no current instruction occupies. Anything
+/// else unrecognised is in a group with no direct branch and cannot
+/// be aimed at a sequence's interior.
+pub fn unknown_direct_branch_possible(word: u32) -> bool {
+    if insn::decode(word) != Insn::Other {
+        return false;
+    }
+    if (word >> 26) & 0x7 == 0b101 {
+        // Positively known to have no image target: exception
+        // generation (11010100: SVC/HVC/SMC/BRK and kin, which trap),
+        // the system/hint space (11010101: MSR/MRS, barriers, hints,
+        // CLREX), and the indirect branch/return forms (1101011 with
+        // BR/BLR/RET/ERET/DRPS opcodes). Everything else in the group
+        // that the decoder does not recognise — a branch family it does
+        // not know, or an unallocated encoding — is a possible direct
+        // branch.
+        let known_non_direct = (word >> 24) & 0xff == 0b11010100
+            || (word >> 24) & 0xff == 0b11010101
+            || ((word >> 25) & 0x7f == 0b1101011
+                && matches!(
+                    (word >> 21) & 0xf,
+                    0b0000 | 0b0001 | 0b0010 | 0b0100 | 0b0101
+                ));
+        !known_non_direct
+    } else {
+        (word >> 25) & 0xf == 0
+    }
+}
+
 /// Apply a plan to the same words it was computed from.
 pub fn apply(words: &mut [u32], base: u64, report: &Report) {
     for site in &report.patched {
@@ -301,6 +381,7 @@ fn direct_branches(decoded: &[Insn], base: u64) -> Vec<(usize, u64)> {
             Insn::Branch { offset, .. }
             | Insn::CondBranch { offset, .. }
             | Insn::CompareBranch { offset, .. }
+            | Insn::CompareAndBranch { offset }
             | Insn::TestBranch { offset } => offset,
             _ => continue,
         };
@@ -857,6 +938,77 @@ mod tests {
         // is where the replacement starts too, so it does not refuse it.
         let report = plan(original, BASE);
         assert_eq!(report.patched.len(), 1);
+    }
+
+    #[test]
+    fn a_bc_cond_into_the_middle_of_a_sequence_refuses_it() {
+        // clrex; bc.ne .+8; ldaxr x4,[x3]; add x4,x4,#1; stlxr w5,x4,[x3];
+        // cbnz w5, .-12; ret. The BC.ne lands on the ADD inside the
+        // canonical loop, so the loop must be refused, exactly as the
+        // same entry by B.ne is.
+        let words = [
+            0xd503_3f5f, // clrex
+            0x5400_0051, // bc.ne .+8
+            0xc85f_fc64, // ldaxr x4, [x3]
+            0x9100_0484, // add x4, x4, #1
+            0xc805_fc64, // stlxr w5, x4, [x3]
+            0x35ff_ffa5, // cbnz w5, .-12
+            0xd65f_03c0, // ret
+        ];
+        let report = plan(&words, BASE);
+        assert_eq!(report.patched, vec![]);
+        assert_eq!(
+            report.refused.first().map(|r| r.reason.clone()),
+            Some(Refusal::BranchIntoSequence)
+        );
+
+        // Control: without the interior entry the same loop is rewritten.
+        let mut control = words;
+        control[1] = insn::NOP;
+        let report = plan(&control, BASE);
+        assert_eq!(report.patched.len(), 1);
+    }
+
+    #[test]
+    fn a_cmpbr_into_the_middle_of_a_sequence_refuses_it() {
+        // clrex; CB<cc> .+8 (register, immediate, byte and halfword
+        // forms); then the canonical loop. Each branch lands on the ADD
+        // inside the loop, so the loop is refused, and without the
+        // branch the same loop is rewritten.
+        let (_, _, loop_words, _) = CASES[0];
+        for branch in [0xf4c6_0046, 0xf5c0_0046, 0x74c6_8046, 0x74c6_c046] {
+            let mut words = vec![insn::CLREX, branch];
+            words.extend_from_slice(loop_words);
+            let report = plan(&words, BASE);
+            assert_eq!(report.patched, vec![], "{branch:#x}");
+            assert_eq!(
+                report.refused.first().map(|r| r.reason.clone()),
+                Some(Refusal::BranchIntoSequence),
+                "{branch:#x}"
+            );
+        }
+        let mut words = vec![insn::CLREX, insn::NOP];
+        words.extend_from_slice(loop_words);
+        assert_eq!(plan(&words, BASE).patched.len(), 1);
+    }
+
+    #[test]
+    fn an_unrecognised_possible_branch_refuses_the_whole_range() {
+        // A reserved (permanently unallocated) word and an unallocated
+        // branch-group word are each treated as a direct branch with an
+        // unknown target: no site in the range rewrites.
+        let (_, _, loop_words, _) = CASES[0];
+        for unknown in [0x0000_0000, 0xd700_0000] {
+            let mut words = vec![unknown];
+            words.extend_from_slice(loop_words);
+            let report = plan(&words, BASE);
+            assert_eq!(report.patched, vec![], "{unknown:#x}");
+            assert_eq!(
+                report.refused.first().map(|r| r.reason.clone()),
+                Some(Refusal::UnknownDirectBranch),
+                "{unknown:#x}"
+            );
+        }
     }
 
     #[test]

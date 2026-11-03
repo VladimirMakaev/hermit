@@ -39,8 +39,10 @@ pub mod rewrite;
 /// symbol marks is rewritten only under the stripped-file heuristic,
 /// which writes what 4 wrote. 6: scope cut -- compare (CAS) idioms are
 /// left alone as `compare-exit` and the stripped-file heuristic opt-in
-/// is removed, so only mapping-symbol-proved code is rewritten.
-pub const REWRITE_FORMAT_VERSION: u32 = 6;
+/// is removed, so only mapping-symbol-proved code is rewritten. 7: a word
+/// that may be a direct branch with an unknown target refuses every
+/// rewrite in the image.
+pub const REWRITE_FORMAT_VERSION: u32 = 7;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
