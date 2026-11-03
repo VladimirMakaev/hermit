@@ -8310,14 +8310,11 @@ pub enum SignalScope {
 /// landed 46). 48 adds `WithCpuTime` and `RecordExitCode` (package K item
 /// 2b slice 2b-1, allocated 39, renumbered 41 at its rebase onto 40, 42 at
 /// its rebase onto 41, 46 at its rebase onto 45, then mechanically to 48
-/// at its rebase onto 47) and is the current revision.
-/// From https://github.com/rrnewton/hermit/pull/5222, merged at landing by the merge queue (its
-/// revision 48 is 49):
-/// `Rewrite::unmarked` to the `StoreExclusive` payload (numbered 42 at
-/// this change's rebase onto main's 41, renumbered to 47, the next
-/// revision after the landed 46). 48 adds `Rewrite::not_written` to the
-/// `StoreExclusive` payload and is current.
-pub(crate) const GLOBAL_RPC_REVISION: u32 = 49;
+/// at its rebase onto 47). 49 adds `Rewrite::not_written`, why an in-memory
+/// rewrite wrote nothing, to the `StoreExclusive` payload (numbered 48 after
+/// main's 47, renumbered to 49 after main's 48). 50 adds
+/// `Found::unverified_pairs`, and is current.
+pub(crate) const GLOBAL_RPC_REVISION: u32 = 50;
 
 /// A guest thread's descriptor table, which `GlobalRequest::HoldTable`
 /// carries to the global state, for the terminal receipt of a death by a

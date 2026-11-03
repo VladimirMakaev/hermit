@@ -105,11 +105,9 @@ mod tests {
     /// https://github.com/rrnewton/hermit/pull/4769's
     /// `PublishInstructionOffset` revision, 47 is
     /// https://github.com/rrnewton/hermit/pull/4735's `StoreExclusive`
-    /// payload layout, and 48, package K item 2b slice 2b-1's, is current.
-    /// From https://github.com/rrnewton/hermit/pull/5222, merged at landing by the merge queue:
-    /// `PublishInstructionOffset` revision. 47 is this change's
-    /// `StoreExclusive` payload layout; 48 adds `Rewrite::not_written`
-    /// and is current.
+    /// payload layout, 48 is package K item 2b slice 2b-1's, 49 is
+    /// `Rewrite::not_written` on the `StoreExclusive` payload, and 50 is this
+    /// change's `Found::unverified_pairs` and is current.
     /// 42 to 44 are queued or advisory claims at this rebase
     /// (42 on drain/4759, 43 for PR 4627, 44 for kvm-2b-3 in the
     /// allocation table). Remove an entry when its change lands, with
@@ -344,6 +342,12 @@ mod tests {
         // (renumbered from 48 to 49 at landing by the merge queue; digests measured on the combined
         // tree)
         (49, "cc10df0910192a63", "f013e36743d8d9e6"),
+        // `Found` gains `unverified_pairs`: of a mapping's pairs, those in
+        // bytes no mapping symbol proves are code. `Found` is one of the
+        // StoreExclusive payload's digested types, so the digest changes with
+        // it; numbered 49 after 48 and renumbered to 50, the next revision
+        // after 49 (digest measured at this head).
+        (50, "317db02ddad70067", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
