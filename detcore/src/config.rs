@@ -87,10 +87,10 @@ mod tests {
     use super::*;
 
     /// Revisions reserved for a change that is not on this base yet, which
-    /// `GLOBAL_RPC_REVISIONS` therefore skips: none now, since SP2's 25
-    /// (reserved as 22 with its record version) landed beneath PRCTL's 26,
-    /// with its row. Remove an entry when its change lands, with its row.
-    const RESERVED_GLOBAL_RPC_REVISIONS: &[u32] = &[];
+    /// `GLOBAL_RPC_REVISIONS` therefore skips: 28 for the pending 4789
+    /// change, which this change's 29 skips. Remove an entry when its change
+    /// lands, with its row.
+    const RESERVED_GLOBAL_RPC_REVISIONS: &[u32] = &[28];
 
     /// Every revision of the global RPC, oldest first, with the digest of the
     /// code of its two enums and its `Resources` payload. A change to any of
@@ -223,6 +223,16 @@ mod tests {
         // image returns it (the release-05 pidfd pair, renumbered to 27 at
         // its rebase onto C2's 25 and 26; digest measured at this head).
         (27, "74ceb8dd663f2297", "f013e36743d8d9e6"),
+        // `GlobalRequest::StoreExclusive`'s payload grows again: each
+        // `ScannedMapping` carries the rewrite made in the guest's memory
+        // (`Rewrite`), and the report lists every executable file mapping the
+        // scan saw (`LiveMapping`); their fields cross the wire positionally.
+        // Revision 24's digest covers `Report`, `ScannedMapping` and `Found`;
+        // it now covers `Rewrite` and `LiveMapping` as well (claimed as 22 on
+        // its own base, then 24, renumbered to 25 after main's 24, to 27 after
+        // main's 26, and to 29 after main's 27, skipping 28 reserved for the
+        // pending 4789 change; digests measured at this head).
+        (29, "335e6feee054d672", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
@@ -243,10 +253,12 @@ mod tests {
     /// The types `GlobalRequest::StoreExclusive` carries, declared in
     /// `store_exclusive.rs` inside its modules. Their fields cross the RPC in
     /// positional bincode as the enums' own do.
-    const STORE_EXCLUSIVE_PAYLOAD: [&str; 3] = [
+    const STORE_EXCLUSIVE_PAYLOAD: [&str; 5] = [
         "pub enum Report {",
         "pub struct ScannedMapping {",
         "pub struct Found {",
+        "pub struct Rewrite {",
+        "pub struct LiveMapping {",
     ];
 
     /// The lines of code, as [`definition`] gives them, of the type that

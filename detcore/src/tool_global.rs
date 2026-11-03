@@ -7956,8 +7956,10 @@ pub enum SignalScope {
 /// coordinator. The in-guest runtimes, the only peers built apart, never
 /// register a placeholder (`Detcore::serves_placeholders`).
 // 26 follows SP2's 25, whose variants come before this revision's
-// `ChildSubreaper` pair.
-pub(crate) const GLOBAL_RPC_REVISION: u32 = 27;
+// `ChildSubreaper` pair. 29 follows main's 27, skipping 28 reserved for the
+// pending 4789 change: the StoreExclusive payload's `Rewrite` and
+// `LiveMapping` (#4795).
+pub(crate) const GLOBAL_RPC_REVISION: u32 = 29;
 
 /// A guest thread's descriptor table, which `GlobalRequest::HoldTable`
 /// carries to the global state, for the terminal receipt of a death by a
