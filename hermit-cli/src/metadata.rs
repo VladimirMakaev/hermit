@@ -944,7 +944,8 @@ impl RecordVersion {
 // older recording replayed with this binary desyncs at its first flock.
 // 0x199 -> 0x19b (coordinator-assigned; 0x19a is reserved for the PMU
 // change): an Mmap event of a MAP_SHARED file mapping names the mapped file
-// (device, inode, offset) and the mapped descriptor's access mode. Replay
+// (device, inode, offset; for /dev/zero, the new shmem object the mapping
+// made) and the mapped descriptor's access mode. Replay
 // maps every shared mapping of one file as a view of one backing, opened
 // with that access mode, instead of making separate anonymous copies. An
 // older reader cannot decode the new field, and an older recording has no
