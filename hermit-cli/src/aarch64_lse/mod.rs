@@ -37,8 +37,10 @@ pub mod rewrite;
 /// data. 4: a stripped file's code is what control proves, and what the
 /// code or the image addresses as data is not it. 5: a section no mapping
 /// symbol marks is rewritten only under the stripped-file heuristic
-/// (`StrippedRewrite::Heuristic`), which writes what 4 wrote.
-pub const REWRITE_FORMAT_VERSION: u32 = 5;
+/// (`StrippedRewrite::Heuristic`), which writes what 4 wrote. 6: a
+/// conditional compare-and-swap loop stays native, and a word that may be a
+/// direct branch with an unknown target refuses every rewrite in the image.
+pub const REWRITE_FORMAT_VERSION: u32 = 6;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///

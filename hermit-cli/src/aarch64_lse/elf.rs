@@ -201,6 +201,8 @@ fn refusal_name(reason: &Refusal) -> &'static str {
         Refusal::Registers(_) => "register-constraint",
         Refusal::UnsupportedOperation => "unsupported-operation",
         Refusal::BranchOutOfRange => "branch-out-of-range",
+        Refusal::ConditionalCas => "conditional-cas",
+        Refusal::UnknownDirectBranch => "unknown-direct-branch",
         Refusal::Relocated => "relocation-inside-the-sequence",
         Refusal::LiteralInsideSequence => "literal-inside-the-sequence",
         Refusal::AddressedData => "addressed-data-inside-the-sequence",
@@ -557,6 +559,21 @@ pub fn rewrite_bytes(
             })
         })
         .collect();
+    // The fail-closed entry rule across the image: a word that might be a
+    // direct branch with an unknown target, anywhere but in bytes marked
+    // data, could be aimed into any executable section, so no section's
+    // sequences are rewritten. Bytes marked data are not executed.
+    let unknown_direct_branch = sections.iter().any(|section| {
+        // A section that cannot be read could hold anything.
+        let Some(words) = &section.words else {
+            return true;
+        };
+        words.iter().enumerate().any(|(index, word)| {
+            let addr = section.vaddr + 4 * index as u64;
+            (in_spans(&section.code, addr) || in_spans(&section.unknown, addr))
+                && rewrite::unknown_direct_branch_possible(*word)
+        })
+    });
     let mut report = FileReport::default();
     if relr_unreadable {
         report
@@ -597,7 +614,7 @@ pub fn rewrite_bytes(
         // each sequence the planner finds is named as left alone for that
         // reason, whatever else it would have said of it.
         if let Some(reason) = unproven {
-            let plan = rewrite::plan_with_external_store(
+            let plan = rewrite::plan_section(
                 &words,
                 vaddr,
                 &external_targets,
@@ -635,7 +652,7 @@ pub fn rewrite_bytes(
             ));
             continue;
         }
-        let mut plan = rewrite::plan_with_external_store(
+        let mut plan = rewrite::plan_section(
             &words,
             vaddr,
             &external_targets,
@@ -645,6 +662,9 @@ pub fn rewrite_bytes(
         restrict_to_code(&mut plan, &words, vaddr, &code);
         refuse_literals(&mut plan, &literals);
         refuse_overlapping(&mut plan, &extents, Refusal::AddressedData);
+        if unknown_direct_branch {
+            rewrite::refuse_patched(&mut plan, Refusal::UnknownDirectBranch);
+        }
         if unknown != 0 {
             report.skipped_segments.push(format!(
                 "executable section at {vaddr:#x}: {unknown} exclusive instructions in bytes not \
@@ -1133,39 +1153,9 @@ fn restrict_to_code(plan: &mut rewrite::Report, words: &[u32], base: u64, code: 
             .find(|index| matches!(insn::decode(words[*index]), insn::Insn::StoreExcl { .. }))
             .map_or(site.addr, at);
         let end = site.addr + 4 * site.words.len() as u64;
-        // A sub-word compare against a register is rewritten only because
-        // the instruction before the loop zero-extends that register
-        // (`rewrite::cas_compare`), which must then be code too.
-        let needs_before = site.idiom == Idiom::CasCompare
-            && matches!(
-                insn::decode(words[first]),
-                insn::Insn::LoadExcl {
-                    size: insn::Size::B | insn::Size::H,
-                    ..
-                }
-            )
-            && matches!(
-                words.get(first + 1).map(|word| insn::decode(*word)),
-                Some(insn::Insn::Cmp {
-                    operand: insn::Operand::Reg(_),
-                    ..
-                })
-            );
         match span_of(store) {
             None => {}
-            Some((start, stop))
-                if start <= site.addr
-                    && end <= stop
-                    && (!needs_before || start + 4 <= site.addr) =>
-            {
-                plan.patched.push(site)
-            }
-            Some((start, stop)) if start <= site.addr && end <= stop => {
-                plan.refused.push(rewrite::RefusedSite {
-                    addr: store,
-                    reason: Refusal::Registers("a sub-word compare against a register"),
-                })
-            }
+            Some((start, stop)) if start <= site.addr && end <= stop => plan.patched.push(site),
             Some(_) => plan.refused.push(rewrite::RefusedSite {
                 addr: store,
                 reason: Refusal::NotCanonical,
@@ -2250,22 +2240,21 @@ mod tests {
         );
     }
 
-    /// The loader entry inside a compare sequence refuses it: starting at
-    /// the CMP executes a different instruction once the sequence's first
-    /// word materialises the expected value and its second is the CAS.
+    /// The loader entry inside a sequence refuses it: starting at the ADD
+    /// executes a different instruction once the sequence's first word
+    /// materialises the operand and its second is the atomic.
     #[test]
     fn a_loader_entry_inside_a_sequence_refuses_it() {
-        // ldaxr x0,[x2]; cmp x0,#1; b.ne out; stlxr w17,x1,[x2]; cbnz w17; ret
+        // ldaxr w0,[x2]; add w0,w0,#1; stlxr w17,w0,[x2]; cbnz w17; ret
         let words = [
             0x885f_fc40,
-            0x7100_041f,
-            0x5400_0061,
-            0x8811_fc41,
-            0x35ff_ff91,
+            0x1100_0400,
+            0x8811_fc40,
+            0x35ff_ffb1,
             0xd65f_03c0,
         ];
         let mut image = elf_image(&words, Some(&[(1, 0, true)]));
-        // e_entry at the CMP (word 1).
+        // e_entry at the ADD (word 1).
         image[24..32].copy_from_slice(&0x104u64.to_le_bytes());
         let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
         assert_eq!(bytes, image, "{report:?}");
@@ -2286,57 +2275,65 @@ mod tests {
         );
     }
 
-    /// A function entry at a sub-word compare's head bypasses the
-    /// zero-extension before it, whether the entry is named by an FDE or by
-    /// a defined STT_FUNC symbol, so the compare stays refused.
+    /// A conditional compare-and-swap loop keeps its bytes in an image,
+    /// whatever precedes it and whatever names its head. Its original
+    /// stores only when the comparison matches, and LDXR/LDAXR is a load,
+    /// so on a read-only word (`PROT_READ`, or a `MAP_PRIVATE` read-only
+    /// mapping) a mismatch exits without a fault. A CAS is an atomic whose
+    /// access descriptor asks for read and write
+    /// (`CreateAccDescAtomicOp(MemAtomicOp_CAS, ...)` in the Arm
+    /// pseudocode), so its permission check faults on that word even when
+    /// the comparison fails. The loop is refused as `conditional-cas`.
     #[test]
-    fn a_function_entry_at_a_sub_word_compare_bypasses_its_zero_extension() {
-        // uxtb w16,w0; ldaxrb w0,[x2]; cmp w0,w16; b.ne out;
-        // stlxrb w17,w1,[x2]; cbnz w17; ret
-        let words = [
-            0x5300_1c10,
-            0x085f_fc40,
-            0x6b10_001f,
-            0x5400_0061,
-            0x0811_fc41,
-            0x35ff_ff91,
-            0xd65f_03c0,
+    fn a_conditional_cas_in_an_image_keeps_its_bytes() {
+        let shapes: [&[u32]; 3] = [
+            // uxtb w16,w0; ldaxrb w0,[x2]; cmp w0,w16; b.ne out;
+            // stlxrb w17,w1,[x2]; cbnz w17; ret
+            &[
+                0x5300_1c10,
+                0x085f_fc40,
+                0x6b10_001f,
+                0x5400_0061,
+                0x0811_fc41,
+                0x35ff_ff91,
+                0xd65f_03c0,
+            ],
+            // ldaxr x6,[x3]; cmp x6,x4; b.ne out; stlxr w7,x2,[x3];
+            // cbnz w7; ret
+            &[
+                0xc85f_fc66,
+                0xeb04_00df,
+                0x5400_0061,
+                0xc807_fc62,
+                0x35ff_ff87,
+                0xd65f_03c0,
+            ],
+            // ldaxr x0,[x1]; cbnz x0,out; stlxr w2,x3,[x1]; cbnz w2; ret
+            &[
+                0xc85f_fc20,
+                0xb500_0060,
+                0xc802_fc23,
+                0x35ff_ffa2,
+                0xd65f_03c0,
+            ],
         ];
-        // Named by its FDE alone.
-        let image = elf_image_with(&words, Some(&[(1, 0, true)]), Some(&[(1, 7)]));
-        let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
-        assert_eq!(bytes, image, "{report:?}");
-        assert_eq!(report.patched_total(), 0, "{report:?}");
-        assert_eq!(
-            report.refused,
-            BTreeMap::from([("register-constraint", 1)]),
-            "{report:?}"
-        );
-        // Named by a defined STT_FUNC symbol alone: turn the $x mark at the
-        // ldaxrb into a function symbol at the same address.
-        let mut image = elf_image(&words, Some(&[(1, 0, true), (1, 1, true)]));
-        let mark = mapping::tests::symbol(1, 0, 1, 0x104);
-        let at = image
-            .windows(mark.len())
-            .position(|window| window == mark)
-            .expect("the mark is in the symbol table");
-        image[at..at + mark.len()].copy_from_slice(&mapping::tests::symbol(0, 0x12, 1, 0x104));
-        let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
-        assert_eq!(bytes, image, "{report:?}");
-        assert_eq!(report.patched_total(), 0, "{report:?}");
-        assert_eq!(
-            report.refused,
-            BTreeMap::from([("register-constraint", 1)]),
-            "{report:?}"
-        );
-        // With no entry at the head the extension runs and it is rewritten.
-        let image = elf_image(&words, Some(&[(1, 0, true)]));
-        assert_eq!(
-            rewritten_with(&image, StrippedRewrite::Refuse)
-                .1
-                .patched_total(),
-            1
-        );
+        for words in shapes {
+            for image in [
+                elf_image(words, Some(&[(1, 0, true)])),
+                elf_image_with(words, Some(&[(1, 0, true)]), Some(&[(0, words.len())])),
+            ] {
+                for policy in [StrippedRewrite::Refuse, StrippedRewrite::Heuristic] {
+                    let (bytes, report) = rewritten_with(&image, policy);
+                    assert_eq!(bytes, image, "{report:?}");
+                    assert_eq!(report.patched_total(), 0, "{report:?}");
+                    assert_eq!(
+                        report.refused,
+                        BTreeMap::from([("conditional-cas", 1)]),
+                        "{report:?}"
+                    );
+                }
+            }
+        }
     }
 
     /// A short addressed-data exclusion nested inside a whole-function
@@ -2390,30 +2387,26 @@ mod tests {
 
     /// A compare loop in one executable section whose failing exit
     /// branches to a store-exclusive in another section: a section
-    /// boundary does not clear the exclusive monitor, so the compare is
-    /// refused and the image is preserved. Without the outside store the
-    /// same loop is rewritten.
+    /// boundary does not clear the exclusive monitor, so the image is
+    /// preserved. As a conditional compare-and-swap the loop is refused
+    /// first for that, with or without the outside store.
     #[test]
     fn a_compare_whose_reservation_is_consumed_in_another_section_is_refused() {
         // ldaxr x0,[x2]; cbnz x0, <second section>; stlxr w3,x1,[x2];
         // cbnz w3, <ldaxr>
         let first = [0xc85f_fc40, 0xb500_07e0, 0xc803_fc41, 0x35ff_ffa3];
-        // stlxr w4,x1,[x2]
-        let second = [0xc804_fc41];
-        let image = elf_image_two_sections(&first, &second);
-        let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
-        assert_eq!(bytes, image, "{report:?}");
-        assert_eq!(report.patched_total(), 0, "{report:?}");
-        assert_eq!(
-            report.refused.get("exclusive-reservation-exported"),
-            Some(&1),
-            "{report:?}"
-        );
-        // The same loop with no store in the other section is rewritten.
-        let image = elf_image_two_sections(&first, &[0xd503_201f]);
-        let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
-        assert_ne!(bytes, image, "{report:?}");
-        assert_eq!(report.patched_total(), 1, "{report:?}");
+        // stlxr w4,x1,[x2], or a nop.
+        for second in [0xc804_fc41, 0xd503_201f] {
+            let image = elf_image_two_sections(&first, &[second]);
+            let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
+            assert_eq!(bytes, image, "{report:?}");
+            assert_eq!(report.patched_total(), 0, "{report:?}");
+            assert_eq!(
+                report.refused.get("conditional-cas"),
+                Some(&1),
+                "{report:?}"
+            );
+        }
     }
 
     /// Nested FDEs, direct data: data addressed inside both an enclosing
@@ -2467,35 +2460,6 @@ mod tests {
         assert_eq!(
             report.refused,
             BTreeMap::from([("addressed-data-inside-the-sequence", 1)]),
-            "{report:?}"
-        );
-    }
-
-    /// A sub-word compare against a register is rewritten only after the
-    /// zero-extension before it, which must be code too.
-    #[test]
-    fn a_sub_word_compare_needs_its_zero_extension_in_the_code() {
-        // uxtb w16, w0; ldaxrb w0, [x2]; cmp w0, w16; b.ne out;
-        // stlxrb w17, w1, [x2]; cbnz w17, <ldaxrb>; out: ret
-        let words = [
-            0x5300_1c10,
-            0x085f_fc40,
-            0x6b10_001f,
-            0x5400_0061,
-            0x0811_fc41,
-            0x35ff_ff91,
-            0xd65f_03c0,
-        ];
-        let whole = elf_image(&words, Some(&[(1, 0, true)]));
-        assert_eq!(rewritten(&whole).1.patched_total(), 1);
-        // The zero-extension is data: the compare is not rewritten.
-        let split = elf_image(&words, Some(&[(1, 0, false), (1, 1, true)]));
-        let (bytes, report) = rewritten(&split);
-        assert_eq!(bytes, split);
-        assert_eq!(report.patched_total(), 0, "{report:?}");
-        assert_eq!(
-            report.refused,
-            BTreeMap::from([("register-constraint", 1)]),
             "{report:?}"
         );
     }
