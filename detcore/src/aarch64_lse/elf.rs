@@ -1584,6 +1584,53 @@ mod tests {
         assert_eq!(applied, rewritten);
     }
 
+    /// The plan the in-memory rewrite writes into a guest's pages holds
+    /// nothing for a literal pool: the same file whose bytes
+    /// [`rewrite_bytes`] leaves alone yields no patch over them, so the
+    /// memory path cannot change what the file path keeps.
+    #[test]
+    fn the_plan_holds_no_patch_over_a_literal_pool() {
+        // The review's pool: a branch over four words that decode as a
+        // canonical loop, then an `LDR` of them, as an assembler lays it
+        // out, marked `$x`, `$d`, `$x`.
+        let words = [
+            0x1400_0005, // b <word 5>
+            0xc85f_fc64, // the pool
+            0x9100_0484,
+            0xc805_fc64,
+            0x35ff_ffa5,
+            0x58ff_ff80, // ldr x0, <word 1>
+            0xd65f_03c0, // ret
+        ];
+        let marked = elf_image(&words, Some(&[(1, 0, true), (1, 1, false), (1, 5, true)]));
+        let plan = plan_bytes(&marked, StrippedRewrite::Refuse)
+            .unwrap()
+            .expect("an aarch64 ELF image");
+        assert!(plan.patches.is_empty(), "{:?}", plan.report);
+        assert_eq!(plan.report.exclusive_instructions, 0, "{:?}", plan.report);
+
+        // Stripped, under the stripped-file heuristic, where the unwind table
+        // alone speaks, and the pool sits after a call that does not return:
+        // likewise nothing to write.
+        let mut after_a_call = [0u32; 9];
+        after_a_call[0] = 0x9400_0008; // bl <word 8>, which traps
+        after_a_call[1..5].copy_from_slice(&words[1..5]);
+        after_a_call[5] = 0x58ff_ff80;
+        after_a_call[6] = 0xd65f_03c0;
+        after_a_call[7] = 0xd503_201f;
+        after_a_call[8] = 0xd420_0000; // brk
+        let stripped = elf_image_with(&after_a_call, None, Some(&[(0, 8), (8, 9)]));
+        let plan = plan_bytes(&stripped, StrippedRewrite::Heuristic)
+            .unwrap()
+            .expect("an aarch64 ELF image");
+        assert!(plan.patches.is_empty(), "{:?}", plan.report);
+
+        // The planner by itself takes the pool, which is what the marks
+        // and the reachability keep it from doing.
+        let raw = rewrite::plan(&words, 0x100);
+        assert_eq!(raw.patched.len(), 1, "{raw:?}");
+    }
+
     /// A relocation section's entries must be seen, including the packed
     /// relative ones the ELF reader does not report. The check here is on
     /// the decoder itself rather than a whole synthetic ELF: an address
