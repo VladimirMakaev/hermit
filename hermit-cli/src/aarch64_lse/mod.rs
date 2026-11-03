@@ -40,7 +40,8 @@ pub mod rewrite;
 /// (`StrippedRewrite::Heuristic`), which writes what 4 wrote. 6: a
 /// conditional compare-and-swap loop stays native, and a word that may be a
 /// direct branch with an unknown target refuses every rewrite in the image.
-pub const REWRITE_FORMAT_VERSION: u32 = 6;
+/// 7: such a word is any word outside a positive allow-list of classes.
+pub const REWRITE_FORMAT_VERSION: u32 = 7;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
