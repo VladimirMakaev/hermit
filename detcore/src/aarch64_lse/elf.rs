@@ -130,6 +130,13 @@ impl FileReport {
             .copied()
             .unwrap_or(0)
     }
+
+    /// The sequences left alone because no mapping symbol this reader accepts
+    /// proves their section's code: [`Self::unmarked`] and
+    /// [`Self::unsupported`] together.
+    pub fn unproven(&self) -> usize {
+        self.unmarked() + self.unsupported()
+    }
 }
 
 fn idiom_name(idiom: Idiom) -> &'static str {
@@ -1232,6 +1239,32 @@ mod tests {
         };
         assert_eq!(patched(b"$d\0"), 1);
         assert_eq!(patched(b"$x.f\0"), 2);
+    }
+
+    /// A plan counts as unproven every loop no mapping symbol it accepts
+    /// proves: those of a section nothing marks, under the default, and
+    /// those of a section holding a mapping symbol other than `$x` and `$d`,
+    /// under either policy. The in-memory rewrite names a file by this count
+    /// (`Rewrite::unmarked`), so a file refused for an unsupported mapping
+    /// symbol is named as one refused for having none.
+    #[test]
+    fn a_plan_counts_every_loop_no_accepted_mapping_symbol_proves() {
+        let words: Vec<u32> = LOOP.iter().chain(LOOP.iter()).copied().collect();
+        let plan = |image: &[u8]| plan_bytes(image).unwrap().unwrap().report;
+        let stripped = elf_image_with(&words, None, Some(&[(0, 6)]));
+        assert_eq!(plan(&stripped).unproven(), 2);
+        let mut unsupported = elf_image(&words, Some(&[(1, 0, true), (1, 6, false)]));
+        let strtab = b"\0$x\0$d\0abort\0";
+        let at = unsupported
+            .windows(strtab.len())
+            .position(|window| window == strtab)
+            .unwrap();
+        unsupported[at + 4..at + 6].copy_from_slice(b"$a");
+        let report = plan(&unsupported);
+        assert_eq!(report.unmarked(), 0, "{report:?}");
+        assert_eq!(report.unproven(), 2, "{report:?}");
+        let marked = elf_image(&words, Some(&[(1, 0, true)]));
+        assert_eq!(plan(&marked).unproven(), 0);
     }
 
     /// A file mapping symbols mark is rewritten by default exactly as the
