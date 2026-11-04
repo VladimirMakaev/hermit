@@ -1149,42 +1149,23 @@ retry. It is preprocessing for the ptrace backend, not a backend.
 | --- | --- |
 | `--rewrite-exclusives` | Rewrites the loops it can show are code. |
 | `--rewrite-exclusives-also=FILE` | Also rewrites FILE, a shared library the guest loads. Repeatable. |
-| `--rewrite-exclusives-stripped=refuse` | The default. A file, or an executable section, with no ARM mapping symbols (`$x`, `$d`), such as every stripped file, is left unchanged and named: the run's diagnostics and its summary (`exclusive_rewrite_unmarked`) list it, and `hermit rewrite-exclusives --list-refusals FILE` lists each of its loops as `no-mapping-symbols`. |
-| `--rewrite-exclusives-stripped=heuristic` | Rewrites such files by the stripped-file heuristic below. |
+| `--rewrite-exclusives-stripped=refuse` | The default and the only value. A file, or an executable section, with no ARM mapping symbols (`$x`, `$d`), such as every stripped file, is left unchanged and named: the run's diagnostics and its summary (`exclusive_rewrite_unmarked`) list it, and `hermit rewrite-exclusives --list-refusals FILE` lists each of its loops as `no-mapping-symbols`. |
 
 Only mapping symbols prove where code is: the AArch64 ELF ABI has the
 assembler mark every switch between code (`$x`) and data (`$d`), so the
 default rewrites only what they mark as code. A stripped file has none. A
 section that holds a mapping symbol of another kind (AArch32's `$a` or `$t`,
 or a `$` name Hermit does not know) is not proved by them and is left
-unchanged under either setting, its loops listed as
-`unsupported-mapping-symbol` with the symbol's name.
+unchanged, its loops listed as `unsupported-mapping-symbol` with the
+symbol's name.
 
-The stripped-file heuristic takes for code what control reaches from the
-entries of the functions the unwind table (`.eh_frame`) describes, less what
-the code or the image addresses as data. It can take data for code in these
-cases, each data that nothing in the image points at:
-
-- data after a call to an imported function that never returns and whose name
-  Hermit does not know;
-- what the code addresses through a register after a write that does not carry
-  an `ADRP`'s base (a lost carried base);
-- data an unresolved `ADRP`'s completion reaches beyond its own page (a scaled
-  load reaches 64 KiB, an `ADD` with `LSL #12` reaches 16 MiB);
-- the rest of a table whose first word a false branch reaches (a data word
-  before the field the code addresses can decode as a branch into the table);
-- the bytes after a call to a function that returns through a changed link
-  register (`X30`), or through a syscall the walk cannot follow;
-- the bytes after a call through a register (`BLR`), whose callee is unknown.
-
-A mistaken classification can corrupt program data: data taken for code whose
-words form a canonical loop is rewritten like one. A run under the heuristic
-states it in its summary (`exclusive_rewrite_stripped_heuristic`) and in the
-preemption record it writes, and a replay, or an analysis, under the other
-setting is refused. It refuses `--verify-json` and `--verify-run`, whose
-reports would not show it, and `hermit record` takes no `--rewrite-exclusives`.
-`hermit rewrite-exclusives --stripped=heuristic FILE` reports what the
-heuristic would do to a file before anyone runs it.
+An unwind table (`.eh_frame`) does not prove code either: it covers whole
+functions, including any table a function branches over or keeps after a call
+that does not return, so a stripped file is left unchanged whatever its unwind
+table covers. Earlier versions of Hermit had a stripped-file heuristic
+(`--rewrite-exclusives-stripped=heuristic`) that took code from it; a
+preemption record a run made under it says so, and a replay or an analysis of
+that record is refused.
 
 ### Virtual Inputs
 

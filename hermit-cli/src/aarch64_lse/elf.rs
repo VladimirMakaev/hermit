@@ -27,76 +27,25 @@
 //! executable section can hold data too (a literal pool, or OpenSSL's
 //! constant tables in `.text`), and a table whose words happened to form a
 //! canonical loop would otherwise be rewritten, corrupting it. What is taken
-//! for code depends on what the file says, section by section, and on the
-//! caller's [`StrippedRewrite`] for sections without mapping symbols:
+//! for code depends on what the file says, section by section. For a
+//! section without mapping symbols the caller's [`StrippedRewrite`] has one
+//! value, [`StrippedRewrite::Refuse`]:
 //!
 //! - Mapping symbols: exactly the ranges they mark `$x`. The AArch64 ELF ABI
 //!   has an assembler mark data `$d`, so data marked as the ABI says is never
-//!   taken for code. This is the only evidence the default
-//!   ([`StrippedRewrite::Refuse`]) accepts, because it is the only one that
-//!   proves where code is. A section that also holds a mapping symbol of
-//!   another kind (AArch32's `$a` or `$t`, or a `$` name this reader does
-//!   not know, such as `$xyz`) is not proved by them: under either policy
-//!   its sequences are left alone as `unsupported-mapping-symbol`, naming
-//!   the symbol.
-//! - No mapping symbols, under the default: nothing. Every exclusive
-//!   sequence in such a section, as in every stripped file, is left alone as
-//!   `no-mapping-symbols`, so the file is left unchanged and named, never
-//!   silently.
-//! - The unwind table alone, under [`StrippedRewrite::Heuristic`]
-//!   (`--rewrite-exclusives-stripped=heuristic`), the stripped-file
-//!   heuristic: what control reaches from the entries of the functions
-//!   its FDEs describe, following direct branches. A call falls through
-//!   only where the callee can be shown to come back: a function here whose
-//!   own body reaches a `RET`, or which tail-calls one that does, worked out
-//!   over all of them until the answer stops growing; a function the image
-//!   names as one that never returns (`exit`, `abort`, a panic entry point,
-//!   reached directly or through its procedure linkage table entry) never
-//!   does. An FDE covers its whole function, so a table the function
-//!   branches over, keeps after a return, or places after a call that does
-//!   not come back is not reached at all.
-//!
-//!   On top of that, whatever the code addresses as data (an `LDR`
-//!   (literal), `ADR` or `ADRP` target, each completion of one `ADRP` being
-//!   followed through an `ADD` into its own register) is taken for data
-//!   from that address to the next instruction a branch reaches, or the
-//!   function's end, and no sequence over it is rewritten
-//!   (`addressed-data-inside-the-sequence`). An `ADRP` nothing completes
-//!   gives only its page, and every function that page overlaps is taken
-//!   for data. A pointer the image stores to such a table counts as well: a
-//!   dynamic relocation's address, a plain word of a loaded, non-executable
-//!   section in an executable with fixed addresses, or a symbol naming data
-//!   in an executable section.
-//!
-//!   A literal or `ADR` that names a function's own entry is a pointer to
-//!   the function, not to data, so an address-taken function's body is
-//!   still code.
-//!
-//!   The heuristic's residuals, each data that nothing in the image points
-//!   at, taken for code:
-//!
-//!   - Data after a call to an imported function that never returns and is
-//!     not among the names this reader knows.
-//!   - What the code addresses through a register after a write that does
-//!     not carry an `ADRP`'s base (a lost carried base), since where that
-//!     register then points is not in the window.
-//!   - Data an unresolved `ADRP`'s completion would reach beyond its own
-//!     page (a scaled load reaches 64 KiB, an `ADD` with `LSL #12` reaches
-//!     16 MiB).
-//!   - The rest of a table whose first word a branch could reach: a data
-//!     word before the field the code addresses can decode as a branch into
-//!     the table (a false branch), and the next such target ends the data.
-//!   - A function that returns through a changed link register (`X30`), or
-//!     through an `SVC` the walk cannot follow, taken to return to its
-//!     caller.
-//!   - A call through a register (`BLR`), whose callee is unknown, taken to
-//!     come back.
-//!
-//!   A mistaken classification can corrupt program data: data taken for
-//!   code whose words form a canonical loop is rewritten like one.
-//! - Neither, under the heuristic: nothing. Such a section is left alone
-//!   and reported, and so is a whole file with neither mapping symbols nor
-//!   an unwind table.
+//!   taken for code. This is the only evidence the rewrite accepts, because
+//!   it is the only one that proves where code is. A section that also holds
+//!   a mapping symbol of another kind (AArch32's `$a` or `$t`, or a `$` name
+//!   this reader does not know, such as `$xyz`) is not proved by them: its
+//!   sequences are left alone as `unsupported-mapping-symbol`, naming the
+//!   symbol.
+//! - No mapping symbols: nothing, whatever the unwind table covers. Every
+//!   exclusive sequence in such a section, as in every stripped file, is
+//!   left alone as `no-mapping-symbols`, so the file is left unchanged and
+//!   named, never silently. An FDE covers its whole function, including a
+//!   table the function branches over or keeps after a call that does not
+//!   return, so the unwind table cannot prove which of its bytes are code;
+//!   the stripped-file heuristic that read code from it is removed.
 //!
 //! Under any evidence, a sequence an `LDR` (literal) or `ADR` in the code
 //! reaches is refused (`literal-inside-the-sequence`): an object linked

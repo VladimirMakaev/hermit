@@ -1400,8 +1400,8 @@ impl AnalyzeOpts {
     }
 
     /// Whether the trials rewrite files without mapping symbols by the
-    /// stripped-file heuristic (`--rewrite-exclusives-stripped=heuristic` in
-    /// their run arguments).
+    /// stripped-file heuristic. It is removed, so no run argument asks for it
+    /// and this is false.
     pub fn trial_stripped_rewrite_heuristic(&self) -> bool {
         RunData::get_raw_runopts(self).rewrites_stripped_files_by_heuristic()
     }

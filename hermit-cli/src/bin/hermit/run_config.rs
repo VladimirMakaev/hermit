@@ -1462,7 +1462,7 @@ mod tests {
             "rewrite-exclusives-stripped",
             &[
                 "--rewrite-exclusives",
-                "--rewrite-exclusives-stripped=heuristic",
+                "--rewrite-exclusives-stripped=refuse",
             ],
         ),
         ("scheduler-turn-cost", &["--scheduler-turn-cost=10000"]),

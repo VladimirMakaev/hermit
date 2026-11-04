@@ -1745,8 +1745,7 @@ pub struct RunOpts {
     /// preprocessing for the ptrace backend, not a backend: the rewritten copy
     /// is bind-mounted over the original path, and anything that is not a
     /// fully decoded canonical loop is left alone and reported. Only what ARM
-    /// mapping symbols mark as code is rewritten unless
-    /// `--rewrite-exclusives-stripped=heuristic` says otherwise. Incompatible
+    /// mapping symbols mark as code is rewritten. Incompatible
     /// with `--no-namespace`, whose guest has no mount namespace to carry the
     /// overlay, and with `--image` (and `hermit oci run`), whose guest loads
     /// the files of the image's rootfs, which the overlay does not reach.
@@ -1762,30 +1761,17 @@ pub struct RunOpts {
     /// mapping symbols (`$x`, `$d`), such as every stripped file: nothing in
     /// it proves which bytes of its executable sections are code.
     ///
-    /// `refuse`, the default, leaves such a file unchanged and names it: the
-    /// run's diagnostics and its summary list it, and `hermit
-    /// rewrite-exclusives --list-refusals` lists each of its loops as
+    /// `refuse`, the default and the only value, leaves such a file unchanged
+    /// and names it: the run's diagnostics and its summary list it, and
+    /// `hermit rewrite-exclusives --list-refusals` lists each of its loops as
     /// `no-mapping-symbols`. Only what mapping symbols mark as code is
-    /// rewritten.
-    ///
-    /// `heuristic` rewrites it by the stripped-file heuristic: code is what
-    /// control reaches from the entries of the functions its unwind table
-    /// describes, less what the code or the image addresses as data. Its
-    /// residuals, where it can take data for code: data after a call to an
-    /// imported function that never returns and whose name it does not know;
-    /// what the code addresses after a write that loses an `ADRP`'s carried
-    /// base; what an unresolved `ADRP`'s completion reaches past its page;
-    /// the tail of a table a false branch (a data word that decodes as one)
-    /// cuts; the bytes after a call to a function that returns through a
-    /// changed `X30` or a syscall; and the bytes after a call through `BLR`,
-    /// whose callee is unknown. A mistaken classification can corrupt program
-    /// data. A run
-    /// under it says so in its summary and in the preemption record it
-    /// writes, and refuses `--verify-json` and `--verify-run`.
+    /// rewritten. An unwind table does not prove code: it covers whole
+    /// functions, with any table a function branches over or keeps after a
+    /// call that does not return.
     #[clap(
         long,
         value_enum,
-        value_name = "refuse|heuristic",
+        value_name = "refuse",
         default_value = "refuse",
         requires = "rewrite_exclusives"
     )]
@@ -3665,8 +3651,9 @@ fn the_exclusive_rewrite_is_refused_for_an_image_run() {
 }
 
 /// Trials reuse prepared overlays only for the same inputs: another
-/// `--tmp`, `--workdir`, `--image`, guest environment or
-/// `--rewrite-exclusives-stripped`, or a file whose bytes changed, is another
+/// `--tmp`, `--workdir`, `--image` or guest environment, or a file whose
+/// bytes changed, is another preparation. `--rewrite-exclusives-stripped`
+/// has only its default value left, so spelling it out is the same
 /// preparation.
 #[test]
 fn trial_preparations_are_keyed_by_every_input_they_read() {
@@ -3688,10 +3675,14 @@ fn trial_preparations_are_keyed_by_every_input_they_read() {
         "--image=example.invalid/guest",
         "--env=PATH=/elsewhere",
         "--base-env=empty",
-        "--rewrite-exclusives-stripped=heuristic",
     ] {
         assert_ne!(key(&[other]), plain, "{other}");
     }
+    assert_eq!(
+        key(&["--rewrite-exclusives-stripped=refuse"]),
+        plain,
+        "the default, spelled out"
+    );
     std::fs::write(&library, b"second").unwrap();
     let changed = key(&[]);
     assert_ne!(changed, plain, "a file whose bytes changed");

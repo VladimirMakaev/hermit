@@ -346,10 +346,11 @@ pub struct RunSummary {
     pub seed_reproducible: Option<bool>,
 
     /// aarch64: whether the run's `--rewrite-exclusives` rewrote files that
-    /// have no ARM mapping symbols by the stripped-file heuristic
-    /// (`--rewrite-exclusives-stripped=heuristic`), whose classification of
-    /// code is not proved and can be mistaken. Shown in the INFO view and the
-    /// full report. Absent when off.
+    /// have no ARM mapping symbols by the stripped-file heuristic, whose
+    /// classification of code is not proved and can be mistaken. Only a run
+    /// of an earlier Hermit, under its since removed
+    /// `--rewrite-exclusives-stripped=heuristic`, sets it. Shown in the INFO
+    /// view and the full report. Absent when off.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exclusive_rewrite_stripped_heuristic: bool,
 
@@ -698,8 +699,9 @@ impl RunSummary {
             writeln!(
                 f,
                 "Exclusive loops in files without mapping symbols were rewritten by the \
-                 stripped-file heuristic (--rewrite-exclusives-stripped=heuristic): what it took \
-                 for code is not proved"
+                 stripped-file heuristic of an earlier Hermit \
+                 (--rewrite-exclusives-stripped=heuristic, since removed): what it took for code \
+                 is not proved"
             )?;
         }
         if !exclusive_rewrite_unmarked.is_empty() {
@@ -1112,7 +1114,7 @@ mod tests {
         );
         let info = stated.info(None).to_string();
         assert!(
-            info.contains("--rewrite-exclusives-stripped=heuristic"),
+            info.contains("--rewrite-exclusives-stripped=heuristic, since removed"),
             "{info}"
         );
         assert!(info.contains("\n  /lib64/libstdc++.so.6\n"), "{info}");

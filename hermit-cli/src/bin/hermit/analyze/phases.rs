@@ -5813,9 +5813,10 @@ mod tests {
     }
 
     /// Every record analyze writes states whether the trials use the
-    /// stripped-file heuristic (`--rewrite-exclusives-stripped=heuristic`), and
-    /// a recording made under the other setting is refused before any trial,
-    /// by the recording's own mark.
+    /// stripped-file heuristic, which no current run does: the option's
+    /// `heuristic` value is gone, so the run options reject it. A recording
+    /// a run under the heuristic made is refused before any trial, by the
+    /// recording's own mark.
     #[test]
     fn analyze_stamps_and_checks_the_stripped_rewrite_setting() {
         let dir = tempfile::tempdir().unwrap();
@@ -5841,9 +5842,9 @@ mod tests {
             options.prepare(&args.global).map(|_| options)
         };
         let default = ["--rewrite-exclusives"];
-        let heuristic = [
+        let refuse = [
             "--rewrite-exclusives",
-            "--rewrite-exclusives-stripped=heuristic",
+            "--rewrite-exclusives-stripped=refuse",
         ];
         let plain = record("stripped-plain", false);
         let marked = record("stripped-heuristic", true);
@@ -5853,14 +5854,25 @@ mod tests {
             detcore::preemptions::read_recorded_rewrite_exclusives_stripped_heuristic(&trial)
                 .unwrap()
         };
-        let under_default = prepare(&plain, &default).unwrap();
-        assert!(!under_default.trial_stripped_rewrite_heuristic());
-        assert!(!written(&under_default));
-        let under_heuristic = prepare(&marked, &heuristic).unwrap();
-        assert!(under_heuristic.trial_stripped_rewrite_heuristic());
-        assert!(written(&under_heuristic));
-        for (run1, run_args) in [(&marked, &default[..]), (&plain, &heuristic[..])] {
-            let error = prepare(run1, run_args).unwrap_err();
+        for run_args in [&default[..], &refuse[..]] {
+            let options = prepare(&plain, run_args).unwrap();
+            assert!(!options.trial_stripped_rewrite_heuristic(), "{run_args:?}");
+            assert!(!written(&options), "{run_args:?}");
+        }
+        // The run options analyze passes to its trials (parsed as `RunOpts`,
+        // which exits on a bad value) reject the removed value.
+        let removed = crate::app::run::RunOpts::try_parse_from([
+            "run",
+            "--rewrite-exclusives",
+            "--rewrite-exclusives-stripped=heuristic",
+            "/bin/true",
+        ]);
+        assert_eq!(
+            removed.err().map(|error| error.kind()),
+            Some(clap::error::ErrorKind::InvalidValue)
+        );
+        for run_args in [&default[..], &refuse[..]] {
+            let error = prepare(&marked, run_args).unwrap_err();
             assert!(
                 error
                     .downcast_ref::<crate::app::container::PolicyRefusal>()

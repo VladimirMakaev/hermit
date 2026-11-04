@@ -32,12 +32,14 @@
 //!
 //! Only register-only instructions are allowed between the pair, so an
 //! acquire taken at the atomic rather than at the load, and a release taken at
-//! the atomic rather than at the store, order the same memory accesses. The
-//! one place the rewrite is strictly stronger is a comparison that fails:
-//! `CASAL` keeps its release semantics where the original simply never
-//! executed its `STLXR`. Extra ordering cannot create an execution the
-//! original could not have, but it can hide a weak-memory race, which is why
-//! this is opt-in.
+//! the atomic rather than at the store, order the same memory accesses.
+//!
+//! Compare idioms (`CasCompare`, `CasZero`) are matched but never rewritten:
+//! they are always left alone as `compare-exit`. A `CAS` in their place would
+//! differ from the original exactly where the comparison fails, where the
+//! original never executes its store-exclusive: `CASAL` keeps its release
+//! semantics there, and its write-permission check faults on a read-only word
+//! the original only reads.
 
 use std::collections::HashMap;
 use std::collections::HashSet;

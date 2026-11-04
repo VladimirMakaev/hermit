@@ -2192,6 +2192,20 @@ mod tests {
                 "{recorded} replayed with {replay}"
             );
         }
+        let old_record =
+            rewrite_exclusives_stripped_heuristic_mismatch("--replay-schedule-from=x", true, false)
+                .unwrap();
+        assert!(
+            old_record.contains("no longer has the heuristic"),
+            "{old_record}"
+        );
+        let plain_record =
+            rewrite_exclusives_stripped_heuristic_mismatch("--replay-schedule-from=x", false, true)
+                .unwrap();
+        assert!(
+            plain_record.ends_with("Replay with files without mapping symbols left as they are."),
+            "{plain_record}"
+        );
     }
 
     #[test]
@@ -4098,7 +4112,9 @@ pub fn read_recorded_rewrite_exclusives_stripped_heuristic(path: &Path) -> Resul
 
 /// The refusal of a replay that would use the stripped-file heuristic where
 /// the record's run did not, or the other way round, naming the record by
-/// `source` (an option and a path); `None` when they agree.
+/// `source` (an option and a path); `None` when they agree. A current run
+/// never uses the heuristic, which is removed, so the refusal that can
+/// happen is of a record an earlier Hermit made under it.
 pub fn rewrite_exclusives_stripped_heuristic_mismatch(
     source: &str,
     recorded: bool,
@@ -4107,19 +4123,23 @@ pub fn rewrite_exclusives_stripped_heuristic_mismatch(
     let show = |on: bool| {
         if on {
             "files without mapping symbols rewritten by the stripped-file heuristic \
-             (--rewrite-exclusives-stripped=heuristic)"
+             (--rewrite-exclusives-stripped=heuristic, since removed)"
         } else {
             "files without mapping symbols left as they are"
         }
     };
     (recorded != replay).then(|| {
+        let remedy = if recorded {
+            "This Hermit no longer has the heuristic, so it cannot replay this record.".to_owned()
+        } else {
+            format!("Replay with {}.", show(recorded))
+        };
         format!(
             "{source} was recorded with {} and would be replayed with {}. The heuristic changes \
              the instructions the guest retires, so the replay cannot reproduce the run. \
-             Replay with {}.",
+             {remedy}",
             show(recorded),
             show(replay),
-            show(recorded),
         )
     })
 }
