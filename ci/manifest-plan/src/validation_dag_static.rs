@@ -1264,7 +1264,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1971 pin: 1971 + 2 = 1973, measured by that run.
     // Train 5 recount (measured by the ccb5080910 full validate):
     // Composed on measured main ffe313b1: 1944 + 2 = 1946 (Train 5 delta +2).
-    ("test.regular_crates", 1951),
+    // The stripped-file settings' two detcore-model units: 1953, listed.
+    ("test.regular_crates", 1953),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -1978,7 +1979,50 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR #4609 (rebased onto post-split main) adds ten hermit-run units
     // (nine in app::analyze::phases, one in app::analyze::rundata):
     // 1239 + 10 = 1249, measured by nextest list.
-    ("test.hermit_unit", 1249),
+    // And fifteen for the aarch64 exclusive-loop rewrite: thirteen in
+    // hermit-cli/src/aarch64_lse (the decoder, the four idioms and their
+    // refusals), one for the packed-relative-relocation decoder, and one
+    // that the rewrite flags survive into a printed reproducer: 1264,
+    // listed. Derived with this node's own selection: `cargo nextest list
+    // -p hermit-run --features third-party-backends,kvm-native-test-support
+    // --lib --bins` lists 1269, of which this node's `--skip` patterns
+    // remove 5; one `#[ignore]` test, listed only with `--run-ignored all`
+    // (1270), is never executed.
+    // And twenty-two for the review of that rewrite: nineteen in
+    // hermit-cli/src/aarch64_lse (nine telling code from data in
+    // aarch64_lse::mapping, nine for aarch64_lse::elf rewriting only code,
+    // and every_refused_loop_is_listed), and three in the hermit binary (the
+    // rewrite refused for an image run, under `hermit run` and `hermit oci
+    // run`, and the trial-preparation key): 1286, listed with this node's
+    // selection and `--skip` patterns.
+    // And three for taking what a stripped file's code addresses as data
+    // for data (the table after a call that does not return, and
+    // aarch64_lse::mapping's two units): 1289, listed.
+    // And the refusal of an image run at every entry that would prepare the
+    // rewrite: 1290, listed.
+    // And two for the `ADRP` pairing's bounds (a write to its register
+    // ends it; an uncompleted one takes the function its page belongs to):
+    // 1292, listed.
+    // And two more for the review of those: a table addressed by a second
+    // use of one `ADRP`, and a global symbol named like a mapping symbol:
+    // 1294, listed.
+    // And one for a store not ending an `ADRP` pairing: 1295, listed.
+    // And one for a table a stored pointer names: 1296, listed.
+    // And the reader's second round (a call that never returns, an `ADD`
+    // into the `ADRP` base, an unresolved `ADRP`): 1297, listed.
+    // And its third round (the never-returning names, a pointer to a
+    // function's entry): 1299, listed.
+    // And the stripped-file default and opt-in (nine units): 1308, listed.
+    // And the shared-cache unit: 1309, listed.
+    // And the two unsupported-mapping-symbol units: 1311, listed.
+    // And seven for refusing what known entries, exported reservations or
+    // stale artifacts would corrupt: 1318, listed.
+    // And four for a reservation another section could consume and for
+    // nested FDEs: 1322, listed.
+    // And seven for the conditional compare-and-swap refusal, the BC.cond
+    // and CMPBR decoding, the fail-closed entry guard's allow-list, and a
+    // failure path that leaves its sequence: 1329, listed.
+    ("test.hermit_unit", 1329),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3259,7 +3303,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 216dbc929a full validate.
     // Train 5 recount (measured by the ccb5080910 full validate):
     // Composed on measured main ffe313b1: 3395 + 44 = 3439 (Train 5 delta +44).
-    ("test.detcore_unit", 3465),
+    // The stripped-file heuristic's four record and summary units: 3469, listed.
+    ("test.detcore_unit", 3469),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -4633,7 +4678,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // cases: 780 + 7 = 787, measured by the 216dbc929a full validate.
     // Train 5 recount (measured by the ccb5080910 full validate):
     // Composed on landed batch main: 789 + 5 = 794 (Train 5 delta +5 over 787).
-    ("test.cli", 796),
+    // And the --rewrite-exclusives refusal test under --no-namespace: 797.
+    ("test.cli", 797),
     // sabre_and_ptrace_detlogs_agree_through_post_exec and
     // detlog_records_drop_only_the_timestamp_and_suffix retain all 7 prior
     // identities.
@@ -5289,7 +5335,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Train 1 recount (measured by the 216dbc929a full validate, same
     // growth as test.cli): 699 + 7 = 706.
     // Train 5 recount (same growth as test.cli), composed on landed batch main: 708 + 5 = 713.
-    ("test.cli_on_host", 715),
+    // And the same test: 716.
+    ("test.cli_on_host", 716),
     // The hosted twin carries the local regular_crates selection minus its
     // 14 PMU/timer/replay skips: 1959 - 14 = 1945 (run1470 recount).
     // The same two composite-verdict units: 1945 + 2 = 1947 (carried).
@@ -5300,7 +5347,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same two added units as the local selection (1973 measured at
     // 85b8cec25a): 1957 + 2 = 1959 (1973 - 14).
     // Train 5 recount (same growth as test.regular_crates), composed on measured main: 1930 + 2 = 1932.
-    ("test.regular_crates_on_host", 1937),
+    // The same two stripped-file units: 1939, listed.
+    ("test.regular_crates_on_host", 1939),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -5866,7 +5914,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Measured 3363 by compiled nextest list at the integration head.
     // Train 1 recount (same growth as test.detcore_unit): 3363 + 21 = 3384.
     // Train 5 recount (same growth as test.detcore_unit), composed on measured main: 3395 + 44 = 3439.
-    ("test.detcore_unit_on_host", 3465),
+    // The same four stripped-file units: 3469, listed.
+    ("test.detcore_unit_on_host", 3469),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6284,7 +6333,23 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // in the hosted CPUID-faulting skip set): 1327 + 2 = 1329.
     // The split retains nine additional core identities: 1329 + 9 = 1338.
     // Train 5 recount (same growth as test.hermit_unit), composed on measured main: 1206 + 1 = 1207.
-    ("test.hermit_unit_on_host", 1243),
+    // And the same fifteen store-exclusive rewrite tests as test.hermit_unit: 1258.
+    // And the same twenty-two review tests: 1280, listed.
+    // And the same three addressed-data units: 1283, listed.
+    // And the same refusal-at-every-entry unit: 1284, listed.
+    // And the same two `ADRP` pairing units: 1286, listed.
+    // And the same two review units: 1288, listed.
+    // And the same store-pairing unit: 1289, listed.
+    // And the same stored-pointer unit: 1290, listed.
+    // And the same second round: 1291, listed.
+    // And the same third round: 1293, listed.
+    // The same nine stripped-file units as test.hermit_unit: 1302, listed.
+    // And the shared-cache unit: 1303, listed.
+    // And the two unsupported-mapping-symbol units: 1305, listed.
+    // And the same seven entry, reservation and artifact units: 1312, listed.
+    // And the same four cross-section and nested-FDE units: 1316, listed.
+    // And the same seven conditional-CAS and entry-guard units: 1323, listed.
+    ("test.hermit_unit_on_host", 1323),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6523,7 +6588,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The same two added units as the local selection (1973 measured at
     // 85b8cec25a), none hosted-excluded: 1957 + 2 = 1959 (1973 - 14).
     // Train 5 recount (same growth as test.regular_crates), composed on measured main: 1930 + 2 = 1932.
-    ("test.regular_crates_on_host", 1937),
+    // The same two stripped-file units: 1939, listed.
+    ("test.regular_crates_on_host", 1939),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
