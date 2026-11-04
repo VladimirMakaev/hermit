@@ -2798,6 +2798,16 @@ impl GlobalState {
                 post_crash.recorded_not_taken
             );
         }
+        // The overlay's files join those the in-memory rewrite named
+        // (`store_exclusive`'s `fill_summary`, above).
+        summary.exclusive_rewrite_unmarked.extend(
+            self.cfg
+                .rewrite_exclusives_unmarked
+                .iter()
+                .map(|path| path.display().to_string()),
+        );
+        summary.exclusive_rewrite_unmarked.sort();
+        summary.exclusive_rewrite_unmarked.dedup();
         //
         // Real time report:
         // N.B.: We don't have a job-level exit hook atm (T76248597), so we use the
@@ -8006,9 +8016,11 @@ pub enum SignalScope {
 // pair (both landed in batch D2).
 /// https://github.com/rrnewton/hermit/pull/4728's `SchedEvent::stopless`
 /// and `ReplayedSliceEnd` are revision 30, reserved for this change by the
-/// D2 seal; the combined layout on top of 31 appends revision 32, which is
-/// the current revision.
-pub(crate) const GLOBAL_RPC_REVISION: u32 = 32;
+/// D2 seal; the combined layout on top of 31 appends revision 32. 41, the
+/// current revision, adds `Rewrite::unmarked` to the `StoreExclusive`
+/// payload, above 33 to 40, which the queued drains' allocation table
+/// reserves.
+pub(crate) const GLOBAL_RPC_REVISION: u32 = 41;
 
 /// A guest thread's descriptor table, which `GlobalRequest::HoldTable`
 /// carries to the global state, for the terminal receipt of a death by a
@@ -15196,6 +15208,21 @@ mod tests {
                     stopless_slice_ends: None,
                 })
             );
+        }
+    }
+
+    /// The files the CLI's exclusive rewrite left unchanged for want of
+    /// mapping symbols reach the run's summary from the configuration it was
+    /// handed, and the summary names none when there were none.
+    #[test]
+    fn the_unmarked_rewrite_files_are_named_in_the_summary() {
+        for unmarked in [Vec::new(), vec!["/lib64/libstdc++.so.6".to_owned()]] {
+            let config = Config {
+                rewrite_exclusives_unmarked: unmarked.iter().map(Into::into).collect(),
+                ..Config::default()
+            };
+            let summary = GlobalState::for_tests(&config).into_run_summary().unwrap();
+            assert_eq!(summary.exclusive_rewrite_unmarked, unmarked);
         }
     }
 

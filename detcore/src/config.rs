@@ -87,13 +87,17 @@ mod tests {
     use super::*;
 
     /// Revisions reserved for a change that is not on this base yet, which
-    /// `GLOBAL_RPC_REVISIONS` therefore skips. Nothing is reserved at this
-    /// head: 28 is https://github.com/rrnewton/hermit/pull/4789's, 29 is
-    /// https://github.com/rrnewton/hermit/pull/4884's, 30 is this change's
-    /// (https://github.com/rrnewton/hermit/pull/4728), 31 is
-    /// https://github.com/rrnewton/hermit/pull/4867's, and 32, this
-    /// change's layout on top of 31's, is the current revision.
-    const RESERVED_GLOBAL_RPC_REVISIONS: &[u32] = &[];
+    /// `GLOBAL_RPC_REVISIONS` therefore skips: 33 to 39, which the queued
+    /// drains' allocation table reserves (33 for
+    /// https://github.com/rrnewton/hermit/pull/4909, 34 for #4907, 35 for
+    /// #4796, 36 for #4791, 37 for #4759 and 39 for the KVM 2b-1 change),
+    /// and 40 for https://github.com/rrnewton/hermit/pull/4885. 28 is
+    /// https://github.com/rrnewton/hermit/pull/4789's, 29 is
+    /// https://github.com/rrnewton/hermit/pull/4884's, 30 and 32 are
+    /// https://github.com/rrnewton/hermit/pull/4728's, and 31 is
+    /// https://github.com/rrnewton/hermit/pull/4867's. Remove an entry when
+    /// its change lands, with its row.
+    const RESERVED_GLOBAL_RPC_REVISIONS: &[u32] = &[33, 34, 35, 36, 37, 38, 39, 40];
 
     /// Every revision of the global RPC, oldest first, with the digest of the
     /// code of its two enums and its `Resources` payload. A change to any of
@@ -261,6 +265,12 @@ mod tests {
         // here rather than relabel 31 (revopus1's R1 on this change).
         // Digest measured at this head.
         (32, "e178ac33707f23b5", "f013e36743d8d9e6"),
+        // The `StoreExclusive` payload's `Rewrite` says whether a mapping's
+        // file holds loops no mapping symbol proves (`unmarked`), which the
+        // run names in its summary; its fields cross the wire positionally.
+        // The first revision above those the queued drains' allocation table
+        // reserves (33 to 40; digest measured at this head).
+        (41, "ff21b45b2eaff958", "f013e36743d8d9e6"),
     ];
 
     /// The lines of code, without comments or blank lines, of the type that
@@ -281,10 +291,12 @@ mod tests {
     /// The types `GlobalRequest::StoreExclusive` carries, declared in
     /// `store_exclusive.rs` inside its modules. Their fields cross the RPC in
     /// positional bincode as the enums' own do.
-    const STORE_EXCLUSIVE_PAYLOAD: [&str; 3] = [
+    const STORE_EXCLUSIVE_PAYLOAD: [&str; 5] = [
         "pub enum Report {",
         "pub struct ScannedMapping {",
         "pub struct Found {",
+        "pub struct Rewrite {",
+        "pub struct LiveMapping {",
     ];
 
     /// The lines of code, as [`definition`] gives them, of the type that
