@@ -2275,6 +2275,28 @@ mod tests {
         );
     }
 
+    /// A compare loop whose failed comparison returns to the caller keeps
+    /// its bytes: the caller may hold the store-exclusive that consumes the
+    /// reservation, in this file or another, where no search of this image
+    /// reaches. There is no other store-exclusive in the image, so the
+    /// external-store fact does not refuse it; the CAS refusal does, first.
+    #[test]
+    fn a_failure_path_that_returns_to_the_caller_keeps_the_loop() {
+        const RET: u32 = 0xd65f_03c0;
+        // ldaxr x0,[x2]; cbnz x0, <ret>; stlxr w3,x1,[x2]; cbnz w3; ret.
+        let words = [0xc85f_fc40, 0xb500_0060, 0xc803_fc41, 0x35ff_ffa3, RET];
+        let image = elf_image(&words, Some(&[(1, 0, true)]));
+        for policy in [StrippedRewrite::Refuse, StrippedRewrite::Heuristic] {
+            let (bytes, report) = rewritten_with(&image, policy);
+            assert_eq!(bytes, image, "{report:?}");
+            assert_eq!(
+                report.refused,
+                BTreeMap::from([("conditional-cas", 1)]),
+                "{report:?}"
+            );
+        }
+    }
+
     /// A conditional compare-and-swap loop keeps its bytes in an image,
     /// whatever precedes it and whatever names its head. Its original
     /// stores only when the comparison matches, and LDXR/LDAXR is a load,

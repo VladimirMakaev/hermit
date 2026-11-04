@@ -94,6 +94,12 @@ pub enum Refusal {
     /// outside store would silently stop storing. The outside store may be
     /// in another executable section: a section boundary does not clear
     /// the exclusive monitor.
+    ///
+    /// More generally, control can leave the sequence between its
+    /// load-exclusive and its store-exclusive with the reservation still
+    /// live, as a failed comparison's exit does, and reach a caller after a
+    /// return or another file, where no search of this image can see the
+    /// store-exclusive that may consume it.
     ExportsReservation,
     /// The idiom matched but its registers break an assumption the
     /// replacement needs; the string names which one.
@@ -278,9 +284,13 @@ pub fn plan_section(
                         // none. Another store-exclusive in this range could
                         // consume that reservation after the exit, so the
                         // sequence is refused rather than silently changing
-                        // whether that store stores.
+                        // whether that store stores. And whatever the idiom,
+                        // a path that leaves the sequence with the
+                        // reservation live is refused as well: it may reach
+                        // a caller or another file, which no search of this
+                        // image covers.
                         let exports_reservation =
-                            matches!(site.idiom, Idiom::CasCompare | Idiom::CasZero)
+                            (matches!(site.idiom, Idiom::CasCompare | Idiom::CasZero)
                                 && (external_store_exclusive
                                     || decoded.iter().enumerate().any(|(other, other_insn)| {
                                         other != index
@@ -288,7 +298,8 @@ pub fn plan_section(
                                                 other_insn,
                                                 Insn::StoreExcl { .. } | Insn::ExclPair
                                             )
-                                    }));
+                                    })))
+                                || reservation_can_leave(words, base, &site);
                         if interior_entered {
                             report.refused.push(RefusedSite {
                                 addr: addr(index),
@@ -313,6 +324,32 @@ pub fn plan_section(
         }
     }
     report
+}
+
+/// Whether control can leave the sequence `site` replaces while its
+/// load-exclusive's reservation is live: a direct branch after the
+/// load-exclusive and before the store-exclusive whose target lies outside
+/// the sequence, as a failed comparison's exit is. Instructions the decoder
+/// does not know already refuse a sequence, so an indirect branch or a
+/// return cannot be among them.
+pub fn reservation_can_leave(words: &[u32], base: u64, site: &Site) -> bool {
+    let first = ((site.addr - base) / 4) as usize;
+    let end = site.addr + 4 * site.words.len() as u64;
+    let Some(store) = (first..first + site.words.len())
+        .find(|index| matches!(decode(words[*index]), Insn::StoreExcl { .. }))
+    else {
+        return false;
+    };
+    direct_branches(
+        &words[first + 1..store]
+            .iter()
+            .copied()
+            .map(decode)
+            .collect::<Vec<_>>(),
+        site.addr + 4,
+    )
+    .into_iter()
+    .any(|(_, target)| target < site.addr || target >= end)
 }
 
 /// Move every planned rewrite of `report` to its refusals, for `reason`.
@@ -1077,6 +1114,59 @@ mod tests {
         entries.insert(BASE);
         let report = plan_with_entries(original, BASE, &HashSet::new(), &entries);
         assert_eq!(report.patched.len(), 1, "{report:?}");
+    }
+
+    /// The defence-in-depth rule behind `ExportsReservation`, on the shapes
+    /// whose failure path leaves the sequence: a failed comparison's exit
+    /// out of a compare-and-swap loop, whatever it reaches, exports the
+    /// reservation; the read-modify-write and swap loops, whose only branch
+    /// is the retry, and a branch that stays inside the sequence do not.
+    #[test]
+    fn a_failure_path_that_leaves_the_sequence_exports_its_reservation() {
+        let site = |words: &[u32]| Site {
+            addr: BASE,
+            idiom: Idiom::CasCompare,
+            words: words.to_vec(),
+        };
+        // cbnz x0, out (+12, past the loop); cmp + b.ne out (+16).
+        let cas_zero = [0xc85f_fc40, 0xb500_0060, 0xc803_fc41, 0x35ff_ffa3];
+        let cas_compare = [
+            0xc85f_fc66,
+            0xeb04_00df,
+            0x5400_0081,
+            0xc807_fc62,
+            0x35ff_ff87,
+        ];
+        // The same compare whose b.ne goes back before the loop (-12).
+        let back = [
+            0xc85f_fc66,
+            0xeb04_00df,
+            0x54ff_ffa1,
+            0xc807_fc62,
+            0x35ff_ff87,
+        ];
+        for words in [&cas_zero[..], &cas_compare[..], &back[..]] {
+            assert!(
+                reservation_can_leave(words, BASE, &site(words)),
+                "{words:x?}"
+            );
+        }
+        // ldaxr x6,[x3]; cmp x6,x4; b.ne <the stlxr> (+4); stlxr; cbnz:
+        // the branch stays inside the sequence.
+        let inside = [
+            0xc85f_fc66,
+            0xeb04_00df,
+            0x5400_0021,
+            0xc807_fc62,
+            0x35ff_ff87,
+        ];
+        assert!(!reservation_can_leave(&inside, BASE, &site(&inside)));
+        for (_, _, original, _) in CASES {
+            assert!(
+                !reservation_can_leave(original, BASE, &site(original)),
+                "{original:x?}"
+            );
+        }
     }
 
     #[test]
