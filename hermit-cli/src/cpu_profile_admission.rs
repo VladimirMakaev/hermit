@@ -941,6 +941,13 @@ pub fn qualify_host() -> Result<Qualification, AdmissionRefusal> {
     Err(non_x86_refusal())
 }
 
+/// [`admit`]'s host half off x86: the same refusal as [`qualify_host`], since
+/// there is no probe to cache.
+#[cfg(not(target_arch = "x86_64"))]
+fn qualify_host_cached() -> Result<Qualification, AdmissionRefusal> {
+    qualify_host()
+}
+
 /// Why a nondefault profile is refused off x86: both describe x86 CPUs.
 #[cfg(not(target_arch = "x86_64"))]
 fn non_x86_refusal() -> AdmissionRefusal {
