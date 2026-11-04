@@ -3290,7 +3290,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The aarch64 rewriter's code/data proof on main (F1): forty-three
     // detcore units: 3535, listed.
     // And six known-entry and overlap units: 3541, listed.
-    ("test.detcore_unit", 3541),
+    // And the in-memory rewrite's unproven-file units: 3543, listed.
+    ("test.detcore_unit", 3543),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5918,7 +5919,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR #4751: the same twelve units (same growth as test.detcore_unit): 3482.
     // The same forty-three detcore units: 3535, listed.
     // And the same six units: 3541, listed.
-    ("test.detcore_unit_on_host", 3541),
+    // And the same two unproven-file units: 3543, listed.
+    ("test.detcore_unit_on_host", 3543),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
