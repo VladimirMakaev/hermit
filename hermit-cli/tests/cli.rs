@@ -64501,6 +64501,22 @@ fn binder_guest_output_with(mode: &str, side: BinderSide, hermit_args: &[&str]) 
     let await_ready = format!(
         "i=0; while [ ! -e {mountpoint}.ready ] && [ $i -lt 600 ]; do sleep 0.1; i=$((i+1)); done"
     );
+    // Hermit is launched only once the manager outside it is ready. Without
+    // this, a manager that failed to start would let Hermit run against no
+    // peer, and a test asserting that nothing reached the peer would pass
+    // for nothing. The script reports it with a marker on stdout, which
+    // neither the guest nor hermit prints, then the manager's fate and log.
+    const MANAGER_NOT_READY: &str = "BINDER-MANAGER-NOT-READY";
+    // The same where the manager runs under Hermit: its client outside
+    // Hermit sent nothing ([`BinderSide::Manager`]).
+    const MANAGER_UNDER_HERMIT_NOT_READY: &str = "BINDER-MANAGER-UNDER-HERMIT-NOT-READY";
+    let require_ready = format!(
+        "[ -e {mountpoint}.ready ] || {{ if kill -0 $peer 2>/dev/null; then kill $peer; \
+         wait $peer; why='was still running after 60 s and was killed'; else wait $peer; \
+         why=\"exited with status $?\"; fi; echo {MANAGER_NOT_READY}; \
+         echo \"the context manager outside Hermit never became ready: it $why\" >&2; \
+         cat {peer_log} >&2; exit 0; }}"
+    );
     // The side outside Hermit is given up to 10 s to finish on its own, so
     // its output is whole, before any cleanup kill.
     let reap_peer = "i=0; while kill -0 $peer 2>/dev/null && [ $i -lt 100 ]; do sleep 0.1; \
@@ -64508,21 +64524,31 @@ fn binder_guest_output_with(mode: &str, side: BinderSide, hermit_args: &[&str]) 
     let report_peer = format!("echo '--- outside Hermit ---' >&2; cat {peer_log} >&2");
     let run = match side {
         BinderSide::Both => format!("exec {}", under_hermit("both")),
+        // The manager runs under Hermit and the client outside it. The client
+        // sends only once the manager is ready; where it never became ready,
+        // whether the client's wait expired or Hermit ended first, the script
+        // says so on its stdout (`MANAGER_UNDER_HERMIT_NOT_READY`, through
+        // descriptor 3 from the client), so a refusal Hermit reaches with no
+        // transaction sent cannot pass for one that refused a real peer.
         BinderSide::Manager => format!(
-            "( {await_ready}; exec timeout --kill-after 5s 60s {guest} {mountpoint} {mode} \
-             client ) >{peer_log} 2>&1 & peer=$!; {}; status=$?; {reap_peer}; \
-             {report_peer}; exit $status",
+            "( {await_ready}; [ -e {mountpoint}.ready ] || {{ echo \
+             {MANAGER_UNDER_HERMIT_NOT_READY} >&3; echo 'binder_fd_passing: the context \
+             manager under Hermit never became ready' >&2; exit 1; }}; exec timeout \
+             --kill-after 5s 60s {guest} {mountpoint} {mode} client 3>&- ) 3>&1 \
+             >{peer_log} 2>&1 & peer=$!; {}; status=$?; [ -e {mountpoint}.ready ] || echo \
+             {MANAGER_UNDER_HERMIT_NOT_READY}; {reap_peer}; {report_peer}; exit $status",
             under_hermit("manager")
         ),
         BinderSide::Client => format!(
             "timeout --kill-after 5s 60s {guest} {mountpoint} {mode} manager >{peer_log} 2>&1 & \
-             peer=$!; {await_ready}; {}; status=$?; {reap_peer}; {report_peer}; \
-             exit $status",
+             peer=$!; {await_ready}; {require_ready}; {}; status=$?; {reap_peer}; \
+             {report_peer}; exit $status",
             under_hermit("client")
         ),
         BinderSide::Inherited => format!(
             "timeout --kill-after 5s 60s {guest} {mountpoint} {mode} manager >{peer_log} 2>&1 & \
-             peer=$!; {await_ready}; timeout --kill-after 5s 120s {hermit} run --base-env=minimal \
+             peer=$!; {await_ready}; {require_ready}; timeout --kill-after 5s 120s {hermit} run \
+             --base-env=minimal \
              {} -- /bin/sh -c 'exit 0' <{mountpoint}/binder-fd-passing; status=$?; {reap_peer}; \
              {report_peer}; exit $status",
             hermit_args.join(" ")
@@ -64543,6 +64569,18 @@ fn binder_guest_output_with(mode: &str, side: BinderSide, hermit_args: &[&str]) 
         );
         return None;
     }
+    assert!(
+        !stdout(&output).contains(MANAGER_NOT_READY),
+        "the binder context manager outside Hermit never became ready, so Hermit was not \
+         launched:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(
+        !stdout(&output).contains(MANAGER_UNDER_HERMIT_NOT_READY),
+        "the binder context manager under Hermit never became ready, so its client outside \
+         Hermit sent nothing:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
     Some(output)
 }
 
@@ -67265,12 +67303,17 @@ fn a_strict_run_refuses_a_binder_device_a_thread_opens_in_a_table_of_its_own() {
     );
 }
 
-/// A `--strict` replay of a record made without it is refused where it opens
-/// the binder device too: the record fixes when each backgrounded call
-/// rejoins, not what a binder call reads, which is not recorded. The record is made by a
-/// client alone under Hermit against a context manager outside it. The
-/// control: the same record replayed without `--strict` runs to the end, so
-/// the refusal is `--strict`'s, not the record's.
+/// A `--strict` replay of a record made without it, one that stores where each
+/// backgrounded binder call rejoined, is refused where it opens the binder
+/// device: the record fixes when each call is readmitted, not what a binder
+/// call reads, which is not recorded. The record is made by a client alone
+/// under Hermit against a context manager outside it that waits 100 ms before
+/// it replies ("slowreply"), so the client's read for the reply waits off the
+/// turn and its readmission is logged. The control: the same record replayed
+/// without `--strict` runs to the end, its readmissions followed, so the
+/// refusal is `--strict`'s, not the record's. Before, a strict replay of such
+/// a record could make binder calls, against a peer whose replies it did not
+/// record.
 #[test]
 #[ignore = "host-limited: needs a binder filesystem (CONFIG_ANDROID_BINDERFS) mountable in a user namespace and a branch counter --strict accepts; run with --run-ignored only (docs/TESTING_ENVIRONMENTS.md)"]
 fn a_strict_replay_refuses_binder() {
@@ -67279,15 +67322,23 @@ fn a_strict_replay_refuses_binder() {
     let record = directory.path().join("binder.json");
     let record_flag = format!("--record-preemptions-to={}", record.display());
     let recorded = binder_guest_output_with_on_a_capable_host(
-        "ping",
+        "slowreply",
         BinderSide::Client,
         &[&epoch, &record_flag],
     );
-    assert_success(&recorded, &["binder_fd_passing", "ping", "client"]);
+    assert_success(&recorded, &["binder_fd_passing", "slowreply", "client"]);
+    let json: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&record).unwrap()).unwrap();
+    assert!(
+        json["rejoins"]
+            .as_array()
+            .is_some_and(|rejoins| !rejoins.is_empty()),
+        "the recording stored no readmission: {json}"
+    );
     let replay_flag = format!("--replay-preemptions-from={}", record.display());
 
     let strict = binder_guest_output_with_on_a_capable_host(
-        "ping",
+        "slowreply",
         BinderSide::Client,
         &["--strict", &epoch, &replay_flag],
     );
@@ -67303,20 +67354,31 @@ fn a_strict_replay_refuses_binder() {
             && log.contains("binder reply payloads are not recorded"),
         "{log}"
     );
+    assert!(
+        !log.contains("received transaction from pid"),
+        "the manager outside Hermit got a transaction from a refused run: {log}"
+    );
 
     let replayed = binder_guest_output_with_on_a_capable_host(
-        "ping",
+        "slowreply",
         BinderSide::Client,
         &[&epoch, &replay_flag],
     );
     assert_success(
         &replayed,
-        &["binder_fd_passing", "ping", "client", "replay"],
+        &["binder_fd_passing", "slowreply", "client", "replay"],
+    );
+    let log = stderr(&replayed);
+    assert!(!log.contains("--strict refuses"), "{log}");
+    assert!(
+        !log.contains("stopped following the replayed record's readmissions"),
+        "{log}"
     );
     assert!(
-        !stderr(&replayed).contains("--strict refuses"),
-        "{}",
-        stderr(&replayed)
+        log.split("--- outside Hermit ---")
+            .nth(1)
+            .is_some_and(|outside| outside.contains("received transaction from pid")),
+        "the manager outside Hermit got no transaction: {log}"
     );
 }
 

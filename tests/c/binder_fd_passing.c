@@ -10,7 +10,7 @@
 // it in the receiver.
 //
 // Usage: binder_fd_passing <binderfs mount>
-//            [poll|block|ping|exhausted|writeread|threaded|ownfiles]
+//            [poll|block|ping|exhausted|writeread|threaded|slowreply|ownfiles]
 //            [both|manager|client].
 // The guest adds a device of its own to that binderfs instance through its
 // binder-control file (BINDER_CTL_ADD; an existing one is reused), so it needs
@@ -40,6 +40,8 @@
 // In "block" and "exhausted" mode the sender sleeps 100 ms first, so the
 // receiver's read is the one that waits. "threaded" is "ping" whose receiver
 // starts a second thread, sharing its descriptor table, before it waits.
+// "slowreply" is "ping" whose receiver sleeps 100 ms before it replies, so the
+// sender's read for the reply is the one that waits.
 // "ownfiles", for a client, sends nothing: the process opens /dev/null, and a
 // second thread, made without CLONE_FILES (clone(2) with CLONE_THREAD), so
 // with a copy of the descriptor table of its own, closes that number in its
@@ -96,6 +98,10 @@ static int write_and_read = 0;
 
 // Whether the sender sleeps before it sends, so the receiver waits first.
 static int sender_waits = 0;
+
+// Whether the receiver sleeps before it replies, so the sender's read for the
+// reply is the one that waits ("slowreply").
+static int reply_waits = 0;
 
 // Whether the receiver starts a second thread, which shares its descriptor
 // table, before it waits for the transaction ("threaded").
@@ -361,7 +367,7 @@ static char* add_device(const char* mount, const char* name) {
 int main(int argc, char** argv) {
   const char* usage =
       "usage: %s <binderfs mount> "
-      "[poll|block|ping|exhausted|writeread|threaded|ownfiles] "
+      "[poll|block|ping|exhausted|writeread|threaded|slowreply|ownfiles] "
       "[both|manager|client]\n";
   if (argc < 2 || argc > 4) {
     fprintf(stderr, usage, argv[0]);
@@ -397,6 +403,10 @@ int main(int argc, char** argv) {
       nonblocking = 0;
       pass_fd = 0;
       threaded = 1;
+    } else if (strcmp(argv[2], "slowreply") == 0) {
+      nonblocking = 0;
+      pass_fd = 0;
+      reply_waits = 1;
     } else if (strcmp(argv[2], "ownfiles") == 0) {
       nonblocking = 0;
       pass_fd = 0;
@@ -543,6 +553,9 @@ int main(int argc, char** argv) {
               .data.ptr.buffer = (binder_uintptr_t)&status,
           },
   };
+  if (reply_waits) {
+    usleep(100 * 1000);
+  }
   write_commands(fd, &commands, sizeof(commands));
   if (role == MANAGER) {
     return 0;
