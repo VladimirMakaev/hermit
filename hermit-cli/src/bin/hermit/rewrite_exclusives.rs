@@ -38,16 +38,10 @@ pub struct RewriteExclusivesOpts {
 
     /// What to do with a file, or an executable section, that has no ARM
     /// mapping symbols (`$x`, `$d`), as `hermit run
-    /// --rewrite-exclusives-stripped` does: `refuse` (the default) leaves its
-    /// loops alone as `no-mapping-symbols`; `heuristic` rewrites it by the
-    /// stripped-file heuristic, whose residuals `hermit run --help` lists
-    /// and which can corrupt program data where it takes data for code.
-    #[clap(
-        long,
-        value_enum,
-        value_name = "refuse|heuristic",
-        default_value = "refuse"
-    )]
+    /// --rewrite-exclusives-stripped` does: `refuse` (the only value, and
+    /// the default) leaves its loops alone as `no-mapping-symbols`. The
+    /// former `heuristic` opt-in was removed (scope cut).
+    #[clap(long, value_enum, value_name = "refuse", default_value = "refuse")]
     stripped: elf::StrippedRewrite,
 }
 
@@ -123,19 +117,21 @@ mod tests {
 
     use super::*;
 
-    /// `--stripped` takes the run's values, `refuse` by default.
+    /// `--stripped` takes only `refuse` (the heuristic opt-in is gone).
     #[test]
-    fn stripped_files_are_refused_unless_the_heuristic_is_asked_for() {
+    fn stripped_files_are_refused_and_the_heuristic_is_rejected() {
         let default =
             RewriteExclusivesOpts::try_parse_from(["rewrite-exclusives", "a.so"]).unwrap();
         assert_eq!(default.stripped, elf::StrippedRewrite::Refuse);
-        let heuristic = RewriteExclusivesOpts::try_parse_from([
-            "rewrite-exclusives",
-            "--stripped=heuristic",
-            "a.so",
-        ])
-        .unwrap();
-        assert_eq!(heuristic.stripped, elf::StrippedRewrite::Heuristic);
+        // The removed heuristic opt-in is rejected, not silently refused.
+        assert!(
+            RewriteExclusivesOpts::try_parse_from([
+                "rewrite-exclusives",
+                "--stripped=heuristic",
+                "a.so",
+            ])
+            .is_err()
+        );
         assert!(
             RewriteExclusivesOpts::try_parse_from([
                 "rewrite-exclusives",

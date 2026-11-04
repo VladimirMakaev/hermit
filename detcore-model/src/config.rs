@@ -416,12 +416,12 @@ pub struct Config {
     #[clap(skip)]
     pub launch_image: Option<LaunchImage>,
 
-    /// aarch64: the run's `--rewrite-exclusives` rewrote files that have no
-    /// ARM mapping symbols by the stripped-file heuristic
-    /// (`--rewrite-exclusives-stripped=heuristic`), whose classification of
-    /// code is not proved and can be mistaken. The CLI sets it; the run states
-    /// it in its summary and in the preemption record it writes, and a replay
-    /// under the other setting is refused. Never read from a recording.
+    /// aarch64: legacy record-compat flag: a run under the removed
+    /// stripped-file heuristic (`--rewrite-exclusives-stripped=heuristic`,
+    /// deleted in the scope cut) stated it here. No current CLI setting
+    /// can set it; it is retained only so recordings made under the
+    /// heuristic still read back and are refused on replay mismatch.
+    /// Never read from a recording.
     #[serde(default)]
     #[clap(skip)]
     pub rewrite_exclusives_stripped_heuristic: bool,
@@ -2644,12 +2644,6 @@ pub enum StrippedRewrite {
     /// sequence in it is left alone as `no-mapping-symbols`.
     #[default]
     Refuse,
-    /// Rewrite it by the stripped-file heuristic: code is what control
-    /// reaches from the entries of the functions the unwind table describes,
-    /// less what the code or the image addresses as data. Its known residuals
-    /// are listed with the rewriter; a mistaken classification can corrupt
-    /// program data.
-    Heuristic,
 }
 
 impl StrippedRewrite {
@@ -2657,7 +2651,6 @@ impl StrippedRewrite {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Refuse => "refuse",
-            Self::Heuristic => "heuristic",
         }
     }
 }

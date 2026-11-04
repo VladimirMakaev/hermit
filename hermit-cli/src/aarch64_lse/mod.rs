@@ -36,9 +36,11 @@ pub mod rewrite;
 /// never reused. 3: only code is rewritten, as [`mapping`] tells it from
 /// data. 4: a stripped file's code is what control proves, and what the
 /// code or the image addresses as data is not it. 5: a section no mapping
-/// symbol marks is rewritten only under the stripped-file heuristic
-/// (`StrippedRewrite::Heuristic`), which writes what 4 wrote.
-pub const REWRITE_FORMAT_VERSION: u32 = 5;
+/// symbol marks is rewritten only under the stripped-file heuristic,
+/// which writes what 4 wrote. 6: scope cut -- compare (CAS) idioms are
+/// left alone as `compare-exit` and the stripped-file heuristic opt-in
+/// is removed, so only mapping-symbol-proved code is rewritten.
+pub const REWRITE_FORMAT_VERSION: u32 = 6;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
@@ -168,13 +170,12 @@ pub fn cache_dir() -> anyhow::Result<PathBuf> {
 mod tests {
     use super::*;
 
-    /// A default run and a heuristic run of one stripped file share one
-    /// cache directory, and each gets only its own bytes: the default run's
-    /// file (the source unchanged) and the heuristic run's rewrite have
-    /// distinct entries, written in either order, and a run that holds one
-    /// entry open still reads its bytes after the other run's write. An entry
-    /// that does not hold what its name promises is replaced by a new file,
-    /// not rewritten in place.
+    /// Two rewrites of one source under the only policy share one cache
+    /// directory, and each gets only its own bytes: entries are named by
+    /// the bytes they hold, written in either order, and a run that holds
+    /// one entry open still reads its bytes after the other run's write.
+    /// An entry that does not hold what its name promises is replaced by
+    /// a new file, not rewritten in place.
     #[test]
     fn each_policy_maps_only_its_own_rewrite_from_one_cache() {
         let directory = tempfile::tempdir().unwrap();
@@ -182,31 +183,29 @@ mod tests {
         std::fs::create_dir(&cache).unwrap();
         let source = directory.path().join("libstripped.so");
         let original = b"\x7fELF stripped, as the default leaves it".to_vec();
-        let heuristic = b"\x7fELF stripped, as the heuristic rewrites it".to_vec();
+        let other = b"\x7fELF stripped, another rewrite".to_vec();
         std::fs::write(&source, &original).unwrap();
         let entry = |bytes: &[u8], stripped| {
             cached_rewrite(&cache, bytes, &source, "libstripped.so", stripped).unwrap()
         };
-        let mapped = entry(&heuristic, elf::StrippedRewrite::Heuristic);
+        let mapped = entry(&other, elf::StrippedRewrite::Refuse);
         let mut held = std::fs::File::open(&mapped).unwrap();
         let default = entry(&original, elf::StrippedRewrite::Refuse);
         assert_ne!(default, mapped);
-        assert_eq!(std::fs::read(&mapped).unwrap(), heuristic);
+        assert_eq!(std::fs::read(&mapped).unwrap(), other);
         assert_eq!(std::fs::read(&default).unwrap(), original);
-        // The same bytes under the other policy have an entry of their own.
-        assert_ne!(entry(&heuristic, elf::StrippedRewrite::Refuse), mapped);
         // An entry that lost its bytes is replaced by a new file; the one a
         // run holds keeps what it held.
         std::fs::remove_file(&mapped).unwrap();
         std::fs::write(&mapped, b"someone else's bytes").unwrap();
         let mut stale = std::fs::File::open(&mapped).unwrap();
-        assert_eq!(entry(&heuristic, elf::StrippedRewrite::Heuristic), mapped);
-        assert_eq!(std::fs::read(&mapped).unwrap(), heuristic);
+        assert_eq!(entry(&other, elf::StrippedRewrite::Refuse), mapped);
+        assert_eq!(std::fs::read(&mapped).unwrap(), other);
         let mut read = Vec::new();
         std::io::Read::read_to_end(&mut stale, &mut read).unwrap();
         assert_eq!(read, b"someone else's bytes");
         read.clear();
         std::io::Read::read_to_end(&mut held, &mut read).unwrap();
-        assert_eq!(read, heuristic);
+        assert_eq!(read, other);
     }
 }

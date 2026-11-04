@@ -3471,101 +3471,87 @@ fn the_exclusive_rewrite_is_retained_in_reproducers() {
     );
 }
 
-/// `--rewrite-exclusives-stripped` needs `--rewrite-exclusives`; a reproducer
-/// keeps the heuristic, which changes the program the guest runs, and the
-/// run's configuration states it for the summary and the preemption record.
-/// The default is not written.
+/// `--rewrite-exclusives-stripped` takes only `refuse` (scope cut: the
+/// heuristic opt-in is removed, so `--stripped=heuristic` is a parse
+/// error). The default is not written in a reproducer, and no current
+/// run states the legacy heuristic mark in its configuration.
 #[test]
 fn the_stripped_file_heuristic_is_retained_in_reproducers() {
-    let alone = crate::app::Args::try_parse_from([
+    let removed = crate::app::Args::try_parse_from([
         "hermit",
         "run",
+        "--rewrite-exclusives",
         "--rewrite-exclusives-stripped=heuristic",
         "--",
         "/nonexistent/guest",
     ]);
     assert_eq!(
-        alone.err().map(|error| error.kind()),
-        Some(clap::error::ErrorKind::MissingRequiredArgument)
+        removed.err().map(|error| error.kind()),
+        Some(clap::error::ErrorKind::InvalidValue)
     );
-    for (value, heuristic) in [("refuse", false), ("heuristic", true)] {
-        let stripped = format!("--rewrite-exclusives-stripped={value}");
-        let mut options = run_opts_for(&[
-            "hermit",
-            "run",
-            "--rewrite-exclusives",
-            &stripped,
-            "--",
-            "/nonexistent/guest",
-        ]);
-        options.validate_args_with_perf_support(true).unwrap();
-        let rendered = options.to_string();
-        assert_eq!(
-            rendered.contains(" --rewrite-exclusives-stripped=heuristic"),
-            heuristic,
-            "{rendered}"
-        );
-        assert!(
-            !rendered.contains("--rewrite-exclusives-stripped=refuse"),
-            "{rendered}"
-        );
-        assert_eq!(options.rewrites_stripped_files_by_heuristic(), heuristic);
-        assert_eq!(
-            options
-                .effective_det_config()
-                .rewrite_exclusives_stripped_heuristic,
-            heuristic
-        );
-    }
+    let mut options = run_opts_for(&[
+        "hermit",
+        "run",
+        "--rewrite-exclusives",
+        "--rewrite-exclusives-stripped=refuse",
+        "--",
+        "/nonexistent/guest",
+    ]);
+    options.validate_args_with_perf_support(true).unwrap();
+    let rendered = options.to_string();
+    assert!(
+        !rendered.contains("--rewrite-exclusives-stripped"),
+        "{rendered}"
+    );
+    assert!(!options.rewrites_stripped_files_by_heuristic());
+    assert!(
+        !options
+            .effective_det_config()
+            .rewrite_exclusives_stripped_heuristic
+    );
 }
 
-/// Under the stripped-file heuristic, a verification another tool reads
-/// without this command line is refused before anything runs: neither the
-/// typed report (`--verify-json`) nor the saved run directory that `hermit
-/// log-diff --verify-json` compares (`--verify-run`) would show it. Without
-/// the heuristic, and for `--verify` alone, nothing is refused.
+/// No current run uses the stripped-file heuristic (scope cut), so
+/// verification exports are never refused on that ground: neither the
+/// typed report (`--verify-json`) nor the saved run directory
+/// (`--verify-run`) is refused, and `--verify` alone is not either.
+/// The removed heuristic value itself is rejected at parse time.
 #[test]
 fn the_stripped_file_heuristic_refuses_verification_exports() {
+    let removed = crate::app::Args::try_parse_from([
+        "hermit",
+        "run",
+        "--rewrite-exclusives",
+        "--rewrite-exclusives-stripped=heuristic",
+        "--verify-run=/nonexistent/run",
+        "--",
+        "/nonexistent/guest",
+    ]);
+    assert_eq!(
+        removed.err().map(|error| error.kind()),
+        Some(clap::error::ErrorKind::InvalidValue)
+    );
     let options = |extra: &[&str]| {
         let mut argv = vec!["hermit", "run"];
         argv.extend_from_slice(extra);
         argv.extend_from_slice(&["--", "/nonexistent/guest"]);
         run_opts_for(&argv)
     };
-    let heuristic = [
-        "--rewrite-exclusives",
-        "--rewrite-exclusives-stripped=heuristic",
-    ];
     for export in [
         &["--verify", "--verify-json=/nonexistent/report.json"][..],
         &["--verify-run=/nonexistent/run"][..],
+        &["--verify"][..],
     ] {
-        let error = options(&[&heuristic[..], export].concat())
-            .refuse_stripped_heuristic_verification_export()
-            .unwrap_err();
-        assert!(error.is::<PolicyRefusal>(), "{error:#}");
-        assert!(
-            format!("{error:#}").contains("--rewrite-exclusives-stripped=heuristic"),
-            "{error:#}"
-        );
         options(&[&["--rewrite-exclusives"][..], export].concat())
             .refuse_stripped_heuristic_verification_export()
             .unwrap();
     }
-    options(&[&heuristic[..], &["--verify"][..]].concat())
-        .refuse_stripped_heuristic_verification_export()
-        .unwrap();
-    // Every preparation refuses it too, before it reads a file or asks
-    // whether the host executes LSE atomics.
-    let error = options(&[&heuristic[..], &["--verify-run=/nonexistent/run"][..]].concat())
-        .prepare_exclusive_rewrite(Backend::Ptrace)
-        .unwrap_err();
-    assert!(error.is::<PolicyRefusal>(), "{error:#}");
 }
 
-/// A replay under the other stripped-file setting is refused by the
-/// record's own mark: the heuristic changes the instructions the guest
-/// retires.
+/// A replay of a recording made under the removed stripped-file
+/// heuristic is refused by the record's own mark (scope cut): no
+/// current run can set the heuristic, so a heuristic recording
+/// mismatches every replay, while an ordinary recording replays.
 #[test]
 fn a_replay_under_the_other_stripped_rewrite_is_refused() {
     let directory = tempfile::tempdir().unwrap();
@@ -3579,21 +3565,18 @@ fn a_replay_under_the_other_stripped_rewrite_is_refused() {
         )
         .unwrap();
         let replay = format!("--replay-preemptions-from={}", path.display());
-        for heuristic in [false, true] {
-            let mut argv = vec!["hermit", "run", "--rewrite-exclusives"];
-            if heuristic {
-                argv.push("--rewrite-exclusives-stripped=heuristic");
-            }
-            argv.extend_from_slice(&[&replay, "--", "/nonexistent/guest"]);
-            let result = run_opts_for(&argv).refuse_replay_under_another_stripped_rewrite();
-            assert_eq!(
-                result.is_err(),
-                recorded != heuristic,
-                "recorded {recorded}, replayed {heuristic}"
-            );
-            if let Err(error) = result {
-                assert!(error.is::<PolicyRefusal>(), "{error:#}");
-            }
+        let argv = [
+            "hermit",
+            "run",
+            "--rewrite-exclusives",
+            &replay,
+            "--",
+            "/nonexistent/guest",
+        ];
+        let result = run_opts_for(&argv).refuse_replay_under_another_stripped_rewrite();
+        assert_eq!(result.is_err(), recorded, "recorded {recorded}");
+        if let Err(error) = result {
+            assert!(error.is::<PolicyRefusal>(), "{error:#}");
         }
     }
 }
@@ -9886,11 +9869,11 @@ impl RunOpts {
     }
 
     /// Whether this run rewrites files without mapping symbols by the
-    /// stripped-file heuristic (`--rewrite-exclusives-stripped=heuristic`).
+    /// stripped-file heuristic. The heuristic opt-in was removed (scope
+    /// cut), so no current run does; the answer stays `false` so a
+    /// recording made under the heuristic is refused on replay mismatch.
     pub(crate) fn rewrites_stripped_files_by_heuristic(&self) -> bool {
-        self.rewrite_exclusives
-            && self.rewrite_exclusives_stripped
-                == hermit::aarch64_lse::elf::StrippedRewrite::Heuristic
+        false
     }
 
     /// Refuses `--verify-json` and `--verify-run` under the stripped-file

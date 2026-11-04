@@ -86,14 +86,16 @@ pub enum Refusal {
     /// an indirect branch's target (a jump table, a landing pad) is not
     /// known here.
     BranchIntoSequence,
-    /// The sequence is a compare idiom whose failing-comparison exit leaves
-    /// the load-exclusive's reservation in place in the original, and a
-    /// store-exclusive outside the sequence could consume that reservation.
-    /// The replacement's single atomic creates no reservation, so the
-    /// outside store would silently stop storing. The outside store may be
-    /// in another executable section: a section boundary does not clear
-    /// the exclusive monitor.
-    ExportsReservation,
+    /// The sequence is a compare idiom (CAS): its failing-comparison exit
+    /// leaves the load-exclusive's reservation in place in the original,
+    /// and any store-exclusive that exit can reach could consume that
+    /// reservation. The replacement's single atomic creates no
+    /// reservation, so such a store would silently stop storing. Which
+    /// executable bytes a compare exit can reach cannot be proved from
+    /// section flags alone (an executable mapping, not `SHF_EXECINSTR`,
+    /// decides what can execute), so every compare idiom is left alone
+    /// as `compare-exit`, without a rewrite, by construction.
+    CompareExit,
     /// The idiom matched but its registers break an assumption the
     /// replacement needs; the string names which one.
     Registers(&'static str),
@@ -191,18 +193,16 @@ pub fn plan_with_entries(
 }
 
 /// The same, also told whether code outside this range holds a
-/// store-exclusive (or an unreadable executable section, whose contents are
-/// unknown). A section boundary does not clear the exclusive monitor, so a
-/// compare idiom whose failing exit leaves its reservation in place is
-/// refused whenever any other store-exclusive in the image could consume
-/// that reservation, in this range or any other: the replacement's single
-/// atomic creates no reservation for it to consume.
+/// store-exclusive. Retained for caller compatibility; it no longer
+/// decides anything: compare idioms are left alone as `compare-exit`
+/// whether or not any other store-exclusive is known, because the set
+/// of executable bytes a compare exit can reach is not proved.
 pub fn plan_with_external_store(
     words: &[u32],
     base: u64,
     external_targets: &HashSet<u64>,
     known_entries: &HashSet<u64>,
-    external_store_exclusive: bool,
+    _external_store_exclusive: bool,
 ) -> Report {
     let decoded: Vec<Insn> = words.iter().copied().map(decode).collect();
     let branches = direct_branches(&decoded, base);
@@ -242,29 +242,20 @@ pub fn plan_with_external_store(
                         });
                         // A compare idiom's failing exit keeps the original's
                         // exclusive reservation; the replacement creates
-                        // none. Another store-exclusive in this range could
-                        // consume that reservation after the exit, so the
-                        // sequence is refused rather than silently changing
-                        // whether that store stores.
-                        let exports_reservation =
-                            matches!(site.idiom, Idiom::CasCompare | Idiom::CasZero)
-                                && (external_store_exclusive
-                                    || decoded.iter().enumerate().any(|(other, other_insn)| {
-                                        other != index
-                                            && matches!(
-                                                other_insn,
-                                                Insn::StoreExcl { .. } | Insn::ExclPair
-                                            )
-                                    }));
+                        // none, and a store-exclusive that exit reaches could
+                        // consume that reservation. Coverage of every such
+                        // store cannot be proved, so compare idioms are
+                        // left alone unconditionally (scope cut: CAS).
+                        let compare_exit = matches!(site.idiom, Idiom::CasCompare | Idiom::CasZero);
                         if interior_entered {
                             report.refused.push(RefusedSite {
                                 addr: addr(index),
                                 reason: Refusal::BranchIntoSequence,
                             });
-                        } else if exports_reservation {
+                        } else if compare_exit {
                             report.refused.push(RefusedSite {
                                 addr: addr(index),
-                                reason: Refusal::ExportsReservation,
+                                reason: Refusal::CompareExit,
                             });
                         } else {
                             report.patched.push(site);
@@ -748,30 +739,6 @@ mod tests {
             &[0x085ffc20, 0x08027c23, 0x35ffffc2],
             &[0x38a38020, 0x2a1f03e2, 0xd503201f],
         ),
-        (
-            "cas_compare_gcc_x_al",
-            Idiom::CasCompare,
-            &[0xc85ffc66, 0xeb0400df, 0x54000081, 0xc807fc62, 0x35ffff87],
-            &[0xaa0403e6, 0xc8e6fc62, 0xeb0400df, 0x54000061, 0x2a1f03e7],
-        ),
-        (
-            "cas_compare_llvm_status_is_destination",
-            Idiom::CasCompare,
-            &[0xc85ffd4c, 0xeb0b019f, 0x540000a1, 0xc80cfd48, 0x35ffff8c],
-            &[0xaa0b03ec, 0xc8ecfd48, 0xeb0b019f, 0x54000081, 0x2a1f03ec],
-        ),
-        (
-            "cas_compare_immediate_halfword",
-            Idiom::CasCompare,
-            &[0x485ffc20, 0x71001c1f, 0x54000081, 0x4802fc23, 0x35ffff82],
-            &[0x528000e0, 0x48e0fc23, 0x71001c1f, 0x54000061, 0x2a1f03e2],
-        ),
-        (
-            "cas_zero_x_al",
-            Idiom::CasZero,
-            &[0xc85ffc20, 0xb5000080, 0xc802fc23, 0x35ffffa2],
-            &[0xaa1f03e0, 0xc8e0fc23, 0xb5000060, 0x2a1f03e2],
-        ),
     ];
 
     /// Sequences that must survive untouched, with the reason they do.
@@ -805,6 +772,16 @@ mod tests {
             "memory_access_between_the_pair",
             &[0xc85ffc64, 0xf94000e6, 0xc805fc64, 0x35ffffa5],
             Refusal::Undecoded,
+        ),
+        (
+            "cas_compare_is_left_alone_compare_exit",
+            &[0xc85ffc66, 0xeb0400df, 0x54000081, 0xc807fc62, 0x35ffff87],
+            Refusal::CompareExit,
+        ),
+        (
+            "cas_zero_is_left_alone_compare_exit",
+            &[0xc85ffc20, 0xb5000080, 0xc802fc23, 0x35ffffa2],
+            Refusal::CompareExit,
         ),
     ];
 
@@ -882,7 +859,7 @@ mod tests {
 
     #[test]
     fn a_loop_inside_a_larger_region_is_found_at_its_own_address() {
-        let (_, _, original, expected) = CASES[8];
+        let (_, _, original, expected) = CASES[0];
         let mut words = vec![insn::NOP, insn::NOP];
         words.extend_from_slice(original);
         words.push(insn::NOP);
@@ -937,16 +914,12 @@ mod tests {
         let mut words = vec![0x5300_1c10];
         words.extend_from_slice(&loop_words);
         let report = plan(&words, BASE);
-        assert_eq!(report.refused, vec![], "{report:?}");
+        // The zero-extension proof passes, but a compare idiom is left
+        // alone as compare-exit in any case (scope cut: no CAS rewrite).
+        assert_eq!(report.patched, vec![], "{report:?}");
         assert_eq!(
-            report.patched[0].words,
-            vec![
-                0x2a10_03e0,
-                0x08e0_fc41,
-                0x6b10_001f,
-                0x5400_0061,
-                0x2a1f_03f1
-            ]
+            report.refused.first().map(|r| r.reason.clone()),
+            Some(Refusal::CompareExit)
         );
 
         // Without the zero extension the same loop stays refused.
@@ -972,11 +945,16 @@ mod tests {
         );
 
         // A branch to the zero extension itself is what the real helpers do,
-        // and it keeps the proof: the extension still runs.
+        // and it keeps the proof: the extension still runs, so the only
+        // refusal is compare-exit.
         let mut words = vec![0x1400_0001u32, 0x5300_1c10];
         words.extend_from_slice(&loop_words);
         let report = plan(&words, BASE);
-        assert_eq!(report.patched.len(), 1, "{report:?}");
+        assert_eq!(report.patched, vec![], "{report:?}");
+        assert_eq!(
+            report.refused.first().map(|r| r.reason.clone()),
+            Some(Refusal::CompareExit)
+        );
 
         // An outside branch to the head also refuses it when it comes from
         // another executable section.
@@ -1002,21 +980,25 @@ mod tests {
         // instruction): starting there executes a different instruction in
         // the replacement, whose first word materialises the expected value
         // and whose second is the CAS itself.
-        let (_, _, original, _) = CASES[8];
+        let original = [0xc85ffc66, 0xeb0400df, 0x54000081, 0xc807fc62, 0x35ffff87];
         let mut entries = HashSet::new();
         entries.insert(BASE + 4);
-        let report = plan_with_entries(original, BASE, &HashSet::new(), &entries);
+        let report = plan_with_entries(&original, BASE, &HashSet::new(), &entries);
         assert_eq!(report.patched, vec![], "{report:?}");
         assert_eq!(
             report.refused.first().map(|r| r.reason.clone()),
             Some(Refusal::BranchIntoSequence)
         );
-        // The same entry at the sequence's head is its ordinary start and
-        // does not by itself refuse a full-width compare.
+        // The same entry at the sequence's head is its ordinary start; a
+        // compare idiom is still left alone as compare-exit (scope cut).
         let mut entries = HashSet::new();
         entries.insert(BASE);
-        let report = plan_with_entries(original, BASE, &HashSet::new(), &entries);
-        assert_eq!(report.patched.len(), 1, "{report:?}");
+        let report = plan_with_entries(&original, BASE, &HashSet::new(), &entries);
+        assert_eq!(report.patched, vec![], "{report:?}");
+        assert_eq!(
+            report.refused.first().map(|r| r.reason.clone()),
+            Some(Refusal::CompareExit)
+        );
     }
 
     #[test]
@@ -1065,16 +1047,23 @@ mod tests {
             report
                 .refused
                 .iter()
-                .any(|r| r.reason == Refusal::ExportsReservation),
+                .any(|r| r.reason == Refusal::CompareExit),
             "{report:?}"
         );
-        // Without the outside store the same loop is rewritten as before.
+        // Without the outside store the same loop is also left alone:
+        // compare idioms are not rewritten at all (scope cut).
         let report = plan(&words[..4], BASE);
-        assert_eq!(report.patched.len(), 1, "{report:?}");
-        assert_eq!(report.patched[0].idiom, Idiom::CasZero);
+        assert_eq!(report.patched, vec![], "{report:?}");
+        assert!(
+            report
+                .refused
+                .iter()
+                .any(|r| r.reason == Refusal::CompareExit),
+            "{report:?}"
+        );
 
         // The compare form exports its reservation the same way.
-        let (_, _, original, _) = CASES[8];
+        let original = [0xc85ffc66, 0xeb0400df, 0x54000081, 0xc807fc62, 0x35ffff87];
         let mut words = original.to_vec();
         words.push(0xc807_fc62);
         let report = plan(&words, BASE);
@@ -1083,7 +1072,21 @@ mod tests {
             report
                 .refused
                 .iter()
-                .any(|r| r.reason == Refusal::ExportsReservation),
+                .any(|r| r.reason == Refusal::CompareExit),
+            "{report:?}"
+        );
+    }
+
+    #[test]
+    fn a_compare_loop_is_left_alone_even_with_no_other_store() {
+        let words = [0xc85f_fc40, 0xb500_0060, 0xc803_fc41, 0x35ff_ffa3];
+        let report = plan(&words, BASE);
+        assert_eq!(report.patched, vec![], "{report:?}");
+        assert!(
+            report
+                .refused
+                .iter()
+                .any(|r| r.reason == Refusal::CompareExit),
             "{report:?}"
         );
     }
@@ -1101,13 +1104,20 @@ mod tests {
             report
                 .refused
                 .iter()
-                .any(|r| r.reason == Refusal::ExportsReservation),
+                .any(|r| r.reason == Refusal::CompareExit),
             "{report:?}"
         );
-        // Told there is none, the same loop is rewritten as before.
+        // Told there is none, the same loop is still left alone.
         let report =
             plan_with_external_store(&words, BASE, &HashSet::new(), &HashSet::new(), false);
-        assert_eq!(report.patched.len(), 1, "{report:?}");
+        assert_eq!(report.patched, vec![], "{report:?}");
+        assert!(
+            report
+                .refused
+                .iter()
+                .any(|r| r.reason == Refusal::CompareExit),
+            "{report:?}"
+        );
     }
 
     #[test]

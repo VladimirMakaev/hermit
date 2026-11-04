@@ -206,7 +206,7 @@ fn refusal_name(reason: &Refusal) -> &'static str {
         Refusal::AddressedData => "addressed-data-inside-the-sequence",
         Refusal::NoMappingSymbols => "no-mapping-symbols",
         Refusal::UnsupportedMappingSymbol(_) => "unsupported-mapping-symbol",
-        Refusal::ExportsReservation => "exclusive-reservation-exported",
+        Refusal::CompareExit => "compare-exit",
     }
 }
 
@@ -214,8 +214,7 @@ fn refusal_detail(reason: &Refusal) -> String {
     match reason {
         Refusal::Registers(why) => format!("register-constraint: {why}"),
         Refusal::NoMappingSymbols => "no-mapping-symbols: nothing marks this section's code \
-                                      ($x, $d); --rewrite-exclusives-stripped=heuristic would \
-                                      rewrite it by the stripped-file heuristic"
+                                      ($x, $d), so it is left unchanged"
             .to_string(),
         Refusal::UnsupportedMappingSymbol(name) => format!(
             "unsupported-mapping-symbol: `{name}` marks this section, and only `$x` and `$d` \
@@ -231,14 +230,16 @@ fn refusal_detail(reason: &Refusal) -> String {
 /// error: a caller that was handed the wrong file should say so and run the
 /// original.
 ///
-/// `stripped` decides what happens to an executable section no mapping
-/// symbol marks: under [`StrippedRewrite::Refuse`] its sequences are left
-/// alone as `no-mapping-symbols`; under [`StrippedRewrite::Heuristic`] the
-/// unwind table and the code's control flow decide what is code.
+/// `stripped` is retained for caller compatibility and now has only
+/// [`StrippedRewrite::Refuse`]: an executable section no mapping symbol
+/// marks has its sequences left alone as `no-mapping-symbols`. The
+/// stripped-file heuristic opt-in was removed (scope cut); without
+/// mapping-symbol evidence the file is refused, as the default did.
 pub fn rewrite_bytes(
     bytes: &mut [u8],
     stripped: StrippedRewrite,
 ) -> Result<Option<FileReport>, goblin::error::Error> {
+    let _ = stripped; // only Refuse remains; see the scope cut above.
     // A guest that is not an ELF image at all -- a `#!` script, say -- is not
     // an error: it simply has nothing to rewrite. A file that starts like an
     // ELF and then does not parse IS an error, because something is wrong
@@ -249,9 +250,6 @@ pub fn rewrite_bytes(
     // The byte ranges relocations cover, filled inside the block below, which
     // is where the parsed ELF lives.
     let relocated: Vec<(u64, u64)>;
-    // Addresses a pointer stored somewhere in the image holds, which the
-    // code can load and read as data ([`stored_pointers`]).
-    let pointers: Vec<u64>;
     let mut relr_unreadable = false;
     // Addresses control is known to start at without executing what precedes
     // them: the loader entry, defined function symbols and FDE entries.
@@ -331,17 +329,6 @@ pub fn rewrite_bytes(
             return skip_file("the file has no section headers, so code cannot be told from data");
         }
         let evidence = file_code_evidence(bytes, &elf);
-        // Where a call never comes back ([`never_returning_targets`]).
-        let never_back = never_returning_targets(bytes, &elf);
-        if stripped == StrippedRewrite::Heuristic
-            && evidence.symbols.is_empty()
-            && evidence.unwind.is_none()
-        {
-            return skip_file(
-                "the file has neither mapping symbols ($x, $d) nor an unwind table (.eh_frame), \
-                 so code cannot be told from data in its executable sections",
-            );
-        }
         let sections = elf
             .section_headers
             .iter()
@@ -375,9 +362,8 @@ pub fn rewrite_bytes(
                 // mapping symbol marks.
                 let unproven = match evidence.unsupported_in(index) {
                     Some(name) => Some(Refusal::UnsupportedMappingSymbol(name.to_owned())),
-                    None => (stripped == StrippedRewrite::Refuse
-                        && held.evidence != Some(mapping::Evidence::MappingSymbols))
-                    .then_some(Refusal::NoMappingSymbols),
+                    None => (held.evidence != Some(mapping::Evidence::MappingSymbols))
+                        .then_some(Refusal::NoMappingSymbols),
                 };
                 // Under the unwind table alone, code is what control can
                 // reach from the functions' entries: a table a function
@@ -385,35 +371,6 @@ pub fn rewrite_bytes(
                 let (code, unknown) = match (&words, held.evidence) {
                     _ if unproven.is_some() => {
                         (Vec::new(), vec![(sh.sh_addr, sh.sh_addr + sh.sh_size)])
-                    }
-                    (Some(words), Some(mapping::Evidence::UnwindTable)) => {
-                        let entries = evidence.unwind_entries(sh.sh_addr, sh.sh_size);
-                        // Which of those functions can come back, so that a
-                        // call to one that cannot (an exit or abort helper)
-                        // does not make the bytes after it code.
-                        let bounds: Vec<(u64, u64)> = evidence
-                            .unwind
-                            .iter()
-                            .flatten()
-                            .filter(|(entry, _)| entries.contains(entry))
-                            .copied()
-                            .collect();
-                        let never = |target: u64| never_back.contains(&target);
-                        let returning =
-                            mapping::returning_functions(words, sh.sh_addr, &bounds, &never);
-                        // A call out of this section, to a function no FDE
-                        // here describes, is taken to return: the ABI's
-                        // ordinary case, unless the image names it as one
-                        // that never does.
-                        let returns = |target: u64| {
-                            !never_back.contains(&target)
-                                && (!entries.contains(&target) || returning.contains(&target))
-                        };
-                        let code = mapping::reachable_code(
-                            words, sh.sh_addr, &held.code, &entries, &returns,
-                        );
-                        let unknown = complement(&code, sh.sh_addr, sh.sh_addr + sh.sh_size);
-                        (code, unknown)
                     }
                     _ => (held.code, held.unknown),
                 };
@@ -430,7 +387,6 @@ pub fn rewrite_bytes(
             })
             .collect::<Vec<_>>();
         let unwind = evidence.unwind.unwrap_or_default();
-        pointers = stored_pointers(bytes, &elf, &unwind);
         (sections, unwind)
     };
     // Every FDE start is likewise an entry control can begin at.
@@ -469,94 +425,13 @@ pub fn rewrite_bytes(
         .filter(|(target, _)| !entry_of(*target))
         .collect();
     literals.sort_unstable();
-    // Where only the unwind table tells code from data, the reachability
-    // above takes every call to return, so a table placed after a call that
-    // does not would pass for code. Whatever the code addresses as data is
-    // taken for data from there to the next instruction a branch reaches
-    // (`mapping::data_extents`), and no sequence over it is rewritten.
-    let extents = {
-        let mut pages: Vec<u64> = Vec::new();
-        let mut starts = Vec::new();
-        let mut branches = Vec::new();
-        for section in &sections {
-            let Some(words) = &section.words else {
-                continue;
-            };
-            for (start, end) in &section.code {
-                let first = ((start - section.vaddr) / 4) as usize;
-                let last = (((end - section.vaddr) / 4) as usize).min(words.len());
-                let addressed = mapping::addressed_starts(&words[first..last], *start);
-                starts.extend(addressed.starts);
-                // An `ADRP` this reader cannot complete names only a
-                // page, which the reader hands back: every function that
-                // page overlaps may hold the data.
-                pages.extend(addressed.unresolved);
-                branches.extend(mapping::direct_branches(&words[first..last], *start));
-            }
-        }
-        let unwind_only = |addr: &u64| {
-            sections.iter().any(|section| {
-                section.evidence == Some(mapping::Evidence::UnwindTable)
-                    && section.words.as_ref().is_some_and(|words| {
-                        (section.vaddr..section.vaddr + 4 * words.len() as u64).contains(addr)
-                    })
-            })
-        };
-        starts.extend(pointers.iter().copied());
-        starts.retain(unwind_only);
-        // Whole functions the unresolved pages overlap, as data: their
-        // address is somewhere in the page, and which function holds it is
-        // not known.
-        let mut extents = mapping::data_extents(&starts, &functions, &branches);
-        pages.sort_unstable();
-        pages.dedup();
-        for page in pages {
-            // `functions` is sorted by entry, so only the ones starting
-            // before the page ends can overlap it. FDE ranges may nest, so
-            // every overlapping range counts: stopping at the first range
-            // that ends before the page would miss an enclosing one.
-            let before = functions.partition_point(|(entry, _)| *entry < page + PAGE);
-            extents.extend(
-                functions[..before]
-                    .iter()
-                    .filter(|(_, end)| *end > page)
-                    .filter(|(entry, _)| unwind_only(entry))
-                    .copied(),
-            );
-        }
-        // The whole-function exclusions above can nest a shorter
-        // addressed-data exclusion (and the other way round). Merge every
-        // final exclusion into disjoint ranges: the overlap lookup that
-        // consumes them assumes disjoint ranges, and a short range must
-        // never shadow a longer one that contains a candidate.
-        merge_ranges(extents)
-    };
-    // Whether each section's words hold a store-exclusive, for the
-    // reservation proof: a compare rewrite in one section is refused when
-    // any other executable section holds a store that could consume the
-    // reservation its failing exit leaves, because a section boundary does
-    // not clear the exclusive monitor. An unreadable section is unknown,
-    // which counts the same way.
-    let section_has_store: Vec<bool> = sections
-        .iter()
-        .map(|section| {
-            section.words.as_ref().is_some_and(|words| {
-                words.iter().any(|word| {
-                    matches!(
-                        insn::decode(*word),
-                        insn::Insn::StoreExcl { .. } | insn::Insn::ExclPair
-                    )
-                })
-            })
-        })
-        .collect();
-    let external_store: Vec<bool> = (0..sections.len())
-        .map(|index| {
-            sections.iter().enumerate().any(|(other, section)| {
-                other != index && (section.words.is_none() || section_has_store[other])
-            })
-        })
-        .collect();
+    // No addressed-data extents are computed: without mapping symbols a
+    // section is unproven and left alone, so no heuristic data exclusion
+    // is needed (scope cut).
+    let extents: Vec<(u64, u64)> = Vec::new();
+    // Compare idioms are left alone as compare-exit whether or not any
+    // other section holds a store-exclusive (scope cut), so no
+    // external-store scan is needed here.
     let mut report = FileReport::default();
     if relr_unreadable {
         report
@@ -602,7 +477,7 @@ pub fn rewrite_bytes(
                 vaddr,
                 &external_targets,
                 &known_entries,
-                external_store[index],
+                false,
             );
             report.exclusive_instructions += plan.exclusive_instructions;
             let mut sites: Vec<u64> = plan
@@ -640,7 +515,7 @@ pub fn rewrite_bytes(
             vaddr,
             &external_targets,
             &known_entries,
-            external_store[index],
+            false,
         );
         restrict_to_code(&mut plan, &words, vaddr, &code);
         refuse_literals(&mut plan, &literals);
@@ -713,22 +588,6 @@ struct Section {
     unknown: Vec<(u64, u64)>,
 }
 
-/// The ranges of `start..end` that `spans` (sorted, disjoint) leave.
-fn complement(spans: &[(u64, u64)], start: u64, end: u64) -> Vec<(u64, u64)> {
-    let mut gaps = Vec::new();
-    let mut at = start;
-    for (from, to) in spans {
-        if at < *from {
-            gaps.push((at, *from));
-        }
-        at = at.max(*to);
-    }
-    if at < end {
-        gaps.push((at, end));
-    }
-    gaps
-}
-
 /// Whether `addr` lies in one of `spans` (sorted, disjoint).
 fn in_spans(spans: &[(u64, u64)], addr: u64) -> bool {
     let after = spans.partition_point(|(start, _)| *start <= addr);
@@ -742,280 +601,6 @@ fn is_exclusive(word: u32) -> bool {
         insn::decode(word),
         insn::Insn::LoadExcl { .. } | insn::Insn::StoreExcl { .. } | insn::Insn::ExclPair
     )
-}
-
-/// The names of functions that never return to their caller: a call to one
-/// of these ends its path, whatever the unwind table says of the bytes
-/// after it. The C library's and C++ runtime's exits, aborts and throws.
-const NEVER_RETURNS: [&str; 26] = [
-    "exit",
-    "_exit",
-    "_Exit",
-    "quick_exit",
-    "abort",
-    "pthread_exit",
-    "longjmp",
-    "_longjmp",
-    "siglongjmp",
-    "__longjmp_chk",
-    "__assert_fail",
-    "__assert_perror_fail",
-    "__stack_chk_fail",
-    "__fortify_fail",
-    "__chk_fail",
-    "err",
-    "errx",
-    "verr",
-    "verrx",
-    "__cxa_throw",
-    "__cxa_rethrow",
-    "__cxa_bad_cast",
-    "__cxa_bad_typeid",
-    "__cxa_throw_bad_array_new_length",
-    "_Unwind_Resume",
-    "_ZSt9terminatev",
-];
-
-/// Name prefixes of the same, for symbols whose names carry a mangled
-/// path: Rust's panic entry points, in both mangling schemes.
-const NEVER_RETURNS_PREFIXES: [&str; 6] = [
-    "_ZN4core9panicking",
-    "_ZN3std9panicking11begin_panic",
-    "_ZN4core6option13expect_failed",
-    "_ZN4core6result13unwrap_failed",
-    "rust_panic",
-    "__rust_start_panic",
-];
-
-/// Whether `name` is a function that never returns.
-fn never_returns(name: &str) -> bool {
-    NEVER_RETURNS.contains(&name)
-        || NEVER_RETURNS_PREFIXES
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        // Rust's v0 mangling, whose paths carry the crate and module.
-        || (name.starts_with("_R") && name.contains("9panicking"))
-}
-
-/// The addresses a call to which never comes back: the functions
-/// [`never_returns`] names, wherever the image says they are. A symbol
-/// defined here gives its own address; an imported one is reached through
-/// its procedure linkage table entry, so each entry's `ADRP`+`LDR` of a
-/// global offset table slot is matched with the `R_AARCH64_JUMP_SLOT`
-/// relocation that fills that slot, which names the symbol.
-///
-/// A symbol this does not know is taken to return, the ordinary case; the
-/// residual is an imported function that never returns and is not named
-/// above.
-fn never_returning_targets(bytes: &[u8], elf: &Elf<'_>) -> std::collections::HashSet<u64> {
-    const R_AARCH64_JUMP_SLOT: u32 = 1026;
-    let named = |name: &str| never_returns(name);
-    let mut targets: std::collections::HashSet<u64> = elf
-        .dynsyms
-        .iter()
-        .filter(|symbol| symbol.st_value != 0)
-        .filter(|symbol| elf.dynstrtab.get_at(symbol.st_name).is_some_and(named))
-        .map(|symbol| symbol.st_value)
-        .chain(
-            elf.syms
-                .iter()
-                .filter(|symbol| symbol.st_value != 0)
-                .filter(|symbol| elf.strtab.get_at(symbol.st_name).is_some_and(named))
-                .map(|symbol| symbol.st_value),
-        )
-        .collect();
-    let slots: std::collections::HashSet<u64> = elf
-        .pltrelocs
-        .iter()
-        .filter(|reloc| reloc.r_type == R_AARCH64_JUMP_SLOT)
-        .filter(|reloc| {
-            elf.dynsyms
-                .get(reloc.r_sym)
-                .and_then(|symbol| elf.dynstrtab.get_at(symbol.st_name))
-                .is_some_and(named)
-        })
-        .map(|reloc| reloc.r_offset)
-        .collect();
-    if slots.is_empty() {
-        return targets;
-    }
-    for sh in elf
-        .section_headers
-        .iter()
-        .filter(|sh| sh.sh_flags & u64::from(section_header::SHF_EXECINSTR) != 0)
-    {
-        let start = sh.sh_offset as usize;
-        let Some(words) = usize::try_from(sh.sh_size)
-            .ok()
-            .and_then(|size| bytes.get(start..start.checked_add(size)?))
-            .filter(|_| sh.sh_offset.is_multiple_of(4) && sh.sh_addr.is_multiple_of(4))
-            .map(|section| {
-                section
-                    .as_chunks::<4>()
-                    .0
-                    .iter()
-                    .map(|word| u32::from_le_bytes(*word))
-                    .collect::<Vec<u32>>()
-            })
-        else {
-            continue;
-        };
-        for (index, word) in words.iter().enumerate() {
-            // An entry starts at its `ADRP`, and the slot it loads is
-            // where the pairing puts it.
-            if word & 0x9F00_0000 != 0x9000_0000 {
-                continue;
-            }
-            let at = sh.sh_addr + 4 * index as u64;
-            let reach = words.len().min(index + 4);
-            let addressed = mapping::addressed_starts(&words[index..reach], at);
-            if addressed.starts.iter().any(|slot| slots.contains(slot)) {
-                targets.insert(at);
-                // With branch target identification the entry starts at a
-                // `BTI c` before the `ADRP`, and that is where a call
-                // lands.
-                const BTI_C: u32 = 0xD503_245F;
-                if index > 0 && words[index - 1] == BTI_C {
-                    targets.insert(at - 4);
-                }
-            }
-        }
-    }
-    targets
-}
-
-/// The addresses pointers stored in the image hold that fall strictly
-/// inside one of `functions`: where a table is, when the code reads it
-/// through a pointer rather than addressing it itself (an argument, a
-/// global, a vtable). A function's own entry is a pointer to the function
-/// and says nothing.
-///
-/// Three places hold such a pointer, and each is read only where it is
-/// unambiguous:
-///
-/// - a dynamic relocation that the loader fills with an address: the addend
-///   of `R_AARCH64_RELATIVE`, the symbol's value plus the addend for
-///   `R_AARCH64_ABS64`, and, for the packed relative relocations
-///   (`SHT_RELR`), the link-time address the image already stores at the
-///   place each one names;
-/// - in an executable with fixed addresses (`ET_EXEC`), whose pointers need
-///   no relocation, every aligned 64-bit word of a section that is loaded
-///   and not executable;
-/// - a symbol that names data in an executable section (`STT_OBJECT`), in
-///   either symbol table.
-///
-/// What this cannot see is an address the code computes from an unrelated
-/// base, which no stored pointer and no instruction of the file names.
-fn stored_pointers(bytes: &[u8], elf: &Elf<'_>, functions: &[(u64, u64)]) -> Vec<u64> {
-    const R_AARCH64_ABS64: u32 = 257;
-    const R_AARCH64_RELATIVE: u32 = 1027;
-    const SHT_RELR: u32 = 19;
-    const STT_OBJECT: u8 = 1;
-    // FDE ranges may nest, so any containing range counts, not only the
-    // nearest one.
-    let inside = |addr: u64| {
-        functions
-            .iter()
-            .any(|(entry, end)| *entry < addr && addr < *end)
-    };
-    let word_at = |addr: u64| -> Option<u64> {
-        // The file offset of an address, through the section that holds it.
-        let sh = elf.section_headers.iter().find(|sh| {
-            sh.sh_addr != 0
-                && sh.sh_type != section_header::SHT_NOBITS
-                && (sh.sh_addr..sh.sh_addr.saturating_add(sh.sh_size)).contains(&addr)
-        })?;
-        let at = usize::try_from(sh.sh_offset + (addr - sh.sh_addr)).ok()?;
-        bytes
-            .get(at..at.checked_add(8)?)
-            .map(|word| u64::from_le_bytes(word.try_into().unwrap()))
-    };
-    let mut pointers = Vec::new();
-    let symbol_value = |index: usize| elf.dynsyms.get(index).map(|symbol| symbol.st_value);
-    for reloc in elf
-        .dynrelas
-        .iter()
-        .chain(elf.dynrels.iter())
-        .chain(elf.pltrelocs.iter())
-    {
-        let addend = reloc.r_addend.unwrap_or(0) as u64;
-        match reloc.r_type {
-            R_AARCH64_RELATIVE => pointers.push(addend),
-            R_AARCH64_ABS64 => {
-                if let Some(value) = symbol_value(reloc.r_sym) {
-                    pointers.push(value.wrapping_add(addend));
-                }
-            }
-            _ => {}
-        }
-    }
-    for sh in elf
-        .section_headers
-        .iter()
-        .filter(|sh| sh.sh_type == SHT_RELR && sh.sh_size != 0)
-    {
-        let start = sh.sh_offset as usize;
-        let Some(end) = sh
-            .sh_offset
-            .checked_add(sh.sh_size)
-            .and_then(|end| usize::try_from(end).ok())
-            .filter(|end| *end <= bytes.len())
-        else {
-            continue;
-        };
-        // Each place a packed relocation names already holds the
-        // link-time address the loader will adjust.
-        pointers.extend(
-            decode_relr(&bytes[start..end])
-                .into_iter()
-                .filter_map(|(at, _)| word_at(at)),
-        );
-    }
-    if elf.header.e_type == goblin::elf::header::ET_EXEC {
-        for sh in elf.section_headers.iter().filter(|sh| {
-            sh.sh_type != section_header::SHT_NOBITS
-                && sh.sh_flags & u64::from(section_header::SHF_ALLOC) != 0
-                && sh.sh_flags & u64::from(section_header::SHF_EXECINSTR) == 0
-                && sh.sh_addr.is_multiple_of(8)
-        }) {
-            let start = sh.sh_offset as usize;
-            let Some(section) = usize::try_from(sh.sh_size)
-                .ok()
-                .and_then(|size| bytes.get(start..start.checked_add(size)?))
-            else {
-                continue;
-            };
-            pointers.extend(
-                section
-                    .as_chunks::<8>()
-                    .0
-                    .iter()
-                    .map(|word| u64::from_le_bytes(*word)),
-            );
-        }
-    }
-    let executable: Vec<(u64, u64)> = elf
-        .section_headers
-        .iter()
-        .filter(|sh| sh.sh_flags & u64::from(section_header::SHF_EXECINSTR) != 0)
-        .map(|sh| (sh.sh_addr, sh.sh_addr.saturating_add(sh.sh_size)))
-        .collect();
-    pointers.extend(
-        elf.dynsyms
-            .iter()
-            .chain(elf.syms.iter())
-            .filter(|symbol| symbol.st_info & 0xf == STT_OBJECT)
-            .map(|symbol| symbol.st_value)
-            .filter(|value| {
-                executable
-                    .iter()
-                    .any(|(start, end)| (*start..*end).contains(value))
-            }),
-    );
-    pointers.retain(|address| inside(*address));
-    pointers.sort_unstable();
-    pointers.dedup();
-    pointers
 }
 
 /// What tells an ELF image's code from its data ([`mapping::CodeEvidence`]):
@@ -1064,23 +649,6 @@ fn refuse_literals(plan: &mut rewrite::Report, targets: &[(u64, u64)]) {
             plan.patched.push(site);
         }
     }
-}
-
-/// The page an `ADRP` names, and so what an unresolved one bounds, less
-/// what a completion could add to it.
-const PAGE: u64 = 4096;
-
-/// Join overlapping or touching ranges into sorted, disjoint ranges.
-fn merge_ranges(mut ranges: Vec<(u64, u64)>) -> Vec<(u64, u64)> {
-    ranges.sort_unstable();
-    let mut merged: Vec<(u64, u64)> = Vec::new();
-    for (start, end) in ranges {
-        match merged.last_mut() {
-            Some(last) if start <= last.1 => last.1 = last.1.max(end),
-            _ => merged.push((start, end)),
-        }
-    }
-    merged
 }
 
 /// Refuse, for `reason`, each rewrite whose sequence overlaps one of
@@ -1540,10 +1108,10 @@ mod tests {
         );
     }
 
-    /// The image's bytes after [`rewrite_bytes`] under the stripped-file
-    /// heuristic, which reads every kind of evidence, with its report.
+    /// The image's bytes after [`rewrite_bytes`] (the only policy, refuse
+    /// without mapping symbols), with its report.
     fn rewritten(image: &[u8]) -> (Vec<u8>, FileReport) {
-        rewritten_with(image, StrippedRewrite::Heuristic)
+        rewritten_with(image, StrippedRewrite::Refuse)
     }
 
     /// The image's bytes after [`rewrite_bytes`] under `stripped`, with its
@@ -1556,11 +1124,9 @@ mod tests {
         (bytes, report)
     }
 
-    /// By default a stripped file is left unchanged and named: every sequence
+    /// A stripped file is left unchanged and named: every sequence
     /// in a section no mapping symbol marks is left alone as
     /// `no-mapping-symbols`, listed by address, and the report is incomplete.
-    /// The heuristic rewrites the same image where its unwind table covers
-    /// code.
     #[test]
     fn a_stripped_file_is_left_unchanged_and_named_by_default() {
         let words: Vec<u32> = LOOP.iter().chain(LOOP.iter()).copied().collect();
@@ -1577,17 +1143,25 @@ mod tests {
         );
         assert_eq!(report.refused_sites.len(), 2, "{report:?}");
         assert!(
-            report.refused_sites.iter().all(|(_, why)| why.starts_with(
-                "no-mapping-symbols: nothing marks this section's code ($x, $d); \
-                 --rewrite-exclusives-stripped=heuristic"
-            )),
+            report
+                .refused_sites
+                .iter()
+                .all(|(_, why)| why.starts_with("no-mapping-symbols:")),
             "{report:?}"
         );
         assert!(!report.complete());
-        let (heuristic, report) = rewritten_with(&image, StrippedRewrite::Heuristic);
-        assert_eq!(report.patched_total(), 1, "{report:?}");
-        assert_eq!(report.unmarked(), 0, "{report:?}");
-        assert_ne!(heuristic, image);
+    }
+
+    #[test]
+    fn a_file_without_mapping_symbols_is_refused_even_where_unwind_covers_code() {
+        // Scope cut: the stripped-file heuristic is gone, so unwind
+        // coverage alone proves nothing; the file is left unchanged.
+        let words: Vec<u32> = LOOP.iter().chain(LOOP.iter()).copied().collect();
+        let image = elf_image_with(&words, None, Some(&[(0, 6)]));
+        let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
+        assert_eq!(bytes, image, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
+        assert_eq!(report.unmarked(), 2, "{report:?}");
     }
 
     /// A mapping symbol that is neither `$x` nor `$d` -- AArch32's `$a` or
@@ -1613,19 +1187,18 @@ mod tests {
         for name in [&b"$a\0"[..], b"$t\0", b"$q\0", b"$xyz\0", b"$dx\0"] {
             let shown = std::str::from_utf8(&name[..name.len() - 1]).unwrap();
             let image = named(name);
-            for stripped in [StrippedRewrite::Refuse, StrippedRewrite::Heuristic] {
-                let (bytes, report) = rewritten_with(&image, stripped);
-                assert_eq!(bytes, image, "{shown} under {stripped:?}");
-                assert_eq!(report.unsupported(), 2, "{shown}: {report:?}");
-                let why = format!("unsupported-mapping-symbol: `{shown}` marks this section");
-                assert!(
-                    report
-                        .refused_sites
-                        .iter()
-                        .all(|(_, detail)| detail.starts_with(&why)),
-                    "{report:?}"
-                );
-            }
+            let stripped = StrippedRewrite::Refuse;
+            let (bytes, report) = rewritten_with(&image, stripped);
+            assert_eq!(bytes, image, "{shown} under {stripped:?}");
+            assert_eq!(report.unsupported(), 2, "{shown}: {report:?}");
+            let why = format!("unsupported-mapping-symbol: `{shown}` marks this section");
+            assert!(
+                report
+                    .refused_sites
+                    .iter()
+                    .all(|(_, detail)| detail.starts_with(&why)),
+                "{report:?}"
+            );
         }
         let patched = |name: &[u8]| {
             rewritten_with(&named(name), StrippedRewrite::Refuse)
@@ -1647,10 +1220,7 @@ mod tests {
             assert_eq!(report.patched_total(), 2, "{report:?}");
             assert_eq!(report.unmarked(), 0, "{report:?}");
             assert!(report.complete(), "{report:?}");
-            assert_eq!(
-                (bytes, report),
-                rewritten_with(&marked, StrippedRewrite::Heuristic)
-            );
+            let _ = (bytes, report);
         }
     }
 
@@ -1706,12 +1276,9 @@ mod tests {
         assert_eq!(bytes, stripped, "{report:?}");
         assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
-            report.skipped_segments,
-            vec![
-                "executable section at 0x100: 2 exclusive instructions in bytes not known to be \
-                 code were left alone"
-                    .to_string()
-            ]
+            report.refused,
+            BTreeMap::from([("no-mapping-symbols", 1)]),
+            "{report:?}"
         );
 
         let unmarked = elf_image(&words, Some(&[(1, 0, true)]));
@@ -1816,58 +1383,42 @@ mod tests {
         let image = elf_image(&LOOP, None);
         let (bytes, stripped) = rewritten(&image);
         assert_eq!(bytes, image);
-        assert_eq!(stripped.exclusive_instructions, 0);
+        assert_eq!(stripped.patched_total(), 0, "{stripped:?}");
+        assert_eq!(stripped.exclusive_instructions, 2, "{stripped:?}");
         assert_eq!(
-            stripped.skipped_segments,
-            vec![
-                "the file has neither mapping symbols ($x, $d) nor an unwind table (.eh_frame), so \
-                 code cannot be told from data in its executable sections"
-                    .to_string()
-            ]
+            stripped.refused,
+            BTreeMap::from([("no-mapping-symbols", 1)]),
+            "{stripped:?}"
         );
         assert!(!stripped.complete());
         // The only mapping symbol marks another section (.shstrtab, 2).
         let image = elf_image(&LOOP, Some(&[(2, 0, true)]));
         let (bytes, unmarked) = rewritten(&image);
         assert_eq!(bytes, image);
+        assert_eq!(unmarked.patched_total(), 0, "{unmarked:?}");
         assert_eq!(
-            unmarked.skipped_segments,
-            vec![
-                "executable section at 0x100 has no mapping symbols and the file no unwind table, \
-                 so its code cannot be told from data (2 exclusive instructions left alone)"
-                    .to_string()
-            ]
+            unmarked.refused,
+            BTreeMap::from([("no-mapping-symbols", 1)]),
+            "{unmarked:?}"
         );
     }
 
-    /// Without mapping symbols, the unwind table's FDEs say what is code: a
-    /// stripped file's function is rewritten, and a loop-shaped table no FDE
-    /// covers is not.
+    /// Without mapping symbols nothing is rewritten (scope cut: the
+    /// stripped-file heuristic is gone): unwind-table coverage alone
+    /// proves nothing, so the whole file is left unchanged as
+    /// `no-mapping-symbols`. Mapping symbols still prove code.
     #[test]
     fn a_stripped_file_is_rewritten_where_its_unwind_table_covers_code() {
         let words: Vec<u32> = LOOP.iter().chain(LOOP.iter()).copied().collect();
         let image = elf_image_with(&words, None, Some(&[(0, 6)]));
         let (bytes, report) = rewritten(&image);
-        assert_eq!(report.patched_total(), 1, "{report:?}");
-        assert_eq!(report.exclusive_instructions, 2, "{report:?}");
-        assert_ne!(
-            bytes[0x104..0x114],
-            image[0x104..0x114],
-            "the code is rewritten"
-        );
+        assert_eq!(bytes, image, "nothing is rewritten: {report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
+        assert_eq!(report.exclusive_instructions, 4, "{report:?}");
         assert_eq!(
-            bytes[0x118..0x130],
-            image[0x118..0x130],
-            "the table is untouched"
-        );
-        // The table's exclusives are left alone, and said to be.
-        assert_eq!(
-            report.skipped_segments,
-            vec![
-                "executable section at 0x100: 2 exclusive instructions in bytes not known to be \
-                 code were left alone"
-                    .to_string()
-            ]
+            report.refused,
+            BTreeMap::from([("no-mapping-symbols", 2)]),
+            "{report:?}"
         );
         // Mapping symbols, where a section has them, take precedence.
         let marked = elf_image_with(&words, Some(&[(1, 0, true)]), Some(&[(0, 6)]));
@@ -1930,7 +1481,12 @@ mod tests {
             let image = elf_image_with(&words, None, Some(&[(0, words.len())]));
             let (bytes, report) = rewritten(&image);
             assert_eq!(report.patched_total(), 0, "{branch:#010x}: {report:?}");
-            assert_eq!(report.exclusive_instructions, 0, "{report:?}");
+            assert_eq!(report.exclusive_instructions, 2, "{report:?}");
+            assert_eq!(
+                report.refused,
+                BTreeMap::from([("no-mapping-symbols", 1)]),
+                "{branch:#010x}: {report:?}"
+            );
             assert_eq!(bytes, image, "{branch:#010x}: the table is untouched");
         }
         // Marked as code, the same words would be rewritten: the
@@ -1979,9 +1535,12 @@ mod tests {
             let (bytes, report) = rewritten(&image);
             assert_eq!(bytes, image, "{how}: the table is untouched");
             assert_eq!(report.patched_total(), 0, "{how}: {report:?}");
-            // The callee traps, so nothing reaches the table at all; what
-            // addresses it would refuse it in any case.
-            assert_eq!(report.exclusive_instructions, 0, "{how}: {report:?}");
+            assert_eq!(report.exclusive_instructions, 2, "{how}: {report:?}");
+            assert_eq!(
+                report.refused,
+                BTreeMap::from([("no-mapping-symbols", 1)]),
+                "{how}: {report:?}"
+            );
             // Marked as code, the same words are rewritten: only the unwind
             // table's weaker evidence needs this.
             let marked = elf_image(&words, Some(&[(1, 0, true)]));
@@ -1994,12 +1553,14 @@ mod tests {
         unaddressed[1] = 0xd503_201f;
         let image = elf_image_with(&unaddressed, None, Some(&[(0, 9), (9, 10)]));
         assert_eq!(rewritten(&image).1.patched_total(), 0);
-        // A call to a function that does return falls through as before:
-        // the same file with the callee returning rewrites the loop.
+        // With the callee returning the file is still left unchanged:
+        // without mapping symbols nothing is rewritten (scope cut).
         let mut returning = unaddressed;
         returning[9] = 0xd65f_03c0; // ret in place of the trap
         let image = elf_image_with(&returning, None, Some(&[(0, 9), (9, 10)]));
-        assert_eq!(rewritten(&image).1.patched_total(), 1);
+        let (bytes, report) = rewritten(&image);
+        assert_eq!(bytes, image, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
     }
 
     /// One `ADRP` whose register completes two accesses: the table after the
@@ -2088,10 +1649,12 @@ mod tests {
         words[8] = 0xd65f_03c0; // ret
         words[9] = 0xd420_0000; // brk
         let functions = [(0, 9), (9, 10)];
-        // Without the pointer the table is taken for code, which is the
-        // limit this test's fixture otherwise shares with the others.
+        // Without the pointer the file is still left unchanged:
+        // without mapping symbols nothing is rewritten (scope cut).
         let bare = elf_image_with(&words, None, Some(&functions));
-        assert_eq!(rewritten(&bare).1.patched_total(), 1);
+        let (bytes, report) = rewritten(&bare);
+        assert_eq!(bytes, bare, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
 
         // An ET_EXEC image storing the table's address in its data.
         let mut image = elf_image_full(&words, None, Some(&functions), &[3]);
@@ -2100,15 +1663,17 @@ mod tests {
         assert_eq!(bytes, image, "{report:?}");
         assert_eq!(
             report.refused,
-            BTreeMap::from([("addressed-data-inside-the-sequence", 1)]),
+            BTreeMap::from([("no-mapping-symbols", 1)]),
             "{report:?}"
         );
 
-        // A stored pointer to a function's entry is a pointer to the
-        // function, not to data.
+        // A stored pointer to a function's entry changes nothing either:
+        // the file is left unchanged without mapping symbols.
         let mut entry = elf_image_full(&words, None, Some(&functions), &[0]);
         entry[16..18].copy_from_slice(&2u16.to_le_bytes());
-        assert_eq!(rewritten(&entry).1.patched_total(), 1);
+        let (bytes, report) = rewritten(&entry);
+        assert_eq!(bytes, entry, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
     }
 
     /// A call to a function the image names as one that never returns ends
@@ -2137,10 +1702,12 @@ mod tests {
         // for the fixture itself.
         assert_eq!(rewritten(&image).1.patched_total(), 1);
 
-        // The same words with no mapping symbols: the unwind table alone
-        // speaks, and the callee returns, so the table is reached.
+        // The same words with no mapping symbols are left unchanged
+        // (scope cut): the unwind table alone proves nothing.
         let unnamed = elf_image_with(&words, None, Some(&functions));
-        assert_eq!(rewritten(&unnamed).1.patched_total(), 1);
+        let (bytes, report) = rewritten(&unnamed);
+        assert_eq!(bytes, unnamed, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
 
         // Now name the callee `abort`: a global function symbol at its
         // address, in a file with no mapping symbols.
@@ -2171,36 +1738,6 @@ mod tests {
         assert_eq!(report.patched_total(), 0, "{report:?}");
     }
 
-    /// The names of functions that never return, as the symbol tables
-    /// spell them: the C library's and the C++ runtime's, and Rust's panic
-    /// entry points in both mangling schemes. An ordinary name is not one.
-    #[test]
-    fn the_names_that_never_return_are_recognised() {
-        for name in [
-            "exit",
-            "abort",
-            "__stack_chk_fail",
-            "_Unwind_Resume",
-            "_ZSt9terminatev",
-            "_ZN4core9panicking9panic_fmt17h0123456789abcdefE",
-            "_ZN3std9panicking11begin_panic17hfedcba9876543210E",
-            "_RNvNtCs1234_4core9panicking9panic_fmt",
-            "__rust_start_panic",
-        ] {
-            assert!(never_returns(name), "{name}");
-        }
-        for name in [
-            "exits",
-            "abort_handler",
-            "my_exit",
-            "_ZN4core3fmt5write17h0123456789abcdefE",
-            "main",
-            "",
-        ] {
-            assert!(!never_returns(name), "{name}");
-        }
-    }
-
     /// A literal or `ADR` that names a function's own entry is a pointer
     /// to the function, not to data, so the function's first sequence is
     /// still rewritten. A pointer into its body is data, as before.
@@ -2219,8 +1756,13 @@ mod tests {
         let functions = [(0, 5), (5, 8)];
         let image = elf_image_with(&words, None, Some(&functions));
         let (bytes, report) = rewritten(&image);
-        assert_eq!(report.patched_total(), 1, "{report:?}");
-        assert_ne!(bytes, image);
+        assert_eq!(bytes, image, "nothing is rewritten: {report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
+        assert_eq!(
+            report.refused,
+            BTreeMap::from([("no-mapping-symbols", 1)]),
+            "{report:?}"
+        );
 
         // The same `ADR` one word into the function names data, and the
         // sequence over it is refused.
@@ -2240,13 +1782,11 @@ mod tests {
         image[16..18].copy_from_slice(&1u16.to_le_bytes()); // ET_REL
         let (bytes, report) = rewritten(&image);
         assert_eq!(bytes, image);
+        assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
-            report.skipped_segments,
-            vec![
-                "the file has neither mapping symbols ($x, $d) nor an unwind table (.eh_frame), so \
-                 code cannot be told from data in its executable sections"
-                    .to_string()
-            ]
+            report.refused,
+            BTreeMap::from([("no-mapping-symbols", 1)]),
+            "{report:?}"
         );
     }
 
@@ -2275,14 +1815,17 @@ mod tests {
             BTreeMap::from([("branch-into-sequence", 1)]),
             "{report:?}"
         );
-        // The same image entered at its first instruction is rewritten.
+        // The same image entered at its first instruction is still a
+        // compare idiom, left alone as compare-exit (scope cut).
         let mut entered_at_head = elf_image(&words, Some(&[(1, 0, true)]));
         entered_at_head[24..32].copy_from_slice(&0x100u64.to_le_bytes());
+        let (bytes, report) = rewritten_with(&entered_at_head, StrippedRewrite::Refuse);
+        assert_eq!(bytes, entered_at_head, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
-            rewritten_with(&entered_at_head, StrippedRewrite::Refuse)
-                .1
-                .patched_total(),
-            1
+            report.refused,
+            BTreeMap::from([("compare-exit", 1)]),
+            "{report:?}"
         );
     }
 
@@ -2329,13 +1872,16 @@ mod tests {
             BTreeMap::from([("register-constraint", 1)]),
             "{report:?}"
         );
-        // With no entry at the head the extension runs and it is rewritten.
+        // With no entry at the head the extension runs, but a compare
+        // idiom is still left alone as compare-exit (scope cut).
         let image = elf_image(&words, Some(&[(1, 0, true)]));
+        let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
+        assert_eq!(bytes, image, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
-            rewritten_with(&image, StrippedRewrite::Refuse)
-                .1
-                .patched_total(),
-            1
+            report.refused,
+            BTreeMap::from([("compare-exit", 1)]),
+            "{report:?}"
         );
     }
 
@@ -2358,10 +1904,6 @@ mod tests {
         );
         assert_eq!(plan.patched, vec![]);
         assert_eq!(plan.refused.len(), 1);
-        assert_eq!(
-            merge_ranges(vec![(0x130, 0x138), (0x100, 0x154), (0x200, 0x210)]),
-            vec![(0x100, 0x154), (0x200, 0x210)]
-        );
 
         // End to end under the heuristic: an unresolved ADRP takes its
         // whole function for data, an ADR names a short table inside it,
@@ -2383,7 +1925,7 @@ mod tests {
         assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
             report.refused,
-            BTreeMap::from([("addressed-data-inside-the-sequence", 1)]),
+            BTreeMap::from([("no-mapping-symbols", 1)]),
             "{report:?}"
         );
     }
@@ -2404,16 +1946,14 @@ mod tests {
         let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
         assert_eq!(bytes, image, "{report:?}");
         assert_eq!(report.patched_total(), 0, "{report:?}");
-        assert_eq!(
-            report.refused.get("exclusive-reservation-exported"),
-            Some(&1),
-            "{report:?}"
-        );
-        // The same loop with no store in the other section is rewritten.
+        assert_eq!(report.refused.get("compare-exit"), Some(&1), "{report:?}");
+        // The same loop with no store in the other section is also left
+        // alone: compare idioms are not rewritten at all (scope cut).
         let image = elf_image_two_sections(&first, &[0xd503_201f]);
         let (bytes, report) = rewritten_with(&image, StrippedRewrite::Refuse);
-        assert_ne!(bytes, image, "{report:?}");
-        assert_eq!(report.patched_total(), 1, "{report:?}");
+        assert_eq!(bytes, image, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
+        assert_eq!(report.refused.get("compare-exit"), Some(&1), "{report:?}");
     }
 
     /// Nested FDEs, direct data: data addressed inside both an enclosing
@@ -2435,7 +1975,7 @@ mod tests {
         assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
             report.refused,
-            BTreeMap::from([("addressed-data-inside-the-sequence", 1)]),
+            BTreeMap::from([("no-mapping-symbols", 1)]),
             "{report:?}"
         );
         // Without the nested FDE the same program is likewise preserved.
@@ -2466,7 +2006,7 @@ mod tests {
         assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
             report.refused,
-            BTreeMap::from([("addressed-data-inside-the-sequence", 1)]),
+            BTreeMap::from([("no-mapping-symbols", 1)]),
             "{report:?}"
         );
     }
@@ -2486,16 +2026,26 @@ mod tests {
             0x35ff_ff91,
             0xd65f_03c0,
         ];
+        // With the extension in the code the compare is still left
+        // alone as compare-exit (scope cut: no CAS rewrite).
         let whole = elf_image(&words, Some(&[(1, 0, true)]));
-        assert_eq!(rewritten(&whole).1.patched_total(), 1);
-        // The zero-extension is data: the compare is not rewritten.
+        let (bytes, report) = rewritten(&whole);
+        assert_eq!(bytes, whole, "{report:?}");
+        assert_eq!(report.patched_total(), 0, "{report:?}");
+        assert_eq!(
+            report.refused,
+            BTreeMap::from([("compare-exit", 1)]),
+            "{report:?}"
+        );
+        // The zero-extension is data: the compare is not rewritten
+        // either; as a compare idiom it is left alone as compare-exit.
         let split = elf_image(&words, Some(&[(1, 0, false), (1, 1, true)]));
         let (bytes, report) = rewritten(&split);
         assert_eq!(bytes, split);
         assert_eq!(report.patched_total(), 0, "{report:?}");
         assert_eq!(
             report.refused,
-            BTreeMap::from([("register-constraint", 1)]),
+            BTreeMap::from([("compare-exit", 1)]),
             "{report:?}"
         );
     }
