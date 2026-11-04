@@ -51,7 +51,10 @@ pub mod rewrite;
 /// or the address held where the scan stops, every executable byte.
 /// 8: a UDF #imm16 word, which traps and never branches, no longer refuses
 /// the image. 9: nor does a word of the SVE encodings, which hold no branch.
-pub const REWRITE_FORMAT_VERSION: u32 = 9;
+/// 10: a read-modify-write loop whose ALU instruction sets flags a later
+/// branch reads (`SUBS` in Rust std's `Arc` drop) is rewritten as an LSE
+/// atomic followed by that instruction on the value the atomic returns.
+pub const REWRITE_FORMAT_VERSION: u32 = 10;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
