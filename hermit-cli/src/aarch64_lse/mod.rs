@@ -41,8 +41,8 @@ pub use detcore::aarch64_lse::rewrite;
 /// loader's entry, a defined function symbol or an FDE start) points into
 /// is refused, as is a sub-word compare whose head is one. 5: a UDF
 /// #imm16 word, which traps and never branches, no longer refuses the
-/// image.
-pub const REWRITE_FORMAT_VERSION: u32 = 5;
+/// image. 6: nor does a word of the SVE encodings, which hold no branch.
+pub const REWRITE_FORMAT_VERSION: u32 = 6;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
