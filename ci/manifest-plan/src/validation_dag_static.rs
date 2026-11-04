@@ -1986,7 +1986,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The aarch64 exclusive-loop rewrite (#4735, with the refusals drain/4735
     // adds): 74 hermit-run units; and the direct-entry decoding, the
     // fail-closed allow-list and its UDF exemption on top: 8. 1334, listed.
-    ("test.hermit_unit", 1334),
+    // And the SVE encodings' unit: 1335, listed.
+    ("test.hermit_unit", 1335),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6302,7 +6303,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The split retains nine additional core identities: 1329 + 9 = 1338.
     // Train 5 recount (same growth as test.hermit_unit), composed on measured main: 1206 + 1 = 1207.
     // The same 82 exclusive-loop units as test.hermit_unit: 1328, listed.
-    ("test.hermit_unit_on_host", 1328),
+    // And the same SVE unit: 1329, listed.
+    ("test.hermit_unit_on_host", 1329),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.

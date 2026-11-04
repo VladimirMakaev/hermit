@@ -43,8 +43,8 @@ pub mod rewrite;
 /// that may be a direct branch with an unknown target refuses every
 /// rewrite in the image. 8: such a word is any word outside a positive
 /// allow-list of classes. 9: except UDF #imm16, which traps and never
-/// branches.
-pub const REWRITE_FORMAT_VERSION: u32 = 9;
+/// branches. 10: and except the SVE encodings, which hold no branch.
+pub const REWRITE_FORMAT_VERSION: u32 = 10;
 
 /// Whether this host executes the FEAT_LSE atomics the rewrite emits.
 ///
