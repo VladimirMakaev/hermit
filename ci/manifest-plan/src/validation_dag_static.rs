@@ -1991,7 +1991,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The aarch64 rewriter's code/data proof on main (F1): six hermit-run
     // units: 1260, listed.
     // And the stale trial-overlay unit: 1261, listed.
-    ("test.hermit_unit", 1261),
+    // And the unscanned-mapping retry-line unit: 1262, listed.
+    ("test.hermit_unit", 1262),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -6349,7 +6350,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // Train 5 recount (same growth as test.hermit_unit), composed on measured main: 1206 + 1 = 1207.
     // The same six hermit-run units: 1254, listed.
     // And the same stale trial-overlay unit: 1255, listed.
-    ("test.hermit_unit_on_host", 1255),
+    // And the same retry-line unit: 1256, listed.
+    ("test.hermit_unit_on_host", 1256),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
