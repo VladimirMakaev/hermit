@@ -3295,7 +3295,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the in-memory rewrite's unproven-file units: 3543, listed.
     // The UDF #imm16 exemption's two units: 3545, listed.
     // And the SVE encodings' unit: 3546, listed.
-    ("test.detcore_unit", 3546),
+    // And the flag-setting and compare-loop naming units: 3548, listed.
+    ("test.detcore_unit", 3548),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5927,7 +5928,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two unproven-file units: 3543, listed.
     // The same two UDF units: 3545, listed.
     // And the same SVE unit: 3546, listed.
-    ("test.detcore_unit_on_host", 3546),
+    // And the same two units: 3548, listed.
+    ("test.detcore_unit_on_host", 3548),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
