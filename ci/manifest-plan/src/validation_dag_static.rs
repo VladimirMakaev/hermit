@@ -1988,7 +1988,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1239 + 10 = 1249, measured by nextest list.
     // The aarch64 rewriter's code/data proof on main (F1): six hermit-run
     // units: 1260, listed.
-    ("test.hermit_unit", 1260),
+    // And the stale trial-overlay unit: 1261, listed.
+    ("test.hermit_unit", 1261),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -3288,7 +3289,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // nextest count.
     // The aarch64 rewriter's code/data proof on main (F1): forty-three
     // detcore units: 3535, listed.
-    ("test.detcore_unit", 3535),
+    // And six known-entry and overlap units: 3541, listed.
+    ("test.detcore_unit", 3541),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5915,7 +5917,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same unit (same growth as test.detcore_unit, PR #4926): 3469 + 1 = 3470.
     // PR #4751: the same twelve units (same growth as test.detcore_unit): 3482.
     // The same forty-three detcore units: 3535, listed.
-    ("test.detcore_unit_on_host", 3535),
+    // And the same six units: 3541, listed.
+    ("test.detcore_unit_on_host", 3541),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
@@ -6334,7 +6337,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // The split retains nine additional core identities: 1329 + 9 = 1338.
     // Train 5 recount (same growth as test.hermit_unit), composed on measured main: 1206 + 1 = 1207.
     // The same six hermit-run units: 1254, listed.
-    ("test.hermit_unit_on_host", 1254),
+    // And the same stale trial-overlay unit: 1255, listed.
+    ("test.hermit_unit_on_host", 1255),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
