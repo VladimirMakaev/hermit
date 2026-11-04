@@ -860,36 +860,39 @@ async fn timer_settime_after_the_timers_thread_number_is_reused_is_esrch() {
     let (tool, mut guest, _) = setup();
     let sibling_timer = create_timer(&tool, &mut guest, thread_clock(SIBLING, 2)).await;
     let own_timer = create_timer(&tool, &mut guest, thread_clock(CALLER, 2)).await;
-    let arm = |id: i32, nanos: i64| {
-        let value = libc::itimerspec {
-            it_interval: libc::timespec {
-                tv_sec: 0,
-                tv_nsec: 0,
-            },
-            it_value: libc::timespec {
-                tv_sec: 0,
-                tv_nsec: nanos,
-            },
-        };
+    // The handler reads the specification through the call's address, so
+    // each one is a local of the caller that outlives the awaited handler.
+    let spec = |nanos: i64| libc::itimerspec {
+        it_interval: libc::timespec {
+            tv_sec: 0,
+            tv_nsec: 0,
+        },
+        it_value: libc::timespec {
+            tv_sec: 0,
+            tv_nsec: nanos,
+        },
+    };
+    let arm = |id: i32, value: &libc::itimerspec| {
         TimerSettime::new()
             .with_timerid(id)
             .with_flags(libc::TIMER_ABSTIME)
             .with_new_value(Some(
-                Addr::from_ptr(&value as *const libc::itimerspec).unwrap(),
+                Addr::from_ptr(value as *const libc::itimerspec).unwrap(),
             ))
             .with_old_value(None)
     };
+    let (fire, disarm) = (spec(1), spec(0));
     // Both timers arm against their original tasks (a passed absolute
     // expiration fires at once), then disarm.
     for id in [sibling_timer, own_timer] {
         assert_eq!(
-            tool.handle_timer_settime(&mut guest, arm(id, 1))
+            tool.handle_timer_settime(&mut guest, arm(id, &fire))
                 .await
                 .unwrap(),
             0
         );
         assert_eq!(
-            tool.handle_timer_settime(&mut guest, arm(id, 0))
+            tool.handle_timer_settime(&mut guest, arm(id, &disarm))
                 .await
                 .unwrap(),
             0
@@ -901,12 +904,15 @@ async fn timer_settime_after_the_timers_thread_number_is_reused_is_esrch() {
     guest.incarnations.lock().unwrap().insert(CALLER, 2);
     for id in [sibling_timer, own_timer] {
         assert_eq!(
-            errno(tool.handle_timer_settime(&mut guest, arm(id, 1)).await),
+            errno(tool.handle_timer_settime(&mut guest, arm(id, &fire)).await),
             Errno::ESRCH,
             "{id}: the old timer must not bind to the new task"
         );
         assert_eq!(
-            errno(tool.handle_timer_settime(&mut guest, arm(id, 0)).await),
+            errno(
+                tool.handle_timer_settime(&mut guest, arm(id, &disarm))
+                    .await
+            ),
             Errno::ESRCH,
             "{id}: disarming the old timer is ESRCH too"
         );
@@ -915,7 +921,7 @@ async fn timer_settime_after_the_timers_thread_number_is_reused_is_esrch() {
     for clock in [thread_clock(SIBLING, 2), thread_clock(CALLER, 2)] {
         let id = create_timer(&tool, &mut guest, clock).await;
         assert_eq!(
-            tool.handle_timer_settime(&mut guest, arm(id, 1))
+            tool.handle_timer_settime(&mut guest, arm(id, &fire))
                 .await
                 .unwrap(),
             0,
