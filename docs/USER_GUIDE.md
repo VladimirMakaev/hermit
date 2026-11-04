@@ -1097,7 +1097,11 @@ found only at a short timeslice often shows without chaos at that timeslice
 too, and then the search continues at 200 ms instead
 (`--continuation-timeslice`). The report shows the stack of the thread the
 failing schedule runs at that event and of the thread that runs there
-otherwise. When both continuations run the same thread there, the decision is
+otherwise. Each stack is taken where the trial's replay consumes the recorded
+event at that schedule position, so a trial that makes more or fewer polling
+retries before it than the recording did still shows that event's stack; a
+position the replay never reaches yields no stack, and the trial reports it as
+missed. When both continuations run the same thread there, the decision is
 how long that thread runs: the report then shows its stack, and the stacks of
 the threads that run after it with and without the event:
 
