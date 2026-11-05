@@ -59,9 +59,10 @@ struct NextestInventorySuite {
     testcases: BTreeMap<String, NextestInventoryCase>,
 }
 
+/// A listed testcase. Its `ignored` flag is not read: `filter-match` already
+/// says whether the run selects it (`selected_inventory`).
 #[derive(Deserialize)]
 struct NextestInventoryCase {
-    ignored: bool,
     #[serde(rename = "filter-match")]
     filter_match: NextestFilterMatch,
 }
@@ -71,7 +72,13 @@ struct NextestFilterMatch {
     status: String,
 }
 
-/// The same selected identities used by Nextest, without display-name joins.
+/// The same selected identities used by Nextest, without display-name joins:
+/// every testcase whose filter-match status is `matches`, the population
+/// [`listed_count`] counts. The `ignored` flag does not subtract. `nextest
+/// list` reports an ignored testcase as `matches` exactly when the run's own
+/// arguments run it (`--run-ignored`, or libtest's `--ignored` after `--`), and
+/// as a `mismatch` with reason `ignored` otherwise, so a node that runs ignored
+/// tests gets its exact-identity CPU allowances for them too.
 pub fn selected_inventory(bytes: &[u8]) -> Result<Vec<AttemptIdentity>, String> {
     BinaryMap::from_nextest_inventory(bytes)?;
     let inventory: NextestInventory =
@@ -80,13 +87,13 @@ pub fn selected_inventory(bytes: &[u8]) -> Result<Vec<AttemptIdentity>, String> 
     for suite in inventory.rust_suites.into_values() {
         for (test, case) in suite.testcases {
             match case.filter_match.status.as_str() {
-                "matches" if !case.ignored => identities.push(AttemptIdentity {
+                "matches" => identities.push(AttemptIdentity {
                     package: suite.package.clone(),
                     binary: suite.binary.clone(),
                     test,
                     attempt: 1,
                 }),
-                "matches" | "mismatch" => {}
+                "mismatch" => {}
                 status => return Err(format!("unknown Nextest filter status {status:?}")),
             }
         }
@@ -962,4 +969,83 @@ pub fn write_binary_map_atomic(path: &Path, map: &BinaryMap) -> Result<(), Strin
 
 pub fn write_report_atomic(path: &Path, report: &CpuReport) -> Result<(), String> {
     write_replace_atomic(path, report, "nextest CPU report")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An inventory of hermit-run's analyze binary with these testcases.
+    fn analyze_inventory(testcases: &str) -> Vec<u8> {
+        format!(
+            r#"{{"rust-suites": {{"hermit-run::analyze": {{
+                "package-name": "hermit-run",
+                "binary-id": "hermit-run::analyze",
+                "binary-name": "analyze",
+                "kind": "test",
+                "binary-path": "/fixture/target/validate/deps/analyze-a700f1965e05927a",
+                "testcases": {{{testcases}}}
+            }}}}}}"#
+        )
+        .into_bytes()
+    }
+
+    fn selected_tests(bytes: &[u8]) -> Vec<String> {
+        selected_inventory(bytes)
+            .unwrap()
+            .into_iter()
+            .map(|identity| identity.test)
+            .collect()
+    }
+
+    /// The testcases as `cargo nextest list --message-format json -p hermit-run
+    /// --features liteinst --test analyze -E 'test(=analyze_racewrite_nostdlib) |
+    /// test(=analyze_checks_the_race_candidates_and_says_what_each_edit_moved)'`
+    /// reported them, all four ignored tests: with `-- --ignored` (the PMU
+    /// analyze node's form; `--run-ignored only` reported the same), the two the
+    /// filter names are `matches` and kept; one the filter does not name is a
+    /// `mismatch` and dropped; and without a run-ignored mode every ignored test
+    /// is a `mismatch` with reason `ignored`, dropped. Before, every ignored
+    /// testcase was dropped, so a node's run of ignored tests could carry no
+    /// exact-identity allowance.
+    #[test]
+    fn selection_keeps_an_ignored_testcase_exactly_when_the_run_selects_it() {
+        let run_ignored = analyze_inventory(
+            r#""analyze_checks_the_race_candidates_and_says_what_each_edit_moved":
+                    {"ignored": true, "filter-match": {"status": "matches"}},
+                "analyze_hello_race":
+                    {"ignored": true, "filter-match": {"status": "mismatch", "reason": "expression"}},
+                "analyze_racewrite_nostdlib":
+                    {"ignored": true, "filter-match": {"status": "matches"}}"#,
+        );
+        assert_eq!(
+            selected_tests(&run_ignored),
+            [
+                "analyze_checks_the_race_candidates_and_says_what_each_edit_moved",
+                "analyze_racewrite_nostdlib",
+            ]
+        );
+        assert_eq!(listed_count(&run_ignored).unwrap(), 2);
+
+        let default_mode = analyze_inventory(
+            r#""analyze_checks_the_race_candidates_and_says_what_each_edit_moved":
+                    {"ignored": true, "filter-match": {"status": "mismatch", "reason": "ignored"}},
+                "analyze_racewrite_nostdlib":
+                    {"ignored": true, "filter-match": {"status": "mismatch", "reason": "ignored"}},
+                "an_ordinary_test":
+                    {"ignored": false, "filter-match": {"status": "matches"}}"#,
+        );
+        assert_eq!(selected_tests(&default_mode), ["an_ordinary_test"]);
+        assert_eq!(listed_count(&default_mode).unwrap(), 1);
+
+        let unknown = analyze_inventory(
+            r#""analyze_racewrite_nostdlib":
+                    {"ignored": true, "filter-match": {"status": "surprise"}}"#,
+        );
+        assert!(
+            selected_inventory(&unknown)
+                .unwrap_err()
+                .contains("unknown Nextest filter status")
+        );
+    }
 }

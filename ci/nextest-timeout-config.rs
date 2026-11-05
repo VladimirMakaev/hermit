@@ -1757,6 +1757,14 @@ fn main() -> ExitCode {
 mod tests {
     use super::*;
 
+    /// An ignored testcase the run does not select, as `nextest list` reports
+    /// it without a run-ignored mode. An ignored testcase the run selects
+    /// (`--run-ignored`, or `-- --ignored`) is `matches`, and is selected
+    /// like any other (`nextest_cpu::selected_inventory`).
+    fn unselected_ignored() -> serde_json::Value {
+        serde_json::json!({"ignored": true, "filter-match": {"status": "mismatch", "reason": "ignored"}})
+    }
+
     fn detcore_allocator_identity() -> nextest_cpu::AttemptIdentity {
         MEASURED_CPU_ALLOWANCES[0].identity()
     }
@@ -1895,7 +1903,7 @@ mod tests {
             "fixture": {"package-name":"fixture", "binary-id":"fixture", "binary-name":"fixture", "kind":"lib", "binary-path":"/fixture/lib", "testcases": {
                 "same name,(special)": {"ignored":false,"filter-match":{"status":"matches"}},
                 "unresolved": {"ignored":false,"filter-match":{"status":"matches"}},
-                "ignored": {"ignored":true,"filter-match":{"status":"matches"}},
+                "ignored": {"ignored":true,"filter-match":{"status":"mismatch","reason":"ignored"}},
                 "filtered": {"ignored":false,"filter-match":{"status":"mismatch"}}
             }},
             "fixture::bin/other": {"package-name":"fixture", "binary-id":"fixture::bin/other", "binary-name":"other", "kind":"bin", "binary-path":"/fixture/bin", "testcases": {
@@ -2506,7 +2514,7 @@ mod tests {
                         (format!("{}_extra", target.test)): case
                     });
                 }
-                3 => suite["testcases"][&target.test]["ignored"] = true.into(),
+                3 => suite["testcases"][&target.test] = unselected_ignored(),
                 4 => {
                     suite["testcases"][&target.test]["filter-match"]["status"] = "mismatch".into();
                 }
@@ -2763,7 +2771,7 @@ mod tests {
                 let mut inventory = measured_inventory(std::slice::from_ref(&target));
                 let cases = &mut inventory["rust-suites"][binary]["testcases"];
                 match state {
-                    0 => cases[test]["ignored"] = true.into(),
+                    0 => cases[test] = unselected_ignored(),
                     1 => cases[test]["filter-match"]["status"] = "mismatch".into(),
                     _ => cases.as_object_mut().unwrap().clear(),
                 }
@@ -3409,7 +3417,7 @@ mod tests {
                 let case =
                     &mut inventory["rust-suites"][&identity.binary]["testcases"][&identity.test];
                 match state {
-                    0 => case["ignored"] = true.into(),
+                    0 => *case = unselected_ignored(),
                     1 => case["filter-match"]["status"] = "mismatch".into(),
                     _ => {}
                 }
@@ -3746,7 +3754,7 @@ mod tests {
             let mut inventory = allocator_inventory(&target);
             let cases = &mut inventory["rust-suites"][&target.binary]["testcases"];
             match state {
-                0 => cases[&target.test]["ignored"] = true.into(),
+                0 => cases[&target.test] = unselected_ignored(),
                 1 => cases[&target.test]["filter-match"]["status"] = "mismatch".into(),
                 _ => {
                     cases.as_object_mut().unwrap().clear();
