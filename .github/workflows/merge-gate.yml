@@ -351,8 +351,9 @@ jobs:
           # self-hosted runner, so checking out PR-controlled code and executing
           # scripts/core-review-protocol-lint.sh from it would run arbitrary PR
           # code on our infrastructure. The linter reads only environment inputs
-          # (PR_LABELS/PR_BODY/PR_IS_KVM/PR_NUMBER/PR_HEAD_SHA and
-          # PR_COMMENTS_FILE or PR_COMMENTS_JSON), so main's copy is the correct
+          # (PR_LABELS/PR_IS_KVM/PR_NUMBER/PR_HEAD_SHA, PR_BODY_FILE or PR_BODY,
+          # and PR_COMMENTS_FILE or PR_COMMENTS_JSON) and the files they name,
+          # so main's copy is the correct
           # and safe version to run — and a PR cannot weaken its own gate by
           # editing the lint script.
           ref: main
@@ -427,7 +428,10 @@ jobs:
 
             pr_json="$(gh api "repos/${REPO}/pulls/${pr_number}")"
             labels="$(jq -r '.labels[].name' <<< "$pr_json")"
-            body="$(jq -r '.body // ""' <<< "$pr_json")"
+            # The body goes to a FILE too, for the same 128 KiB reason as the
+            # comments below: PR #4845's description is 145,736 characters.
+            pr_body_file="$(mktemp)"
+            jq -r '.body // ""' <<< "$pr_json" > "$pr_body_file"
 
             # The exact head the reviews must bind, read from the PR itself
             # rather than from the event payload, so a merge_group entry and a
@@ -477,7 +481,7 @@ jobs:
               is_kvm=false
             fi
 
-            if PR_LABELS="$labels" PR_BODY="$body" PR_IS_KVM="$is_kvm" \
+            if PR_LABELS="$labels" PR_BODY_FILE="$pr_body_file" PR_IS_KVM="$is_kvm" \
                PR_NUMBER="$pr_number" PR_HEAD_SHA="$pr_head" \
                PR_COMMENTS_FILE="$pr_comments_file" \
                bash scripts/core-review-protocol-lint.sh; then
@@ -485,7 +489,7 @@ jobs:
             else
               failed=1
             fi
-            rm -f "$pr_comments_file"
+            rm -f "$pr_comments_file" "$pr_body_file"
           done <<< "$pr_numbers"
 
           exit "$failed"

@@ -71,7 +71,17 @@
 #
 # Inputs (environment variables):
 #   PR_LABELS         newline-separated label names on the PR (may be empty)
-#   PR_BODY           the PR description body text (may be empty)
+#   PR_BODY_FILE      path to a file holding the PR description body. PREFERRED,
+#                     and what the workflow uses. Its bytes are the body: grep
+#                     reads the file itself, so nothing is stripped or added and
+#                     no size limit applies. (`jq -r` ends the file with a
+#                     newline that `$(...)` would strip from PR_BODY; the section
+#                     checks match whole lines, so that newline decides nothing.)
+#                     A missing or unreadable path, or a directory, refuses.
+#   PR_BODY           the same body inline (may be empty, meaning the PR has no
+#                     description). Exactly one of PR_BODY_FILE and PR_BODY must be
+#                     set once the protocol applies: both set refuses, neither
+#                     refuses.
 #   PR_IS_KVM         "true" when the PR changes KVM code (default: "false")
 #   PR_NUMBER         PR number, used only in diagnostics (default: "unknown")
 #   PR_HEAD_SHA       the exact 40-hex head the approvals must bind
@@ -82,12 +92,15 @@
 #   PR_COMMENTS_JSON  the same JSON inline. Convenient for tests and small PRs;
 #                     PR_COMMENTS_FILE takes precedence when both are set.
 #
-# USE THE FILE FORM FOR ANYTHING REAL. A single environment variable is capped
+# USE THE FILE FORMS FOR ANYTHING REAL. A single environment variable is capped
 # at MAX_ARG_STRLEN (128 KiB on Linux), and PR #2176's comment array is
 # 154,666 bytes — passing it inline fails exec with E2BIG, which surfaces as
 # exit 126 and blocks a PR for a reason that has nothing to do with its reviews.
 # Comment volume grows with exactly the review activity this gate reads, so the
-# inline form breaks first on the PRs that need the gate most.
+# inline form breaks first on the PRs that need the gate most. The body hit the
+# same wall: PR #4845's description is 145,736 characters, and the inline
+# PR_BODY form failed with "Argument list too long" (exit 126) before the lint
+# started, which is why PR_BODY_FILE exists.
 #
 # PR_HEAD_SHA and one of PR_COMMENTS_FILE / PR_COMMENTS_JSON are REQUIRED
 # whenever the `post-facto-human-review` label is present; a missing, malformed,
@@ -190,7 +203,7 @@ match_status_or_refuse() {
 # had not been given the inputs to answer.
 #
 # CI is unaffected either way: .github/workflows/merge-gate.yml sets PR_LABELS
-# and PR_BODY explicitly. The silent pass only ever reached a human running
+# and PR_BODY_FILE explicitly. The silent pass only ever reached a human running
 # this by hand, which is exactly the reader least able to notice.
 if [ -z "${PR_LABELS+set}" ]; then
     echo "::error::PR #${pr}: PR_LABELS is not set. This gate cannot decide anything" >&2
@@ -270,13 +283,18 @@ round_label_alternatives() {
 # ending in a colon (`Section:`), matched case-insensitively at line start. The
 # leading marker requirement keeps prose mentions ("in summary, ...") from
 # counting as the section.
+# The body is read from PR_BODY_FILE itself when one is given (as text, so a
+# stray NUL byte cannot turn the match into a binary-file answer), or from
+# PR_BODY.
 has_section() {
     local section=$1
+    local pattern="^[[:space:]]*(#{1,6}[[:space:]]*${section}|\*\*[[:space:]]*${section}|${section}[[:space:]]*:)"
     local status=0
-    grep -Eiq \
-        "^[[:space:]]*(#{1,6}[[:space:]]*${section}|\*\*[[:space:]]*${section}|${section}[[:space:]]*:)" \
-        <<<"$body" \
-        || status=$?
+    if [ -n "$body_file" ]; then
+        grep -aEiq -- "$pattern" "$body_file" || status=$?
+    else
+        grep -Eiq -- "$pattern" <<<"$body" || status=$?
+    fi
     match_status_or_refuse "PR-body section lookup" "$status"
 }
 
@@ -935,14 +953,34 @@ fi
 # validating it earlier would refuse callers on the not-applicable fast path
 # that never read it. Same distinction as above: unset is a broken invocation,
 # empty is a PR with no description (which then legitimately fails (c) below).
-if [ -z "${PR_BODY+set}" ]; then
-    echo "::error::PR #${pr}: PR_BODY is not set, and this PR is labeled" >&2
-    echo "  ${post_facto_label}, so the required-section checks below cannot run." >&2
-    echo "  Refusing rather than reporting five phantom 'missing section' errors for a" >&2
-    echo "  body that was never supplied. Pass an EMPTY string for a PR with no body." >&2
+# The body comes one way only: PR_BODY_FILE (a file, for any size) or PR_BODY
+# (inline). Both set is an ambiguous invocation, not a choice to make here.
+body=""
+body_file=""
+if [ -n "${PR_BODY_FILE+set}" ] && [ -n "${PR_BODY+set}" ]; then
+    echo "::error::PR #${pr}: both PR_BODY_FILE and PR_BODY are set. Pass the body one way" >&2
+    echo "  only: PR_BODY_FILE for a file (any size), PR_BODY inline." >&2
     exit 2
 fi
-body="$PR_BODY"
+if [ -n "${PR_BODY_FILE+set}" ]; then
+    if [ ! -r "$PR_BODY_FILE" ] || [ -d "$PR_BODY_FILE" ]; then
+        echo "::error::PR #${pr}: PR_BODY_FILE '${PR_BODY_FILE}' is not a readable file, and" >&2
+        echo "  this PR is labeled ${post_facto_label}, so the required-section checks" >&2
+        echo "  below cannot run. Refusing rather than reporting phantom 'missing section'" >&2
+        echo "  errors for a body that was never read." >&2
+        exit 2
+    fi
+    body_file=$PR_BODY_FILE
+elif [ -n "${PR_BODY+set}" ]; then
+    body="$PR_BODY"
+else
+    echo "::error::PR #${pr}: neither PR_BODY_FILE nor PR_BODY is set, and this PR is labeled" >&2
+    echo "  ${post_facto_label}, so the required-section checks below cannot run." >&2
+    echo "  Refusing rather than reporting five phantom 'missing section' errors for a" >&2
+    echo "  body that was never supplied. Pass PR_BODY_FILE (a file holding the body)," >&2
+    echo "  or an EMPTY PR_BODY for a PR with no body." >&2
+    exit 2
+fi
 
 echo "PR #${pr}: ${post_facto_label} present; enforcing the core-change review protocol."
 

@@ -2718,19 +2718,22 @@ if ! labels=$(jq -r '.labels[].name' <<<"$pr_json"); then
   echo "label decode FAILED -- this is not a pass" >&2
   exit 2
 fi
-if ! body=$(jq -r '.body // ""' <<<"$pr_json"); then
-  echo "body decode FAILED -- this is not a pass" >&2
-  exit 2
-fi
 if ! head_sha=$(jq -r '.head.sha' <<<"$pr_json"); then
   echo "head decode FAILED -- this is not a pass" >&2
   exit 2
 fi
 pr_comments_file=$(mktemp)
-trap 'rm -f "$pr_comments_file"' EXIT
+pr_body_file=$(mktemp)
+trap 'rm -f "$pr_comments_file" "$pr_body_file"' EXIT
 if ! with-proxy gh api "repos/$repo/issues/$pr/comments?per_page=100" \
     --paginate --slurp | jq -ce 'add // []' >"$pr_comments_file"; then
   echo "comment fetch FAILED -- this is not a pass" >&2
+  exit 2
+fi
+# The body goes to a file: one environment variable is capped at 128 KiB, and
+# PR #4845's description is 145,736 characters.
+if ! jq -r '.body // ""' <<<"$pr_json" >"$pr_body_file"; then
+  echo "body decode FAILED -- this is not a pass" >&2
   exit 2
 fi
 if ! files=$(with-proxy gh api --paginate "repos/$repo/pulls/$pr/files" \
@@ -2758,7 +2761,7 @@ else
 fi
 
 lint_status=0
-PR_NUMBER="$pr" PR_LABELS="$labels" PR_BODY="$body" PR_IS_KVM="$is_kvm" \
+PR_NUMBER="$pr" PR_LABELS="$labels" PR_BODY_FILE="$pr_body_file" PR_IS_KVM="$is_kvm" \
 PR_HEAD_SHA="$head_sha" PR_COMMENTS_FILE="$pr_comments_file" \
   bash scripts/core-review-protocol-lint.sh || lint_status=$?
 

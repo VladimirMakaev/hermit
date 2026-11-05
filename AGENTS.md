@@ -529,7 +529,6 @@ if ! pr_json=$(with-proxy gh api "repos/$repo/pulls/$pr"); then
   exit 2
 fi
 labels=$(jq -r '.labels[].name' <<<"$pr_json")
-body=$(jq -r '.body // ""' <<<"$pr_json")
 head_sha=$(jq -r '.head.sha' <<<"$pr_json")
 if ! files=$(with-proxy gh api --paginate "repos/$repo/pulls/$pr/files" \
     --jq '.[].filename'); then
@@ -554,24 +553,32 @@ else
   is_kvm=false
 fi
 pr_comments_file=$(mktemp)
-trap 'rm -f "$pr_comments_file"' EXIT
+pr_body_file=$(mktemp)
+trap 'rm -f "$pr_comments_file" "$pr_body_file"' EXIT
 if ! with-proxy gh api "repos/$repo/issues/$pr/comments?per_page=100" \
     --paginate --slurp | jq -ce 'add // []' >"$pr_comments_file"; then
   echo "comment fetch FAILED -- this is not a pass" >&2
   exit 2
 fi
+if ! jq -r '.body // ""' <<<"$pr_json" >"$pr_body_file"; then
+  echo "body decode FAILED -- this is not a pass" >&2
+  exit 2
+fi
 
-PR_NUMBER="$pr" PR_LABELS="$labels" PR_BODY="$body" PR_IS_KVM="$is_kvm" \
+PR_NUMBER="$pr" PR_LABELS="$labels" PR_BODY_FILE="$pr_body_file" PR_IS_KVM="$is_kvm" \
 PR_HEAD_SHA="$head_sha" PR_COMMENTS_FILE="$pr_comments_file" \
   bash scripts/core-review-protocol-lint.sh
 ```
 
 ⚠️ **THE INPUTS ARE REQUIRED, AND THE SCRIPT REFUSES RATHER THAN GUESSING.** An
-unset `PR_LABELS` or `PR_BODY` exits 2. For a labeled pull request, a missing
-`PR_HEAD_SHA` or missing/unreadable `PR_COMMENTS_FILE`/`PR_COMMENTS_JSON` exits
-1. Pass an explicit empty string only to mean "genuinely none". The file form is
-used above because a complete comment history can exceed the per-environment-
-variable size limit.
+unset `PR_LABELS` exits 2. For a labeled pull request, exactly one of
+`PR_BODY_FILE` and `PR_BODY` must be set: both, neither, or a missing or
+unreadable `PR_BODY_FILE` exits 2. A missing `PR_HEAD_SHA` or missing/unreadable
+`PR_COMMENTS_FILE`/`PR_COMMENTS_JSON` exits 1. Pass an explicit empty string
+(or an empty file) only to mean "genuinely none". The file forms are used above
+because one environment variable is capped at 128 KiB: a complete comment
+history exceeds it, and so did PR #4845's 145,736-character description, which
+failed with "Argument list too long" (exit 126) before the lint started.
 
 ⚠️ **DO NOT "FIX" THIS BY ARMING THE GATE.** This lint and the merge gate stay
 hand-run: no `pull_request` trigger on `merge-gate.yml` and no

@@ -118,6 +118,28 @@ validate_core_linter_invocation() {
         return 1
     fi
 
+    # The body goes by file too: one environment variable is capped at 128 KiB,
+    # and an inline PR_BODY fails exec before the linter runs.
+    binding_count=0
+    for ((index = 1; index < bash_index; index++)); do
+        word=${invocation_words[$index]}
+        if [[ $word == PR_BODY=* ]]; then
+            echo "core-review linter invocation must pass the body as PR_BODY_FILE, not inline PR_BODY" >&2
+            return 1
+        fi
+        if [[ $word == PR_BODY_FILE=* ]]; then
+            ((binding_count += 1))
+            [[ $word == "PR_BODY_FILE=\"\$pr_body_file\"" ]] || {
+                echo "core-review linter invocation has an incorrect PR_BODY_FILE binding" >&2
+                return 1
+            }
+        fi
+    done
+    if [[ $binding_count -ne 1 ]]; then
+        echo "core-review linter invocation must bind PR_BODY_FILE exactly once" >&2
+        return 1
+    fi
+
     for ((index = 1; index < bash_index; index++)); do
         word=${invocation_words[$index]}
         [[ $word =~ ^[a-zA-Z_][a-zA-Z_0-9]*= ]] || {
@@ -161,7 +183,17 @@ expect_binding_mutation_rejected "executable comment decoy" PR_COMMENTS_FILE "$c
 comments_override_replacement="$comments_binding PR_COMMENTS_FILE=\"\$old_comments_file\""
 comments_override=${core_linter_invocation/"$comments_binding"/$comments_override_replacement}
 expect_binding_mutation_rejected "overridden comment binding" PR_COMMENTS_FILE "$comments_override"
+body_binding=" PR_BODY_FILE=\"\$pr_body_file\""
+body_deleted=${core_linter_invocation/"$body_binding"/}
+expect_binding_mutation_rejected "deleted body binding" PR_BODY_FILE "$body_deleted"
+body_decoy_replacement=" printf '%s' 'PR_BODY_FILE=\"\$pr_body_file\"' &&"
+body_decoy=${core_linter_invocation/"$body_binding"/$body_decoy_replacement}
+expect_binding_mutation_rejected "executable body decoy" PR_BODY_FILE "$body_decoy"
+body_inline=${core_linter_invocation/"$body_binding"/ PR_BODY=\"\$body\"}
+expect_binding_mutation_rejected "inline body" PR_BODY_FILE "$body_inline"
 
+core_job_has 'jq -r '\''.body // ""'\'' <<< "$pr_json" > "$pr_body_file"' ||
+    fail "core-review protocol must write the pull-request body to its file"
 core_job_has 'pr_head="$(jq -r '\''.head.sha'\'' <<< "$pr_json")"' ||
     fail "core-review protocol must read the exact pull-request head"
 core_job_has 'issues/${pr_number}/comments?per_page=100' ||

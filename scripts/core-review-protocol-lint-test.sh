@@ -1551,6 +1551,86 @@ PR_COMMENTS_FILE=/nonexistent/path/comments.json \
   run_message_case "an unreadable PR_COMMENTS_FILE is diagnosed as a plumbing fault" \
     1 "is not readable" "$FULL_LABELS" "$FULL_BODY" "" "$HEAD_SHA"
 
+# --- PR_BODY_FILE: the body by file, for bodies over the 128 KiB limit --------
+#
+# One environment variable is capped at MAX_ARG_STRLEN (128 KiB on Linux).
+# PR #4845's description is 145,736 characters, and the inline PR_BODY form
+# failed with "Argument list too long" (exit 126) before the lint started. The
+# file form has no such limit; these cases drive the lint with PR_BODY unset.
+#
+# run_body_file_case NAME EXPECTED_EXIT NEEDLE BODY_FILE [LABELS] [ENV...]
+# NEEDLE is a substring the output must contain ("" for none).
+run_body_file_case() {
+    owns_case || return 0
+    local name=$1 expected=$2 needle=$3 body_file=$4 labels=${5-$FULL_LABELS}
+    shift 5 2>/dev/null || shift $#
+    local actual=0 output comments
+    comments=$(authenticate_comments "$FULL_APPROVALS")
+    output=$(env -u PR_BODY PR_LABELS="$labels" PR_BODY_FILE="$body_file" PR_IS_KVM=false \
+        PR_NUMBER=test PR_HEAD_SHA="$HEAD_SHA" PR_COMMENTS_JSON="$comments" "$@" \
+        bash "$LINT" 2>&1) || actual=$?
+    if [ "$actual" -eq "$expected" ] && [[ $output == *"$needle"* ]]; then
+        echo "ok   - ${name} (exit ${actual})"
+        pass=$((pass + 1))
+    else
+        echo "FAIL - ${name}: expected exit ${expected} with '${needle}', got ${actual}: ${output}"
+        fail=$((fail + 1))
+    fi
+}
+
+body_dir=$(mktemp -d)
+# Over 128 KiB of filler, then every required section: a body cut at the
+# limit, or never read, would miss them all.
+big_body="$body_dir/big-body.md"
+{
+    for ((line = 0; line < 3000; line++)); do
+        printf 'Filler line %05d of a long pull-request description.\n' "$line"
+    done
+    printf '%s\n' "$FULL_BODY"
+} >"$big_body"
+if owns_case; then
+    big_size=$(wc -c <"$big_body")
+    first_section=$(grep -bn '^## Summary' "$big_body" | head -1 | cut -d: -f2)
+    if [ "$big_size" -gt 131072 ] && [ "$first_section" -gt 131072 ]; then
+        echo "ok   - the big body is over 128 KiB with its sections past the limit (${big_size} bytes)"
+        pass=$((pass + 1))
+    else
+        echo "FAIL - the big body fixture is ${big_size} bytes, first section at byte ${first_section}"
+        fail=$((fail + 1))
+    fi
+fi
+run_body_file_case "a body over 128 KiB passes by PR_BODY_FILE, sections past the limit" \
+    0 "enforcing the core-change review protocol" "$big_body"
+printf '%s\n' "$FULL_BODY" >"$body_dir/full-body.md"
+run_body_file_case "PR_BODY_FILE with every section passes" 0 "" "$body_dir/full-body.md"
+: >"$body_dir/empty-body.md"
+run_body_file_case "an empty PR_BODY_FILE is a PR with no body, and blocks" \
+    1 "is missing the required" "$body_dir/empty-body.md"
+run_body_file_case "a missing PR_BODY_FILE refuses" \
+    2 "PR_BODY_FILE '$body_dir/absent.md' is not a readable file" "$body_dir/absent.md"
+run_body_file_case "a directory as PR_BODY_FILE refuses" \
+    2 "is not a readable file" "$body_dir"
+run_body_file_case "a missing PR_BODY_FILE is ignored when the protocol does not apply" \
+    0 "not applicable" "$body_dir/absent.md" "category:detcore"
+run_body_file_case "PR_BODY_FILE and PR_BODY both set refuses" \
+    2 "both PR_BODY_FILE and PR_BODY are set" "$body_dir/full-body.md" "$FULL_LABELS" \
+    PR_BODY="$FULL_BODY"
+if owns_case; then
+    actual=0
+    output=$(env -u PR_BODY -u PR_BODY_FILE PR_LABELS="$FULL_LABELS" PR_IS_KVM=false \
+        PR_NUMBER=test PR_HEAD_SHA="$HEAD_SHA" \
+        PR_COMMENTS_JSON="$(authenticate_comments "$FULL_APPROVALS")" \
+        bash "$LINT" 2>&1) || actual=$?
+    if [ "$actual" -eq 2 ] && [[ $output == *"neither PR_BODY_FILE nor PR_BODY is set"* ]]; then
+        echo "ok   - neither PR_BODY_FILE nor PR_BODY set refuses, naming both (exit 2)"
+        pass=$((pass + 1))
+    else
+        echo "FAIL - neither PR_BODY_FILE nor PR_BODY set: got ${actual}: ${output}"
+        fail=$((fail + 1))
+    fi
+fi
+rm -rf "$body_dir"
+
 echo
 if [ -n "${CORE_REVIEW_LINT_TEST_SHARD-}" ]; then
     echo "core-review-protocol-lint shard ${shard_index}/${shard_count}: cases=${case_index} passed=${pass} failed=${fail}"
