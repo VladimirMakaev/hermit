@@ -3301,7 +3301,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And https://github.com/rrnewton/hermit/pull/4735's rewrite-provenance
     // round-trip unit: 3578 + 1 = 3579.
     // And its heuristic-marker and shared-admission units: 3579 + 2 = 3581.
-    ("test.detcore_unit", 3581),
+    // And the ADRP and ADR base-reader units: 3581 + 5 = 3586, listed.
+    ("test.detcore_unit", 3586),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -5954,7 +5955,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two replayed-switch wake units: 3492 + 2 = 3494.
     // And the same rewrite-provenance unit as test.detcore_unit: 3579.
     // And the same two marker/admission units: 3579 + 2 = 3581.
-    ("test.detcore_unit_on_host", 3581),
+    // And the same five base-reader units: 3581 + 5 = 3586, listed.
+    ("test.detcore_unit_on_host", 3586),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
