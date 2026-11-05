@@ -1300,7 +1300,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (--chaos-instruction-offset): 1964 + 2 = 1966.
     // And detcore-model's untrap_passthrough_syscalls_is_opt_in_and_round_trips and
     // untrap_passthrough_syscalls_never_enters_the_legacy_form: 1968 + 2 = 1970, listed.
-    ("test.regular_crates", 1971),
+    // And hermit-run-kvm's untrapping_is_refused_before_the_backend_runs: 1971 + 1 = 1972.
+    ("test.regular_crates", 1972),
     // Three tracing PID-alignment tests added in f9383156 retain all 707 prior IDs.
     // Twelve epoch controls and the LiteInst stderr-pressure control retain all 710 prior IDs.
     // Two real readv import-permission companions retain all 748 prior identities.
@@ -2043,7 +2044,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And run::untrap_passthrough_syscalls_refuses_preemption_records_by_every_route: 1383 + 1 = 1384.
     // And tests::the_library_entry_points_refuse_untrapping_without_its_prerequisites
     // (the same pull request's post-facto review): 1384 + 1 = 1385.
-    ("test.hermit_unit", 1388),
+    // And the_library_entry_points_refuse_untrapping_off_ptrace_and_with_happens_before: 1388 + 1 = 1389.
+    ("test.hermit_unit", 1389),
     // Fifteen stage-two child-publication controls retain all 728 prior IDs.
     // Five resource-limit controls retain all 743 prior identities.
     // Three descriptor-import error controls retain all 780 prior identities.
@@ -5507,7 +5509,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset detcore-model units:
     // 1950 + 2 = 1952.
     // PR #4764: the same two detcore-model untrap units: 1954 + 2 = 1956.
-    ("test.regular_crates_on_host", 1957),
+    // And the same hermit-run-kvm unit: 1957 + 1 = 1958.
+    ("test.regular_crates_on_host", 1958),
     ("test.hermit_modes_on_host", 21),
     ("privileged-only-test.pmu_buck_chaos_cases", 6),
     // run_kvm_futex_wait_on_an_unreadable_word_matches_linux
@@ -6541,7 +6544,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // 1323 + 4 = 1327.
     // PR #4746: the same 37 hermit-run units: 1327 + 37 = 1364.
     // PR #4764: the same three hermit-run untrap units: 1376 + 3 = 1379.
-    ("test.hermit_unit_on_host", 1382),
+    // And the same library untrap refusal case: 1382 + 1 = 1383.
+    ("test.hermit_unit_on_host", 1383),
     ("test.ignored_syscall_regressions_on_host", 4),
     // The host node carries the identical selection.
     // test-harness no_retry_flag_turns_framework_retries_off retains all 763 prior identities.
@@ -6788,7 +6792,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two --chaos-instruction-offset detcore-model units:
     // 1950 + 2 = 1952.
     // PR #4764: the same two detcore-model untrap units: 1954 + 2 = 1956.
-    ("test.regular_crates_on_host", 1957),
+    // And the same hermit-run-kvm unit: 1957 + 1 = 1958.
+    ("test.regular_crates_on_host", 1958),
     // The local 192 less the PMU-timer case the hosted twin excludes by name
     // (validation_dag::HOSTED_PORTABLE_PMU_TIMER_RR_TESTS): 191.
     // Less the case the 2026-10-17 test audit deleted: 190.
