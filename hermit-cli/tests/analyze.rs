@@ -499,19 +499,16 @@ fn analyze_racewrite_nostdlib_prefix_search() {
 /// after it), so the check is not realized rather than a verdict. No
 /// poller nap decides.
 ///
-/// This test is NOT in the PMU analyze node. Measured 2026-11-04 on an
-/// AMD EPYC 9D85 (the validation host class), whole-cgroup CPU of one
-/// systemd scope per run at the node's 20000-branch margin, it takes
-/// 24.31, 24.47 and 24.78 CPU-seconds against the node's ordinary
-/// 22-second per-test cap, and shrinking the poller's nap far enough to
-/// fit (600 microseconds and up) makes the analysis degenerate: the
-/// deciding event falls in startup (#53), the server-change replay
-/// departs at event #0, and no candidate check is realized -- the
-/// assertions below now refuse that shape. An exact-identity CPU
-/// allowance cannot admit it either today, because allowance selection
-/// drops ignored testcases (nextest_cpu::selected_inventory). It stays
-/// runnable by hand as an ignored test; re-inclusion is tracked in
-/// minibeads dh-zr6yo.
+/// The PMU analyze node runs it under a 38-second exact-identity CPU
+/// allowance that only that node's budget scope admits
+/// (ci/nextest-timeout-config.rs). Measured 2026-11-04 on an AMD EPYC 9D85
+/// (the validation host class), whole-cgroup CPU of one systemd scope per
+/// run at the node's 20000-branch margin, it takes 24.31, 24.47 and 24.78
+/// CPU-seconds, over the ordinary 22-second per-test cap, and shrinking
+/// the poller's nap far enough to fit (600 microseconds and up) makes the
+/// analysis degenerate: the deciding event falls in startup (#53), the
+/// server-change replay departs at event #0, and no candidate check is
+/// realized -- the assertions below refuse that shape.
 #[test]
 #[ignore = "slow: replays chaos schedules; requires PMU branch counters and working mount namespaces"]
 fn analyze_checks_the_race_candidates_and_says_what_each_edit_moved() {
