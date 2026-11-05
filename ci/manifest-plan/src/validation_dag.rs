@@ -6381,11 +6381,18 @@ sys.exit(37)
         // The lone-slice allowance is node-scoped, not a global ptrace policy.
         // Both authored and sharded commands retain the literal marker, while
         // the KVM node and every other node retain their existing environment.
+        // So is the PMU analyze node's race-candidates allowance.
         const SCOPE: &str = "HERMIT_NEXTEST_BUDGET_SCOPE";
+        const PMU_ANALYZE_TAG: &str = "super.pmu_analyze_hello_race_stress_calibrated_skid";
         for step in &steps {
+            let expected = match step.tag().as_str() {
+                PMU_INTEGRATION_TAG => Some("pmu-integration"),
+                PMU_ANALYZE_TAG => Some("pmu-analyze"),
+                _ => None,
+            };
             assert_eq!(
                 step.env.get(SCOPE).map(String::as_str),
-                (step.tag() == PMU_INTEGRATION_TAG).then_some("pmu-integration"),
+                expected,
                 "{}",
                 step.tag()
             );
@@ -6397,9 +6404,14 @@ sys.exit(37)
         materialize_node_shards(&mut sharded, PMU_INTEGRATION_TAG, PMU_INTEGRATION_SHARDS).unwrap();
         let tags = pmu_integration_shard_tags();
         for step in &sharded.steps {
+            let expected = if tags.contains(&step.tag()) {
+                Some("pmu-integration")
+            } else {
+                (step.tag() == PMU_ANALYZE_TAG).then_some("pmu-analyze")
+            };
             assert_eq!(
                 step.env.get(SCOPE).map(String::as_str),
-                tags.contains(&step.tag()).then_some("pmu-integration"),
+                expected,
                 "{}",
                 step.tag()
             );
@@ -6959,12 +6971,12 @@ sys.exit(37)
         refuse(OUTPUT, "the file", text);
     }
 
-    /// The PMU analyze node retains exactly the ten other ignored
+    /// The PMU analyze node retains exactly the twelve other ignored
     /// integrations (the six refusal/workspace/timeout cases, the
-    /// racewrite selfcheck regression, the race finder's fd_reuse
-    /// case and the verdict change's two) plus the resume change's
-    /// one, while hello-race pinpointing and the race-candidates
-    /// case are excluded for their tracked reasons.
+    /// racewrite selfcheck regression, the race finder's fd_reuse and
+    /// race-candidates cases, the verdict change's two and the resume
+    /// change's one), while hello-race pinpointing is excluded for its
+    /// tracked failure.
     #[test]
     fn the_pmu_analyze_node_runs_the_ignored_analyze_integrations() {
         let source = include_str!("../../../hermit-cli/tests/analyze.rs");
@@ -6978,6 +6990,7 @@ sys.exit(37)
             "analyze_racewrite_nostdlib",
             // The race finder's.
             "analyze_names_the_close_racing_the_reused_descriptor",
+            "analyze_checks_the_race_candidates_and_says_what_each_edit_moved",
             // The verdict change's.
             "bisect_exits_2_when_its_good_schedule_meets_the_target",
             "analyze_reports_a_target_met_without_chaos_as_reproduced_without_the_schedule",
@@ -6991,13 +7004,6 @@ sys.exit(37)
             );
         }
         assert!(source.contains("fn analyze_hello_race()"));
-        // The excluded race-candidates case stays in the source as a
-        // hand-runnable ignored test (dh-zr6yo tracks its re-inclusion).
-        assert!(
-            source
-                .contains("fn analyze_checks_the_race_candidates_and_says_what_each_edit_moved()"),
-            "excluded rpc case must remain in hermit-cli/tests/analyze.rs"
-        );
         let expected_filter = cases
             .iter()
             .map(|case| format!("test(={case})"))
@@ -7034,15 +7040,21 @@ sys.exit(37)
                 !step.cmd.contains("test(=analyze_hello_race)"),
                 "{origin}: excluded hello-race must not run"
             );
-            assert!(
-                !step.cmd.contains(
-                    "test(=analyze_checks_the_race_candidates_and_says_what_each_edit_moved)"
-                ),
-                "{origin}: excluded race-candidates case must not run"
+            // The race-candidates case runs under its scoped allowance
+            // (ci/nextest-timeout-config.rs), which only this node's budget
+            // scope admits.
+            assert_eq!(
+                step.env
+                    .get("HERMIT_NEXTEST_BUDGET_SCOPE")
+                    .map(String::as_str),
+                Some("pmu-analyze"),
+                "{origin}"
             );
             assert!(
-                step.description.contains("dh-zr6yo"),
-                "{origin}: missing race-candidates exclusion tracking"
+                step.description
+                    .contains("HERMIT_NEXTEST_BUDGET_SCOPE=pmu-analyze")
+                    && step.description.contains("38 seconds"),
+                "{origin}: missing the race-candidates allowance"
             );
             assert!(
                 step.description
