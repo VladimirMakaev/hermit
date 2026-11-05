@@ -5469,6 +5469,41 @@ fn untrap_passthrough_syscalls_is_an_opt_in_refused_where_its_calls_are_counted(
     );
 }
 
+/// Every launch through an executable-selected adapter refuses
+/// `--untrap-passthrough-syscalls` by the adapter's name before reading any
+/// input (`refuse_unqualified_application_options`): e9patch preprocessing,
+/// which runs on the ptrace runtime, as well as DBT and SaBRe. Without the
+/// flag the same adapters pass that check.
+#[test]
+fn untrap_passthrough_syscalls_is_not_qualified_for_executable_selected_backends() {
+    for name in ["e9patch", "dbt", "sabre"] {
+        let selector = format!("--backend={name}");
+        let refuse = |untrap: bool| {
+            let mut argv = vec!["hermit", selector.as_str(), "run"];
+            if untrap {
+                argv.push("--untrap-passthrough-syscalls");
+            }
+            argv.extend(["--", "fakeprog"]);
+            let opts = run_opts_for(&argv);
+            assert_eq!(opts.application_backend, Some(name));
+            opts.refuse_unqualified_application_options(
+                <super::core_adapter::CoreApplicationAdapter as
+                    super::backend_hook::BackendAdapter>::NONDEFAULT_CPU_PROFILE_REFUSAL,
+            )
+        };
+        let error = refuse(true).expect_err("refused");
+        assert!(error.downcast_ref::<PolicyRefusal>().is_some(), "{error:#}");
+        assert_eq!(
+            error.to_string(),
+            format!(
+                "--untrap-passthrough-syscalls is not qualified for executable-selected \
+                 backend `{name}`"
+            ),
+        );
+        refuse(false).unwrap();
+    }
+}
+
 /// A preemption record holds a callback for each trapped call the recorded run
 /// made, `getppid` among them, with its charge and its preemption point. With
 /// `--untrap-passthrough-syscalls` those calls never reach Detcore, so a replay
