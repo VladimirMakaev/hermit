@@ -26,6 +26,7 @@ use detcore_model::host_input::HostInputSet;
 pub use reserved_input::RecordAdmissionRefusal;
 pub(crate) use reserved_input::ReservedInputLayout;
 pub use reserved_input::ReservedInputMetadata;
+pub use reserved_input::admit_replay_rewrite;
 pub use reserved_input::read_recorded_reserved_input;
 pub use reserved_input::validate_chosen_provenance;
 pub use reserved_input::validate_config_replay_inputs;
@@ -5242,6 +5243,7 @@ mod tests {
             .validate_replay_inputs(
                 "--replay-schedule-from=x",
                 detcore_model::pid::GuestIds::Namespace,
+                None,
             )
             .unwrap_err();
         assert!(

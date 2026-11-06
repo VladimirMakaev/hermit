@@ -4632,6 +4632,15 @@ impl<T: RecordOrReplay> Tool for Detcore<T> {
         {
             return Err(reverie::Error::Tool(anyhow::anyhow!(refusal)));
         }
+        // A replayed record must state this run's exclusive-loop rewrite,
+        // which changes the instructions the guest retires. Hermit's entry
+        // points compare it first (`validate_config_replay_inputs`); this
+        // refuses it for every other launch, before global initialization,
+        // and the authoritative loaders compare it again on the bytes they
+        // install.
+        if let Err(refusal) = crate::preemptions::admit_replay_rewrite(config) {
+            return Err(reverie::Error::Tool(anyhow::Error::new(refusal)));
+        }
         // Under --strict on KVM, where no guest descriptor's identity can be
         // read, a host that offers binder in any form refuses the run before
         // it starts, a temporary conservative policy

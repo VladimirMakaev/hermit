@@ -24,6 +24,7 @@ mod procfs_inode;
 mod property_snapshot;
 mod raw_clone;
 mod readdir_order;
+mod replay_rewrite_admission;
 mod scm_rights;
 mod subreaper;
 mod tight_stack_openat;

@@ -362,7 +362,11 @@ pub(crate) fn prepare_run_with(
             // fails both takes the same refusal on either route. The
             // scheduler validates the installed record again at construction.
             recording
-                .validate_replay_inputs(&input_name("--replay-schedule-from", path), cfg.guest_ids)
+                .validate_replay_inputs(
+                    &input_name("--replay-schedule-from", path),
+                    cfg.guest_ids,
+                    crate::preemptions::config_rewrite_exclusives(cfg),
+                )
                 .map_err(|refusal| PrepareError::Refused(refusal.to_string()))?;
             validated
                 .admit(&input_name("--replay-schedule-from", path), &recording)
@@ -376,7 +380,12 @@ pub(crate) fn prepare_run_with(
     let history = match &cfg.replay_preemptions_from {
         None => None,
         Some(path) => {
-            let history = HistoryReader::read_for_replay(path, cfg.guest_ids).map_err(|error| {
+            let history = HistoryReader::read_for_replay(
+                path,
+                cfg.guest_ids,
+                crate::preemptions::config_rewrite_exclusives(cfg),
+            )
+            .map_err(|error| {
                 if error.chain().any(|cause| {
                     cause.is::<crate::preemptions::RecordAdmissionRefusal>()
                         || cause.is::<crate::preemptions::RecordFormatRefusal>()
@@ -634,6 +643,188 @@ mod tests {
             Err(PrepareError::Unreadable(error)) => panic!("unreadable, not refused: {error:#}"),
             Ok(_) => panic!("prepared, not refused"),
         }
+    }
+
+    /// A Known(v1) empty record stating `rewrite` as its run's exclusive-loop
+    /// rewrite.
+    fn write_rewritten(path: &Path, rewrite: Option<crate::preemptions::RewriteExclusives>) {
+        PreemptionRecord::from_sched_events_with_identity(Vec::new(), Some(V1))
+            .with_rewrite_exclusives(rewrite)
+            .write_to_disk(path)
+            .unwrap();
+    }
+
+    /// Each replay input is prepared under the run's own exclusive-loop
+    /// rewrite (`crate::preemptions::config_rewrite_exclusives` of the final
+    /// config), as `validate_replay_inputs` compares it: for a run that
+    /// rewrites in memory, a record of that rewrite is admitted and one
+    /// stating none is refused, and a record of it is refused for a run that
+    /// rewrites nothing. Through the schedule (`priority: false`) this is the
+    /// schedule's `validate_replay_inputs`; through the priority history,
+    /// `HistoryReader::read_for_replay`.
+    fn prepares_under_the_runs_exclusive_rewrite(priority: bool) {
+        use crate::preemptions::RewriteExclusives;
+        use crate::preemptions::RewriteExclusivesMode;
+        let directory = tempfile::tempdir().unwrap();
+        let memory = directory.path().join("memory.json");
+        write_rewritten(
+            &memory,
+            Some(RewriteExclusives::current(RewriteExclusivesMode::Memory)),
+        );
+        let plain = directory.path().join("plain.json");
+        write_rewritten(&plain, None);
+        for (path, in_memory, refused) in [
+            (&memory, true, false),
+            (&plain, true, true),
+            (&memory, false, true),
+        ] {
+            let state = PmuState::new();
+            let mut cfg = prepared_for_replay();
+            cfg.rewrite_exclusives_in_memory = in_memory;
+            if priority {
+                cfg.replay_preemptions_from = Some(path.clone());
+            } else {
+                cfg.replay_schedule_from = Some(path.clone());
+            }
+            let result = prepare_run_with(&cfg, &on(&amd(), &state));
+            if !refused {
+                assert!(
+                    result.is_ok(),
+                    "{path:?} with in_memory={in_memory}: {:?}",
+                    result.err().map(|error| match error {
+                        PrepareError::Refused(reason) => reason,
+                        PrepareError::Unreadable(error) => format!("{error:#}"),
+                    })
+                );
+                continue;
+            }
+            let option = if priority {
+                "--replay-preemptions-from"
+            } else {
+                "--replay-schedule-from"
+            };
+            let expected = crate::preemptions::rewrite_exclusives_mismatch(
+                &input_name(option, path),
+                crate::preemptions::read_recorded_rewrite_exclusives(path).unwrap(),
+                crate::preemptions::config_rewrite_exclusives(&cfg),
+            )
+            .unwrap();
+            let reason = refusal(result);
+            assert!(reason.contains(&expected), "{reason}");
+        }
+    }
+
+    #[test]
+    fn a_schedule_is_prepared_under_the_runs_exclusive_rewrite() {
+        prepares_under_the_runs_exclusive_rewrite(false);
+    }
+
+    #[test]
+    fn a_priority_history_is_prepared_under_the_runs_exclusive_rewrite() {
+        prepares_under_the_runs_exclusive_rewrite(true);
+    }
+
+    /// The scheduler validates the schedule it installs again under the run's
+    /// own exclusive-loop rewrite (`Scheduler::new_admitted`), so a schedule
+    /// whose record states the rewrite this run applies is installed; compared
+    /// with no rewrite there, it would be refused and the run would exit.
+    #[test]
+    fn the_scheduler_installs_a_schedule_of_the_runs_exclusive_rewrite() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("memory.json");
+        write_rewritten(
+            &path,
+            Some(crate::preemptions::RewriteExclusives::current(
+                crate::preemptions::RewriteExclusivesMode::Memory,
+            )),
+        );
+        let state = PmuState::new();
+        let mut cfg = prepared_for_replay();
+        cfg.rewrite_exclusives_in_memory = true;
+        cfg.replay_schedule_from = Some(path);
+        let prepared = prepare_run_with(&cfg, &on(&amd(), &state)).unwrap();
+        assert!(prepared.schedule.is_some());
+        let _scheduler =
+            crate::scheduler::Scheduler::new_admitted(&cfg, prepared.schedule, &prepared.clock);
+    }
+
+    /// The marker under which
+    /// [`the_scheduler_refuses_to_install_a_schedule_of_another_exclusive_rewrite`]
+    /// starts this test binary again to run its installation alone, and the
+    /// record that installation replays.
+    const MISMATCHED_INSTALL_CHILD_ENV: &str = "HERMIT_MISMATCHED_REWRITE_INSTALL_CHILD";
+    const MISMATCHED_INSTALL_RECORD_ENV: &str = "HERMIT_MISMATCHED_REWRITE_INSTALL_RECORD";
+
+    /// The scheduler's own check of the schedule it installs
+    /// (`Scheduler::new_admitted`) refuses a record of another exclusive-loop
+    /// rewrite even after preparation admitted it: a schedule prepared under
+    /// an in-memory rewrite and installed for a run that rewrites nothing
+    /// exits with the policy status and the rewrite refusal. The refusal ends
+    /// its process, so the installation runs in a process of its own.
+    #[test]
+    fn the_scheduler_refuses_to_install_a_schedule_of_another_exclusive_rewrite() {
+        // The harness names a test by its path below the crate.
+        let (_, module) = module_path!().split_once("::").unwrap();
+        let name = format!(
+            "{module}::the_scheduler_refuses_to_install_a_schedule_of_another_exclusive_rewrite"
+        );
+        if std::env::var(MISMATCHED_INSTALL_CHILD_ENV).as_deref() == Ok(name.as_str()) {
+            let path = std::env::var_os(MISMATCHED_INSTALL_RECORD_ENV).unwrap();
+            install_a_schedule_of_another_exclusive_rewrite(Path::new(&path));
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("memory.json");
+        write_rewritten(
+            &path,
+            Some(crate::preemptions::RewriteExclusives::current(
+                crate::preemptions::RewriteExclusivesMode::Memory,
+            )),
+        );
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args([name.as_str(), "--exact", "--nocapture", "--test-threads=1"])
+            .env(MISMATCHED_INSTALL_CHILD_ENV, &name)
+            .env(MISMATCHED_INSTALL_RECORD_ENV, &path)
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let rendered = format!(
+            "status {}\nstdout:\n{}\nstderr:\n{stderr}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(detcore_model::HERMIT_POLICY_REFUSAL_EXIT),
+            "{rendered}"
+        );
+        let expected = crate::preemptions::rewrite_exclusives_mismatch(
+            &path.display().to_string(),
+            crate::preemptions::read_recorded_rewrite_exclusives(&path).unwrap(),
+            None,
+        )
+        .unwrap();
+        assert!(stderr.contains(&expected), "{rendered}");
+    }
+
+    /// The body of
+    /// [`the_scheduler_refuses_to_install_a_schedule_of_another_exclusive_rewrite`]'s
+    /// own process: `path` records an in-memory rewrite.
+    fn install_a_schedule_of_another_exclusive_rewrite(path: &Path) {
+        let state = PmuState::new();
+        let mut cfg = prepared_for_replay();
+        cfg.rewrite_exclusives_in_memory = true;
+        cfg.replay_schedule_from = Some(path.to_path_buf());
+        let prepared = prepare_run_with(&cfg, &on(&amd(), &state)).unwrap();
+        let installed = Config {
+            rewrite_exclusives_in_memory: false,
+            ..cfg
+        };
+        let _scheduler = crate::scheduler::Scheduler::new_admitted(
+            &installed,
+            prepared.schedule,
+            &prepared.clock,
+        );
     }
 
     /// Qualified hosts whose raw selectors differ count one metric, so each

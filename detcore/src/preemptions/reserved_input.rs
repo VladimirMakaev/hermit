@@ -204,25 +204,26 @@ impl PreemptionRecord {
         &self.reserved_input
     }
 
-    /// Reconcile numbering and private-input provenance on the complete
-    /// decoded record that an authoritative replay loader will install.
-    /// A record of the removed stripped-file heuristic rewrite is
-    /// refused here, on the decoded bytes every loader installs: no
-    /// supported rewrite reproduces its instructions, whatever the
-    /// replay's own rewrite, which `validate_config_replay_inputs`
-    /// compares in full at launch.
+    /// Reconcile numbering, private-input provenance and the exclusive-loop
+    /// rewrite on the complete decoded record that an authoritative replay
+    /// loader will install. `replay_rewrite` is the rewrite the replaying run
+    /// applies (`super::config_rewrite_exclusives` of its final config, or
+    /// `None` for none): a record stating another one, or none while the
+    /// run rewrites, or the removed stripped-file heuristic, is refused here
+    /// (`super::rewrite_exclusives_mismatch`), on the decoded bytes every
+    /// loader installs, so a launch that drives Detcore without Hermit's
+    /// entry points refuses it too.
     pub fn validate_replay_inputs(
         &self,
         source: &str,
         guest_ids: GuestIds,
+        replay_rewrite: Option<super::RewriteExclusives>,
     ) -> Result<(), RecordAdmissionRefusal> {
-        if self.rewrite_exclusives_stripped_heuristic {
-            let refusal = super::rewrite_exclusives_mismatch(
-                source,
-                self.recorded_rewrite_exclusives(),
-                None,
-            )
-            .expect("a heuristic record is always refused");
+        if let Some(refusal) = super::rewrite_exclusives_mismatch(
+            source,
+            self.recorded_rewrite_exclusives(),
+            replay_rewrite,
+        ) {
             return Err(RecordAdmissionRefusal(refusal));
         }
         if let Some(reason) =
@@ -287,14 +288,11 @@ pub fn validate_chosen_provenance(config: &crate::Config) -> anyhow::Result<()> 
         if let Some(path) = path {
             let source = format!("{option} {}", path.display());
             let recording = super::boundary_recording::Recording::read(path)?;
-            recording.validate_replay_inputs(&source, recording.guest_ids())?;
-            if let Some(refusal) = super::rewrite_exclusives_mismatch(
+            recording.validate_replay_inputs(
                 &source,
-                recording.recorded_rewrite_exclusives(),
+                recording.guest_ids(),
                 super::config_rewrite_exclusives(config),
-            ) {
-                return Err(RecordAdmissionRefusal(refusal).into());
-            }
+            )?;
         }
     }
     Ok(())
@@ -310,14 +308,50 @@ pub fn validate_config_replay_inputs(config: &crate::Config) -> anyhow::Result<(
         if let Some(path) = path {
             let source = format!("{option} {}", path.display());
             let recording = super::boundary_recording::Recording::read(path)?;
-            recording.validate_replay_inputs(&source, config.guest_ids)?;
-            if let Some(refusal) = super::rewrite_exclusives_mismatch(
+            recording.validate_replay_inputs(
                 &source,
-                recording.recorded_rewrite_exclusives(),
+                config.guest_ids,
                 super::config_rewrite_exclusives(config),
-            ) {
-                return Err(RecordAdmissionRefusal(refusal).into());
-            }
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// The pre-start comparison of each replayed record's exclusive-loop rewrite
+/// with the run's (`super::config_rewrite_exclusives`), for
+/// `Detcore::facility_admission`: from what the record states about its
+/// rewrite (`super::read_recorded_rewrite_exclusives`), it refuses before
+/// global initialization or the guest's first instruction, on every launch
+/// path. Each authoritative loader compares the same rewrite again on the
+/// bytes it installs (`PreemptionRecord::validate_replay_inputs`), so this
+/// check never admits what a loader would refuse. It reads only a regular
+/// file: a FIFO or other one-shot source is left unread for the loader,
+/// which may be its only reader, as is a record it cannot read, which the
+/// loader refuses with its own error class.
+pub fn admit_replay_rewrite(config: &crate::Config) -> Result<(), RecordAdmissionRefusal> {
+    let replay_rewrite = super::config_rewrite_exclusives(config);
+    for (option, path) in [
+        ("--replay-schedule-from", &config.replay_schedule_from),
+        ("--replay-preemptions-from", &config.replay_preemptions_from),
+    ] {
+        let Some(path) = path else {
+            continue;
+        };
+        // By the path, never by opening it: opening a FIFO to look would
+        // wait for, or take, its producer.
+        if !std::fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+            continue;
+        }
+        let Ok(recorded) = super::read_recorded_rewrite_exclusives(path) else {
+            continue;
+        };
+        if let Some(refusal) = super::rewrite_exclusives_mismatch(
+            &format!("{option} {}", path.display()),
+            recorded,
+            replay_rewrite,
+        ) {
+            return Err(RecordAdmissionRefusal(refusal));
         }
     }
     Ok(())
@@ -408,7 +442,7 @@ mod tests {
                 let decoded = Recording::decode(&recording.encode().unwrap()).unwrap();
                 assert_eq!(decoded.reserved_input().as_json(), value.as_ref());
                 decoded
-                    .validate_replay_inputs("non-Chosen", GuestIds::Namespace)
+                    .validate_replay_inputs("non-Chosen", GuestIds::Namespace, None)
                     .unwrap();
                 assert_eq!(decoded.encode().unwrap(), recording.encode().unwrap());
                 let directory = tempfile::tempdir().unwrap();
@@ -430,7 +464,7 @@ mod tests {
     fn chosen_requires_recognized_matching_provenance_without_overrides() {
         let record = marked();
         record
-            .validate_replay_inputs("qualified", chosen())
+            .validate_replay_inputs("qualified", chosen(), None)
             .unwrap();
         for value in [
             None,
@@ -442,7 +476,7 @@ mod tests {
                 .clone()
                 .with_reserved_input(ReservedInputMetadata(value));
             let refusal = legacy
-                .validate_replay_inputs("old fixture", chosen())
+                .validate_replay_inputs("old fixture", chosen(), None)
                 .unwrap_err();
             assert!(
                 refusal
@@ -459,7 +493,8 @@ mod tests {
                         GuestIds::Chosen {
                             base: 5000,
                             refuse_host_ids: false,
-                        }
+                        },
+                        None
                     )
                     .is_err()
             );
@@ -475,7 +510,7 @@ mod tests {
             raw["reserved_input"][field] = value;
             let changed: PreemptionRecord = serde_json::from_value(raw).unwrap();
             let refusal = changed
-                .validate_replay_inputs("changed", chosen())
+                .validate_replay_inputs("changed", chosen(), None)
                 .unwrap_err();
             assert!(
                 refusal
@@ -492,7 +527,7 @@ mod tests {
         let changed = record.with_reserved_input(other.metadata());
         assert!(
             changed
-                .validate_replay_inputs("different native page", chosen())
+                .validate_replay_inputs("different native page", chosen(), None)
                 .unwrap_err()
                 .0
                 .contains("layout differs")
@@ -504,7 +539,7 @@ mod tests {
         let record = marked();
         assert!(
             record
-                .validate_replay_inputs("wrong runtime", GuestIds::Namespace)
+                .validate_replay_inputs("wrong runtime", GuestIds::Namespace, None)
                 .is_err()
         );
         assert!(
@@ -514,20 +549,21 @@ mod tests {
                     GuestIds::Chosen {
                         base: 6000,
                         refuse_host_ids: true,
-                    }
+                    },
+                    None
                 )
                 .is_err()
         );
         let unlabelled = record.clone().with_guest_ids(GuestIds::Namespace);
         assert!(
             unlabelled
-                .validate_replay_inputs("unlabelled", chosen())
+                .validate_replay_inputs("unlabelled", chosen(), None)
                 .is_err()
         );
         assert!(
             record
                 .with_guest_ids(GuestIds::Host)
-                .validate_replay_inputs("host IDs", chosen())
+                .validate_replay_inputs("host IDs", chosen(), None)
                 .is_err()
         );
     }
@@ -582,7 +618,11 @@ mod tests {
     /// with rewriting off, a same-mode record of another rewrite format,
     /// a record stating no provenance when the run rewrites, and a
     /// legacy heuristic record inside the boundary envelope -- with the
-    /// typed admission refusal, before any backend starts.
+    /// typed admission refusal, before any backend starts. Detcore's own
+    /// pre-start check (`admit_replay_rewrite`, every launch path) and the
+    /// authoritative loaders (the decoded record each installs, for the
+    /// schedule and for the priorities) give the same answer for every
+    /// case.
     #[test]
     fn config_admission_refuses_another_exclusive_rewrite() {
         use crate::preemptions::RewriteExclusives;
@@ -654,6 +694,37 @@ mod tests {
                         "{error:#}"
                     );
                 }
+                assert_eq!(
+                    admit_replay_rewrite(&config).is_err(),
+                    refused,
+                    "pre-start: {path:?} under {current:?}"
+                );
+                assert_eq!(
+                    validate_chosen_provenance(&config).is_err(),
+                    refused,
+                    "provenance preflight: {path:?} under {current:?}"
+                );
+                let replay_rewrite = crate::preemptions::config_rewrite_exclusives(&config);
+                let loaded = if from_schedule {
+                    Recording::read(path).unwrap().validate_replay_inputs(
+                        "--replay-schedule-from",
+                        config.guest_ids,
+                        replay_rewrite,
+                    )
+                } else {
+                    HistoryReader::read_for_replay(path, config.guest_ids, replay_rewrite)
+                        .map(|_| ())
+                        .map_err(|error| {
+                            error
+                                .downcast::<RecordAdmissionRefusal>()
+                                .expect("a typed admission refusal")
+                        })
+                };
+                assert_eq!(
+                    loaded.is_err(),
+                    refused,
+                    "loader: {path:?} under {current:?}"
+                );
             }
         }
     }
@@ -673,7 +744,7 @@ mod tests {
             .with_reserved_input(ReservedInputMetadata::default())
             .write_to_disk(&path)
             .unwrap();
-        let error = HistoryReader::read_for_replay(&path, chosen()).unwrap_err();
+        let error = HistoryReader::read_for_replay(&path, chosen(), None).unwrap_err();
         assert!(
             error
                 .chain()
@@ -934,7 +1005,7 @@ mod tests {
             assert_eq!(recorded.format_version(), Some(3));
             assert_eq!(recorded.time_skips(), Some([skip].as_slice()));
             recorded
-                .validate_replay_inputs("writer observer", chosen())
+                .validate_replay_inputs("writer observer", chosen(), None)
                 .unwrap();
 
             let unsupported_layout = matches!(failure, InputSetupOutcome::Qualified(_));
@@ -951,7 +1022,7 @@ mod tests {
             assert_eq!(partial.time_skips(), Some([skip].as_slice()));
             assert!(
                 partial
-                    .validate_replay_inputs("unqualified earlier image", chosen())
+                    .validate_replay_inputs("unqualified earlier image", chosen(), None)
                     .unwrap_err()
                     .to_string()
                     .contains("missing reserved_input provenance")
