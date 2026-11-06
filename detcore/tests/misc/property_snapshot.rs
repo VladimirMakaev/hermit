@@ -1456,3 +1456,227 @@ fn a_create_whose_parent_walk_fails_gets_linuxs_errno() {
     assert!(!outside.path().join("missing-dir").exists());
     assert!(!unsearchable.join("inner").exists());
 }
+
+/// What the private-table thread of
+/// [`a_late_file_held_through_a_private_descriptor_table_is_refused`] did:
+/// each call's result, or `-errno`, and the first bytes it read.
+#[repr(C)]
+struct PrivateTable {
+    /// The path of the late file, NUL-terminated.
+    late: [u8; 512],
+    /// A file outside the area, NUL-terminated.
+    outside: [u8; 512],
+    /// Where in the area it is renamed to, NUL-terminated.
+    moved_into: [u8; 512],
+    reopened: libc::c_long,
+    reopened_bytes: [u8; 4],
+    mapped: libc::c_long,
+    mapped_bytes: [u8; 4],
+    /// Cleared by the kernel when the thread exits (`CLONE_CHILD_CLEARTID`).
+    alive: i32,
+}
+
+/// The result of a raw syscall, or `-errno`, read right after it. The thread
+/// shares its creator's thread-local storage, which waits meanwhile.
+fn raw_result(ret: libc::c_long) -> libc::c_long {
+    if ret < 0 {
+        // SAFETY: errno of this task, set by the call just made.
+        -libc::c_long::from(unsafe { *libc::__errno_location() })
+    } else {
+        ret
+    }
+}
+
+/// The thread with a descriptor table of its own: it opens the late file
+/// `O_PATH` at 61, unlinks it, and reopens it readably through
+/// `/proc/thread-self/fd/61`. Then it opens a file outside the area readably,
+/// renames it into the area and unlinks it there, and maps its descriptor,
+/// moved to 60. Raw syscalls only, and no allocation or panic: it shares its
+/// creator's memory and thread-local storage.
+extern "C" fn private_table_thread(arg: *mut libc::c_void) -> libc::c_int {
+    // SAFETY: `arg` is the `PrivateTable` its creator keeps alive.
+    let state = unsafe { &mut *arg.cast::<PrivateTable>() };
+    let path = state.late.as_ptr().cast::<libc::c_char>();
+    // SAFETY: raw syscalls on valid paths and buffers.
+    unsafe {
+        let held = libc::syscall(
+            libc::SYS_openat,
+            libc::AT_FDCWD,
+            path,
+            libc::O_PATH | libc::O_CLOEXEC,
+        );
+        if held >= 0 {
+            libc::syscall(libc::SYS_dup3, held, 61, 0);
+            libc::syscall(libc::SYS_close, held);
+        }
+        libc::syscall(libc::SYS_unlinkat, libc::AT_FDCWD, path, 0);
+        let link = b"/proc/thread-self/fd/61\0";
+        state.reopened = raw_result(libc::syscall(
+            libc::SYS_openat,
+            libc::AT_FDCWD,
+            link.as_ptr(),
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        ));
+        if state.reopened >= 0 {
+            libc::syscall(
+                libc::SYS_read,
+                state.reopened,
+                state.reopened_bytes.as_mut_ptr(),
+                4,
+            );
+        }
+        let outside = state.outside.as_ptr().cast::<libc::c_char>();
+        let moved_into = state.moved_into.as_ptr().cast::<libc::c_char>();
+        let readable = libc::syscall(
+            libc::SYS_openat,
+            libc::AT_FDCWD,
+            outside,
+            libc::O_RDONLY | libc::O_CLOEXEC,
+        );
+        libc::syscall(
+            libc::SYS_renameat,
+            libc::AT_FDCWD,
+            outside,
+            libc::AT_FDCWD,
+            moved_into,
+        );
+        libc::syscall(libc::SYS_unlinkat, libc::AT_FDCWD, moved_into, 0);
+        if readable >= 0 {
+            libc::syscall(libc::SYS_dup3, readable, 60, 0);
+            libc::syscall(libc::SYS_close, readable);
+        }
+        state.mapped = raw_result(libc::syscall(
+            libc::SYS_mmap,
+            0,
+            4096,
+            libc::PROT_READ,
+            libc::MAP_PRIVATE,
+            60,
+            0,
+        ));
+        if state.mapped >= 0 {
+            std::ptr::copy_nonoverlapping(
+                state.mapped as *const u8,
+                state.mapped_bytes.as_mut_ptr(),
+                4,
+            );
+            libc::syscall(libc::SYS_munmap, state.mapped, 4096);
+        }
+    }
+    0
+}
+
+/// A thread cloned with `CLONE_THREAD` but without `CLONE_FILES` has a
+/// descriptor table of its own. A file the area gained after its snapshot,
+/// held there and then unlinked, is no longer found among the area's
+/// entries, so only the kernel's path for the descriptor names it, as the
+/// area pathname with " (deleted)", and only in that thread's table: its
+/// leader holds `/dev/null` at the same numbers. Its readable reopen
+/// through `/proc/thread-self/fd` is refused with `EOPNOTSUPP` under the
+/// errno policy, and so is a mapping of a descriptor that thread opened
+/// readably outside the area and then moved into it (renamed there, and
+/// unlinked); no live byte reaches the guest. Before, both checks read the leader's table
+/// (`/proc/<pid>/fd`), found `/dev/null` there, and let the guest read
+/// the live file.
+#[test]
+fn a_late_file_held_through_a_private_descriptor_table_is_refused() {
+    use std::os::fd::AsRawFd;
+    let area = area();
+    let late = area.live.path().join("u:object_r:private_table_prop:s0");
+    std::fs::write(&late, [9, 10, 11, 12]).unwrap();
+    let outside_dir = tempfile::tempdir_in(area.live.path().parent().unwrap()).unwrap();
+    let outside = outside_dir.path().join("readable-outside");
+    std::fs::write(&outside, [13, 14, 15, 16]).unwrap();
+    let moved_into = area.live.path().join("u:object_r:moved_in_prop:s0");
+    let config = detcore::Config {
+        max_timeslice: None,
+        sequentialize_threads: true,
+        property_snapshot: Some(area.snapshot.clone()),
+        ..Default::default()
+    };
+    let guest = move || {
+        let null = std::fs::File::open("/dev/null").unwrap();
+        for number in [60, 61] {
+            // SAFETY: duplicating an open descriptor.
+            assert_eq!(unsafe { libc::dup2(null.as_raw_fd(), number) }, number);
+        }
+        let mut state = Box::new(PrivateTable {
+            late: [0; 512],
+            outside: [0; 512],
+            moved_into: [0; 512],
+            reopened: 0,
+            reopened_bytes: [0; 4],
+            mapped: 0,
+            mapped_bytes: [0; 4],
+            alive: 1,
+        });
+        for (field, path) in [
+            (&mut state.late, &late),
+            (&mut state.outside, &outside),
+            (&mut state.moved_into, &moved_into),
+        ] {
+            let bytes = path.as_os_str().as_encoded_bytes();
+            field[..bytes.len()].copy_from_slice(bytes);
+        }
+        let mut stack = vec![0_u8; 1 << 20];
+        // SAFETY: the stack grows down from its 16-byte-aligned end.
+        let top = unsafe { stack.as_mut_ptr().add(stack.len()) };
+        let top = (top as usize & !15) as *mut libc::c_void;
+        let state_ptr: *mut PrivateTable = &mut *state;
+        // SAFETY: a thread without `CLONE_FILES` on a stack and state that
+        // outlive it; its exit clears `alive`.
+        let tid = unsafe {
+            libc::clone(
+                private_table_thread,
+                top,
+                libc::CLONE_VM
+                    | libc::CLONE_FS
+                    | libc::CLONE_SIGHAND
+                    | libc::CLONE_THREAD
+                    | libc::CLONE_SYSVSEM
+                    | libc::CLONE_CHILD_CLEARTID,
+                state_ptr.cast(),
+                std::ptr::null_mut::<libc::pid_t>(),
+                std::ptr::null_mut::<libc::c_void>(),
+                std::ptr::addr_of_mut!((*state_ptr).alive),
+            )
+        };
+        assert!(tid > 0, "clone: {}", std::io::Error::last_os_error());
+        loop {
+            // SAFETY: the kernel clears and wakes this word at the thread's exit.
+            let alive = unsafe { std::ptr::read_volatile(std::ptr::addr_of!((*state_ptr).alive)) };
+            if alive == 0 {
+                break;
+            }
+            // SAFETY: a futex wait on that word while it holds `alive`.
+            unsafe {
+                libc::syscall(
+                    libc::SYS_futex,
+                    std::ptr::addr_of!((*state_ptr).alive),
+                    libc::FUTEX_WAIT,
+                    alive,
+                    std::ptr::null::<libc::timespec>(),
+                )
+            };
+        }
+        drop(stack);
+        assert_eq!(
+            (state.reopened, state.reopened_bytes),
+            (-libc::c_long::from(libc::EOPNOTSUPP), [0; 4]),
+            "the readable reopen through the private table"
+        );
+        assert_eq!(
+            (state.mapped, state.mapped_bytes),
+            (-libc::c_long::from(libc::EOPNOTSUPP), [0; 4]),
+            "the mapping through the private table"
+        );
+    };
+    // One run: the guest unlinks the late file.
+    detcore_testutils::det_test_fn_with_config_repetitions(
+        1,
+        true,
+        guest,
+        config,
+        detcore_testutils::expect_success,
+    );
+}
