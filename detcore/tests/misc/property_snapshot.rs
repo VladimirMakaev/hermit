@@ -180,12 +180,13 @@ fn a_property_snapshot_serves_every_read_of_the_files_it_copied() {
 /// whose resolution on the host succeeds but names the tracer's
 /// own, different directory for the same descriptor number), and
 /// a parent that cannot be proven outside the area in the guest
-/// (a missing parent, or any overlong spelled parent, including
-/// one naming a real outside directory) fails closed with the
-/// named refusal rather than being treated as outside on the
-/// strength of any host-side resolution; outside creations the
-/// guest probe can prove (plain, chained, and short descriptor
-/// spellings) still succeed.
+/// (any overlong spelled parent, missing or naming a real outside
+/// directory) fails closed with the named refusal rather than being
+/// treated as outside on the strength of any host-side resolution,
+/// while a short missing parent, whose walk the guest probe shows to
+/// fail, gets the open's own `ENOENT`; outside creations the guest
+/// probe can prove (plain, chained, and short descriptor spellings)
+/// still succeed.
 #[test]
 fn a_late_property_file_is_refused_through_alias_spellings() {
     let area = area();
@@ -698,18 +699,22 @@ fn a_late_property_file_is_refused_through_alias_spellings() {
             unsafe { libc::close(900) };
             unsafe { libc::close(902) };
             drop(directory);
-            // A parent that cannot be proven outside the area fails
-            // closed with the named refusal: a resolution that fails,
-            // in the guest probe or on the host, is not proof of
-            // outside. Natively both spellings fail `ENOENT`.
-            for (what, spelling) in [
+            // Natively both spellings fail `ENOENT`. The short one is
+            // probed in the guest, whose walk fails `ENOENT` as the
+            // open's own would, so the open fails with it. The long one
+            // does not fit the staged probe, so its parent cannot be
+            // shown outside the area, and it fails closed with the
+            // named refusal.
+            for (what, spelling, errno) in [
                 (
                     "short missing parent",
                     "/nonexistent-4791-property-area/missing-short-created".to_owned(),
+                    libc::ENOENT,
                 ),
                 (
                     "long missing parent",
                     format!("/nonexistent-4791-property-area/{dots}missing-long-created"),
+                    libc::EOPNOTSUPP,
                 ),
             ] {
                 let c = std::ffi::CString::new(spelling).unwrap();
@@ -725,9 +730,9 @@ fn a_late_property_file_is_refused_through_alias_spellings() {
                     // SAFETY: the descriptor opened above.
                     unsafe { libc::close(fd) };
                     failures.push(format!("{what}: open succeeded"));
-                } else if std::io::Error::last_os_error().raw_os_error() != Some(libc::EOPNOTSUPP) {
+                } else if std::io::Error::last_os_error().raw_os_error() != Some(errno) {
                     failures.push(format!(
-                        "{what}: refused with {}",
+                        "{what}: failed with {}",
                         std::io::Error::last_os_error()
                     ));
                 }
@@ -735,7 +740,7 @@ fn a_late_property_file_is_refused_through_alias_spellings() {
             // An overlong spelling of a real outside directory is
             // the stated fail-closed bound: only host-side
             // resolution could decide it, and host resolution never
-            // decides a spelled parent, so it is refused by name
+            // proves a spelled parent outside, so it is refused by name
             // even though it is in fact outside. Guest-provable
             // outside creations are the short controls above and
             // below (plain, chained, short descriptor spellings).
@@ -1332,4 +1337,122 @@ fn an_access_mode_3_open_of_a_copied_property_file_runs_as_natively() {
         config,
         detcore_testutils::expect_success,
     );
+}
+
+/// In a fail-closed run, a create whose parent walk fails gets the errno
+/// Linux gives it, and creates nothing: a missing directory (`ENOENT`, as a
+/// program probing before `mkdir` expects), with a write-only and a
+/// readable open, a regular file used as a directory (`ENOTDIR`), a
+/// symlink loop (`ELOOP`) and an overlong component (`ENAMETOOLONG`). A
+/// parent behind a directory without search permission fails as the
+/// guest's own walk of it does: `EACCES` for a guest without the
+/// capability to search any directory, `ENOENT` (the missing directory
+/// past it) for one with it, as this harness's guest has in its user
+/// namespace. The guest probe of the parent fails the same way the open's
+/// own walk would, and the open does not run. Before, every failed probe
+/// was a parent that could not be shown outside the area, and the run was
+/// stopped.
+#[test]
+fn a_create_whose_parent_walk_fails_gets_linuxs_errno() {
+    use std::os::unix::fs::PermissionsExt;
+    let area = area();
+    let outside = tempfile::tempdir_in(area.live.path().parent().unwrap()).unwrap();
+    std::fs::write(outside.path().join("file"), []).unwrap();
+    std::os::unix::fs::symlink("loop", outside.path().join("loop")).unwrap();
+    let unsearchable = outside.path().join("unsearchable");
+    std::fs::create_dir(&unsearchable).unwrap();
+    std::fs::set_permissions(&unsearchable, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let open = |path: &Path, flags: libc::c_int| -> Option<i32> {
+        let c = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
+        // SAFETY: a valid NUL-terminated path and a creation mode.
+        let fd = unsafe { libc::open(c.as_ptr(), flags, 0o600) };
+        if fd >= 0 {
+            // SAFETY: the descriptor opened above.
+            unsafe { libc::close(fd) };
+            None
+        } else {
+            std::io::Error::last_os_error().raw_os_error()
+        }
+    };
+    let cases: Vec<(PathBuf, libc::c_int, i32)> = vec![
+        (
+            outside.path().join("missing-dir").join("created"),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_EXCL,
+            libc::ENOENT,
+        ),
+        (
+            outside.path().join("missing-dir").join("created-rdwr"),
+            libc::O_RDWR | libc::O_CREAT,
+            libc::ENOENT,
+        ),
+        (
+            outside.path().join("file").join("created"),
+            libc::O_WRONLY | libc::O_CREAT,
+            libc::ENOTDIR,
+        ),
+        (
+            outside.path().join("loop").join("created"),
+            libc::O_WRONLY | libc::O_CREAT,
+            libc::ELOOP,
+        ),
+        (
+            outside.path().join("n".repeat(300)).join("created"),
+            libc::O_WRONLY | libc::O_CREAT,
+            libc::ENAMETOOLONG,
+        ),
+    ];
+    // Whether a walk through `unsearchable` fails `EACCES` depends on the
+    // walker's capabilities, so this case is compared with the guest's
+    // own non-creating walk of the same parent, which the guard leaves
+    // alone.
+    let searchless_parent = unsearchable.join("inner");
+    let searchless = searchless_parent.join("created");
+    for (path, flags, errno) in &cases {
+        assert_eq!(
+            open(path, *flags),
+            Some(*errno),
+            "natively: {}",
+            path.display()
+        );
+    }
+    let config = detcore::Config {
+        max_timeslice: None,
+        sequentialize_threads: true,
+        panic_on_unsupported_syscalls: true,
+        shutdown_on_unsupported_syscall: true,
+        property_snapshot: Some(area.snapshot.clone()),
+        ..Default::default()
+    };
+    let guest_cases = cases.clone();
+    let guest = move || {
+        for (path, flags, errno) in &guest_cases {
+            assert_eq!(
+                open(path, *flags),
+                Some(*errno),
+                "under Hermit: {}",
+                path.display()
+            );
+        }
+        let walk = open(&searchless_parent, libc::O_PATH | libc::O_CLOEXEC);
+        assert!(
+            matches!(walk, Some(libc::EACCES | libc::ENOENT)),
+            "the guest's walk of {}: {walk:?}",
+            searchless_parent.display()
+        );
+        assert_eq!(
+            open(&searchless, libc::O_WRONLY | libc::O_CREAT),
+            walk,
+            "under Hermit: {}",
+            searchless.display()
+        );
+    };
+    detcore_testutils::det_test_fn_with_config(
+        true,
+        guest,
+        config,
+        detcore_testutils::expect_success,
+    );
+    std::fs::set_permissions(&unsearchable, std::fs::Permissions::from_mode(0o700)).unwrap();
+    assert!(!outside.path().join("missing-dir").exists());
+    assert!(!unsearchable.join("inner").exists());
 }

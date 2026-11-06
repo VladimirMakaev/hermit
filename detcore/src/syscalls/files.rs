@@ -1216,7 +1216,11 @@ fn uncatalogued_area_name(
 /// The area name a not-yet-existing file at `path` would have: its parent,
 /// kernel-resolved on the host (symlinks and `..` walked, as
 /// `resolved_property_area_name` relies on), is the live area itself. This
-/// decides an `O_CREAT` open before it can create anything.
+/// decides an `O_CREAT` open before it can create anything. It is the one
+/// host-side resolution of a creation's parent, and it can only refuse: a
+/// parent it finds to be the area is refused by name, and any other answer
+/// leaves the decision to the guest-side probe
+/// (`Detcore::creation_in_live_area`), never proving a parent outside.
 fn area_parent_name(
     snapshot: &detcore_model::config::PropertySnapshot,
     path: &Path,
@@ -1284,10 +1288,13 @@ enum ParentArea {
     /// successful resolution whose identity differs from the area's.
     /// A resolution that fails is never `Outside`.
     Outside,
+    /// Resolving the parent failed with this errno, which the pending
+    /// open would return itself (`resolved_parent_area`).
+    OpenFails(Errno),
     /// The resolved parent could not be determined, or could not be
     /// proven outside (its spelling does not fit the staged probe,
-    /// its resolution failed, or it resolves only in the guest's own
-    /// context), so the creation fails closed by name.
+    /// its resolution failed in a way the open need not repeat, or the
+    /// staging failed), so the creation fails closed by name.
     Unknown,
 }
 
@@ -1299,6 +1306,9 @@ enum PropertyOpen {
     Live(String),
     /// A name in the property area the snapshot does not hold.
     Unknown(String),
+    /// The open fails with this errno, which Linux would return for it,
+    /// without running (`Detcore::creation_in_live_area`).
+    Fails(Errno),
 }
 
 #[cfg(test)]
@@ -5902,17 +5912,17 @@ impl<T: RecordOrReplay> Detcore<T> {
             && call.flags().contains(OFlag::O_CREAT)
             && opens_to_change(call.flags())
         {
-            let reason = match area_parent_name(snapshot, path) {
-                Some(name) => Some(format!(
+            let decision = match area_parent_name(snapshot, path) {
+                Some(name) => Some(PropertyOpen::Live(format!(
                     "{name} is in the property area but not in its snapshot"
-                )),
+                ))),
                 None => {
                     self.creation_in_live_area(guest, call, path, snapshot)
                         .await
                 }
             };
-            if let Some(reason) = reason {
-                return Some(PropertyOpen::Live(reason));
+            if decision.is_some() {
+                return decision;
             }
         }
         if !pure_read && !opens_readable(call.flags()) {
@@ -5987,13 +5997,41 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// This binds the decision to the directory object the open will
     /// use, not to any spelling of it, so a retained dirfd whose
     /// spelling was replaced and a parent reached through symlinks
-    /// are both decided correctly. A probe the kernel refuses while
-    /// resolving the parent (a missing or non-directory component, a
-    /// symlink loop, a permission failure) is `Unknown`, never
-    /// `Outside`: only a resolved directory whose identity differs
-    /// from the area's proves the parent outside, and a failed
-    /// resolution is no proof at all, so the creation fails closed
-    /// by name instead of being allowed as a proven outside parent.
+    /// are both decided correctly. A failed probe is never `Outside`:
+    /// only a resolved directory whose identity differs from the
+    /// area's proves the parent outside.
+    ///
+    /// A probe that fails with `ENOENT`, `ENOTDIR`, `EACCES`, `ELOOP`,
+    /// `ENAMETOOLONG` or `EMFILE` is `OpenFails`, with that errno: the
+    /// pending open would fail with it too, so the caller can return
+    /// it ([`Self::creation_in_live_area`] says when). The probe is an
+    /// `openat` the guest thread itself makes, from the same `dirfd`,
+    /// with the same credentials, root and working directory and the
+    /// same descriptor table, on the leading bytes of the open's own
+    /// spelling. Linux runs both the same way up to the parent
+    /// (`do_sys_openat2`, `path_openat`, `link_path_walk`, fs/namei.c):
+    /// it allocates the descriptor first (`EMFILE`, from this table
+    /// and this task's `RLIMIT_NOFILE`), then walks the components in
+    /// order, from the same start and with the same link count. Each
+    /// parent component is an intermediate one for the open, looked
+    /// up with search permission on its directory (`may_lookup`) and
+    /// followed if it is a link (`may_follow_link`); the probe's last
+    /// component is looked up and followed the same way, and its
+    /// `O_PATH` open (`do_o_path`) checks no permission on the object
+    /// itself. So every `EACCES` the probe can return is a search or
+    /// link-following check the open makes first, on the same object
+    /// for the same task; `ENOENT`, `ENOTDIR`, `ELOOP` and
+    /// `ENAMETOOLONG` (a component over `NAME_MAX`) are the same
+    /// walk's. A failure only the open can meet before its walk (its
+    /// whole spelling exceeding `PATH_MAX`, or flags `build_open_flags`
+    /// refuses) is excluded by the caller.
+    ///
+    /// Every other failure stays `Unknown`, and refuses: one the open
+    /// need not repeat, and a failure of the staging, which says
+    /// nothing about the walk. Among them is `ENFILE`: the system's
+    /// file table is the host's, which processes outside the run
+    /// change from one moment to the next. So is a spelling too long
+    /// for the staged probe, which is never run.
     async fn resolved_parent_area<G: Guest<Self>>(
         &self,
         guest: &mut G,
@@ -6010,19 +6048,33 @@ impl<T: RecordOrReplay> Detcore<T> {
         let mut spelled = [0_u8; PATH_MAX];
         spelled[..parent.len()].copy_from_slice(parent);
         let flags = OFlag::O_PATH | OFlag::O_CLOEXEC;
-        let opened = crate::syscalls::scratch::inject_with_scratch(guest, spelled, |base| {
-            syscalls::Openat::new()
-                .with_dirfd(dirfd)
-                .with_path(PathPtr::from_ptr(base.as_raw() as *const libc::c_char))
-                .with_flags(flags)
-                .with_mode(None)
-                .into()
-        })
-        .await;
-        let (opened, _) = match opened {
-            Ok(opened) => opened,
-            // A failed resolution is not proof of outside.
-            Err(_) => return ParentArea::Unknown,
+        let opened =
+            crate::syscalls::scratch::inject_with_scratch_reporting(guest, spelled, |base| {
+                syscalls::Openat::new()
+                    .with_dirfd(dirfd)
+                    .with_path(PathPtr::from_ptr(base.as_raw() as *const libc::c_char))
+                    .with_flags(flags)
+                    .with_mode(None)
+                    .into()
+            })
+            .await;
+        let opened = match opened {
+            Ok((Ok(opened), _)) => opened,
+            // The open's own failure, which it would return itself.
+            Ok((
+                Err(
+                    errno @ (Errno::ENOENT
+                    | Errno::ENOTDIR
+                    | Errno::EACCES
+                    | Errno::ELOOP
+                    | Errno::ENAMETOOLONG
+                    | Errno::EMFILE),
+                ),
+                _,
+            )) => return ParentArea::OpenFails(errno),
+            // Any other failure of the probe, or of its staging, is not
+            // proof of outside.
+            Ok((Err(_), _)) | Err(_) => return ParentArea::Unknown,
         };
         let Ok(fd) = RawFd::try_from(opened) else {
             return ParentArea::Unknown;
@@ -6060,13 +6112,31 @@ impl<T: RecordOrReplay> Detcore<T> {
     /// area (a spelling or a link target that does not fit the
     /// staged resolution) refuses the creation by name, rather than
     /// letting the real open create live first.
+    ///
+    /// Where the probe of the spelled parent fails with an errno the
+    /// open would return itself (`ParentArea::OpenFails`), the open
+    /// fails with that errno, without running: a create in a missing
+    /// directory gets `ENOENT`, as a program probing before `mkdir`
+    /// expects. No second lookup is made, so nothing that changes the
+    /// path after the probe (another thread of a run that does not
+    /// sequentialize, or a process outside the run) can make a
+    /// creating walk enter the area; the errno is the one the open
+    /// would have returned at the probe's moment. It is returned only
+    /// where Linux reaches that walk: a spelling with a final name
+    /// (one that ends in `/` fails `EISDIR` before its last
+    /// component is looked up, `open_last_lookups`), shorter than
+    /// `PATH_MAX`, without `O_DIRECTORY` (`O_CREAT` with it, or with
+    /// `O_TMPFILE`, fails `EINVAL` in `build_open_flags`). Elsewhere,
+    /// and for a link target's parent (whose walk comes after the
+    /// open has followed links the probe does not count), a failed
+    /// probe refuses as any other unknown parent does.
     async fn creation_in_live_area<G: Guest<Self>>(
         &self,
         guest: &mut G,
         call: syscalls::Openat,
         _observed: &Path,
         snapshot: &detcore_model::config::PropertySnapshot,
-    ) -> Option<String> {
+    ) -> Option<PropertyOpen> {
         use std::os::unix::ffi::OsStrExt as _;
         fn split(path: &[u8]) -> (&[u8], &[u8]) {
             match path.iter().rposition(|byte| *byte == b'/') {
@@ -6087,30 +6157,38 @@ impl<T: RecordOrReplay> Detcore<T> {
                 String::from_utf8_lossy(name)
             )
         }
+        let live = |reason: String| Some(PropertyOpen::Live(reason));
         let spelled_ptr = call.path()?;
         let spelled: PathBuf = spelled_ptr.read(&guest.memory()).ok()?;
         let bytes = spelled.as_os_str().as_bytes();
         let (parent, name) = split(bytes);
-        // Only the guest-side probe may decide a spelled parent:
-        // host resolution is never consulted, on success or on
-        // failure, because in the tracer's context the same bytes
-        // can name different objects (its own descriptors and task
-        // identity, symlink aliases, a different root). A parent
-        // the probe cannot prove outside — including any spelling
-        // too long for the staged probe — stays `Unknown` and is
-        // refused by name below. That refuses some overlong outside
-        // creations too; it is the accepted bound at this layer,
-        // where no guest-resolution primitive can decide a spelling
-        // beyond the staged probe.
+        // Only the guest-side probe may prove a spelled parent outside
+        // the area. The caller's host-side `area_parent_name` can only
+        // refuse; past it, host resolution decides nothing here, on
+        // success or on failure, because in the tracer's context the
+        // same bytes can name different objects (its own descriptors
+        // and task identity, symlink aliases, a different root). A
+        // parent the probe cannot prove outside — including any
+        // spelling too long for the staged probe — stays `Unknown` and
+        // is refused by name below. That refuses some overlong outside
+        // creations too; it is the accepted bound at this layer, where
+        // no guest-resolution primitive can decide a spelling beyond
+        // the staged probe.
         let parent_area = self
             .resolved_parent_area(guest, call.dirfd(), parent, snapshot)
             .await;
+        let flags = call.flags();
+        let linux_walks_the_parent = !name.is_empty()
+            && bytes.len() < libc::PATH_MAX as usize
+            && !flags.contains(OFlag::O_DIRECTORY);
         match parent_area {
-            ParentArea::Area => return Some(area_reason(name)),
-            ParentArea::Unknown => return Some(unknown_reason(name)),
+            ParentArea::Area => return live(area_reason(name)),
+            ParentArea::OpenFails(errno) if linux_walks_the_parent => {
+                return Some(PropertyOpen::Fails(errno));
+            }
+            ParentArea::OpenFails(_) | ParentArea::Unknown => return live(unknown_reason(name)),
             ParentArea::Outside => {}
         }
-        let flags = call.flags();
         if flags.contains(OFlag::O_NOFOLLOW)
             || (flags.contains(OFlag::O_CREAT) && flags.contains(OFlag::O_EXCL))
         {
@@ -6143,7 +6221,7 @@ impl<T: RecordOrReplay> Detcore<T> {
             // one by the `lstat` above, a later one by the readlink
             // that produced it), or the walk ends below.
             if current.len() >= PATH_PART {
-                return Some(unknown_reason(split(&current).1));
+                return live(unknown_reason(split(&current).1));
             }
             let mut buffer = [0_u8; PATH_PART + TARGET_PART];
             buffer[..current.len()].copy_from_slice(&current);
@@ -6161,17 +6239,17 @@ impl<T: RecordOrReplay> Detcore<T> {
             let target: Vec<u8> = match linked {
                 Ok((length, buffer)) => {
                     let Ok(length) = usize::try_from(length) else {
-                        return Some(unknown_reason(split(&current).1));
+                        return live(unknown_reason(split(&current).1));
                     };
                     // A target that fills its buffer may be cut off.
                     if length == 0 || length >= TARGET_PART {
-                        return Some(unknown_reason(split(&current).1));
+                        return live(unknown_reason(split(&current).1));
                     }
                     buffer[PATH_PART..PATH_PART + length].to_vec()
                 }
                 // The spelled final component is a link (above), so a
                 // refused readlink leaves its target directory unknown.
-                Err(_) if depth == 0 => return Some(unknown_reason(name)),
+                Err(_) if depth == 0 => return live(unknown_reason(name)),
                 // A later target that is no link (absent, or an object
                 // the earlier stat did not see): its own parent is
                 // the creating directory.
@@ -6183,8 +6261,13 @@ impl<T: RecordOrReplay> Detcore<T> {
                         .resolved_parent_area(guest, dirfd, &target_parent, snapshot)
                         .await
                     {
-                        ParentArea::Area => Some(area_reason(&target_name)),
-                        ParentArea::Unknown => Some(unknown_reason(&target_name)),
+                        ParentArea::Area => live(area_reason(&target_name)),
+                        // The open walks this after following links the
+                        // probe does not count, so it could fail
+                        // otherwise (`ELOOP` first).
+                        ParentArea::OpenFails(_) | ParentArea::Unknown => {
+                            live(unknown_reason(&target_name))
+                        }
                         ParentArea::Outside => None,
                     };
                 }
@@ -6726,6 +6809,8 @@ impl<T: RecordOrReplay> Detcore<T> {
                 (None, Some(PropertyOpen::Live(reason))) => {
                     Box::pin(self.open_live_property_area(guest, call, &reason)).await
                 }
+                // The errno the open would return, without running it.
+                (None, Some(PropertyOpen::Fails(errno))) => Err(Error::from(errno)),
                 (None, unknown) => {
                     if let Some(PropertyOpen::Unknown(name)) = unknown {
                         property_unknown = Some(name);
