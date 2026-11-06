@@ -5760,7 +5760,11 @@ impl Scheduler {
                 // Validate the exact decoded record installed below. A CLI
                 // pathname preflight cannot authorize a later unchecked read.
                 recording
-                    .validate_replay_inputs(&path.display().to_string(), cfg.guest_ids)
+                    .validate_replay_inputs(
+                        &path.display().to_string(),
+                        cfg.guest_ids,
+                        crate::preemptions::config_rewrite_exclusives(cfg),
+                    )
                     .unwrap_or_else(|error| exit_on_scheduler_refusal(&error));
                 recording
                     .require_faithful_replay()
@@ -25903,6 +25907,48 @@ mod test {
                 assert_eq!(global_time.lock().unwrap().as_nanos(), deadline);
             }
         }
+    }
+
+    /// A raw record/replay launch reads its schedule input once, in the
+    /// authoritative loader (`Scheduler::new`; its readmissions come from the
+    /// recording's own log), so a FIFO its producer writes once is
+    /// supported. Detcore's pre-start check of the replay's exclusive
+    /// rewrite (`Detcore::facility_admission`) must leave such a source
+    /// unread: had it read the FIFO, the loader would wait for a second
+    /// producer that never comes.
+    #[test]
+    fn a_raw_record_replay_schedule_from_a_fifo_is_read_once_by_its_loader() {
+        let directory = tempfile::tempdir().unwrap();
+        rejoin_log::RejoinWriter::create(directory.path()).unwrap();
+        let fifo = directory.path().join("schedule.fifo");
+        nix::unistd::mkfifo(
+            &fifo,
+            nix::sys::stat::Mode::S_IRUSR | nix::sys::stat::Mode::S_IWUSR,
+        )
+        .unwrap();
+        let config = Config {
+            recordreplay_modes: true,
+            replaying: true,
+            replay_data: Some(directory.path().to_path_buf()),
+            replay_schedule_from: Some(fifo.clone()),
+            ..Config::default()
+        };
+        // One producer, one write, as a pipe from another process gives.
+        let producer = std::thread::spawn(move || {
+            std::fs::write(&fifo, b"{\"per_thread\":{},\"global\":[]}\n").unwrap();
+        });
+        let (done, finished) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let admitted = <crate::Detcore as reverie::Tool>::facility_admission(&config);
+            let _scheduler = Scheduler::new(&config);
+            done.send(admitted.map_err(|error| format!("{error:#}")))
+                .unwrap();
+        });
+        let admitted = finished
+            .recv_timeout(std::time::Duration::from_secs(20))
+            .expect("the loader waited for a second producer: the schedule was read before it");
+        assert_eq!(admitted, Ok(()));
+        producer.join().unwrap();
     }
 
     /// Beside a thread that can still run, an idle poller's commit requests

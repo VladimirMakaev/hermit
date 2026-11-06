@@ -501,8 +501,10 @@ impl Recording {
         &self,
         source: &str,
         guest_ids: detcore_model::pid::GuestIds,
+        replay_rewrite: Option<super::RewriteExclusives>,
     ) -> Result<(), super::RecordAdmissionRefusal> {
-        self.metadata().validate_replay_inputs(source, guest_ids)
+        self.metadata()
+            .validate_replay_inputs(source, guest_ids, replay_rewrite)
     }
 
     /// The opaque private-input metadata, without flattening this envelope.
@@ -570,13 +572,8 @@ impl Recording {
         self.metadata().format_version()
     }
 
-    /// What the recording states about its run's exclusive-loop
-    /// rewrite, for replay admission
-    /// (`super::reserved_input::validate_config_replay_inputs`).
-    pub(super) fn recorded_rewrite_exclusives(&self) -> super::RecordedRewriteExclusives {
-        self.metadata().recorded_rewrite_exclusives()
-    }
-
+    /// The recording's preemption record: the legacy record itself, or a
+    /// boundary recording's.
     fn metadata(&self) -> &PreemptionRecord {
         match self {
             Self::Legacy(record) => record,
@@ -598,16 +595,20 @@ impl HistoryReader {
         Recording::read(path).map(Self)
     }
 
-    /// Read and admit the same bytes used for priority replay. A policy error
-    /// retains its RecordAdmissionRefusal type for the pre-start exit-122 path.
+    /// Read and admit the same bytes used for priority replay, under the
+    /// replaying run's exclusive-loop rewrite (`replay_rewrite`). A policy
+    /// error retains its RecordAdmissionRefusal type for the pre-start
+    /// exit-122 path.
     pub(crate) fn read_for_replay(
         path: &Path,
         guest_ids: detcore_model::pid::GuestIds,
+        replay_rewrite: Option<super::RewriteExclusives>,
     ) -> anyhow::Result<Self> {
         let recording = Recording::read(path)?;
         recording.validate_replay_inputs(
             &format!("--replay-preemptions-from {}", path.display()),
             guest_ids,
+            replay_rewrite,
         )?;
         Ok(Self(recording))
     }

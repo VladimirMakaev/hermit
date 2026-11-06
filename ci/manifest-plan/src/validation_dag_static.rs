@@ -3368,7 +3368,10 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // a_transferred_exec_gives_the_leader_the_survivors_own_cpu_time and
     // a_pre_exec_cpu_publication_after_a_transferred_exec_is_dropped: 3665.
     // Four census provenance units plus the non-PROGBITS control: 3665 + 5.
-    ("test.detcore_unit", 3755),
+    // And a_raw_record_replay_schedule_from_a_fifo_is_read_once_by_its_loader
+    // (the replay-rewrite pre-start check leaves a one-shot input unread):
+    // 3755 + 1 = 3756.
+    ("test.detcore_unit", 3756),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -3484,7 +3487,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (the same pull request's review): 216 + 1 = 217.
     // And the late-file alias, dirfd-after-chdir and live-mapping cases
     // (F1/F4): 217 + 3 = 220.
-    ("test.detcore_misc", 220),
+    // And replay_rewrite_admission's direct-launch refusal of a record of
+    // another exclusive rewrite: 220 + 1 = 221.
+    ("test.detcore_misc", 221),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -5658,7 +5663,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same two readable-open refusals: 214 + 2 = 216.
     // And the same access-mode-3 case: 216 + 1 = 217.
     // And the same three alias/dirfd/mapping cases: 217 + 3 = 220.
-    ("test.detcore_misc_on_host", 220),
+    // And the same direct-launch rewrite refusal: 220 + 1 = 221.
+    ("test.detcore_misc_on_host", 221),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).
@@ -6108,7 +6114,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // merge-queue recount after #5219: 3659.
     // The same six 2b-1 units: 3659 + 6 = 3665.
     // Four census provenance units plus the non-PROGBITS control: 3665 + 5.
-    ("test.detcore_unit_on_host", 3755),
+    // And the same FIFO schedule unit: 3755 + 1 = 3756.
+    ("test.detcore_unit_on_host", 3756),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).

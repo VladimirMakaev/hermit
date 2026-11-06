@@ -6920,6 +6920,34 @@ fn matching_exclusive_rewrite_replays_are_admitted_by_the_cli() {
             let mut ro = RunOpts::parse_from(&argv);
             let result = ro.resolve_guest_ids();
             assert!(result.is_ok(), "{argv:?}: {result:?}");
+            // The launch admission of `run` and `launch_in_container`,
+            // Detcore's pre-start check included, admits the same replay:
+            // the overlay everywhere, the in-memory rewrite wherever the
+            // host executes it. A host without FEAT_LSE refuses that
+            // rewrite itself, by exactly that refusal, never the record.
+            // Threads sequentialized, as `validate_args_with_timer_support`
+            // sets them for a default run and as the in-memory rewrite
+            // requires, so a memory row reaches the host check.
+            ro.det_opts.det_config.sequentialize_threads = true;
+            match ro.admit_launch() {
+                Ok(()) => {}
+                Err(error) => {
+                    let rendered = format!("{error:#}");
+                    assert!(
+                        rewrite.contains(&"--rewrite-exclusives-mode=memory")
+                            && rendered.contains(
+                                &detcore_model::config::RewriteExclusivesRefusal::HostLacksLseAtomics
+                                    .to_string()
+                            )
+                            && error
+                                .chain()
+                                .all(|cause| !cause
+                                    .is::<detcore::preemptions::RecordAdmissionRefusal>())
+                            && !rendered.contains("cannot reproduce the run"),
+                        "{argv:?}: {rendered}"
+                    );
+                }
+            }
         }
     }
 }
@@ -15302,8 +15330,7 @@ impl RunOpts {
         // Analyze and other in-process callers bypass the outer CLI entry.
         self.refuse_exclusive_rewrite_in_an_image()?;
         self.refuse_an_invalid_replayed_record()?;
-        detcore::preemptions::validate_config_replay_inputs(&self.effective_det_config())?;
-        <detcore::Detcore as reverie::Tool>::facility_admission(&self.det_opts.det_config)?;
+        self.admit_launch()?;
         let mut options = self.clone();
         options.capture_launch_namespace_mounts();
         options.det_opts.det_config.annotated_priority_replay =
@@ -15555,7 +15582,11 @@ impl RunOpts {
                         base,
                         refuse_host_ids: true,
                     });
-            record.validate_replay_inputs(&source, runtime_ids)?;
+            record.validate_replay_inputs(
+                &source,
+                runtime_ids,
+                self.rewrite_exclusives_provenance(),
+            )?;
             if let Some((_, previous)) = &replayed
                 && let Some(refusal) =
                     detcore::preemptions::guest_ids_mismatch(&source, *previous, recorded)
@@ -15608,8 +15639,7 @@ impl RunOpts {
         self.refuse_virtual_timeout_with_debugger()?;
         self.refuse_unready_exec_stop()?;
         if !self.namespace_only {
-            detcore::preemptions::validate_config_replay_inputs(&self.effective_det_config())?;
-            <detcore::Detcore as reverie::Tool>::facility_admission(&self.det_opts.det_config)?;
+            self.admit_launch()?;
         }
         let gdbserver_port = self.bind_gdbserver_port()?;
         let (mut container, tmpfs, identity, resources) = if self.no_namespace {
@@ -18313,6 +18343,21 @@ impl RunOpts {
                 detcore_model::host_input::mount_types(&mountinfo),
             );
         }
+    }
+
+    /// The replay and facility admission a run makes before it launches
+    /// (`RunOpts::run`, `launch_in_container`): the shared replay preflight
+    /// (`validate_config_replay_inputs`), then Detcore's own pre-start
+    /// admission (`Detcore::facility_admission`), which compares each
+    /// replayed record's exclusive rewrite with the run's again. Both read
+    /// the effective config, the one the rewrite flags populate and the
+    /// backend receives, so a replay whose record states this run's rewrite
+    /// is admitted by both.
+    fn admit_launch(&self) -> Result<(), Error> {
+        let config = self.effective_det_config();
+        detcore::preemptions::validate_config_replay_inputs(&config)?;
+        <detcore::Detcore as reverie::Tool>::facility_admission(&config)?;
+        Ok(())
     }
 
     pub(super) fn effective_det_config(&self) -> DetConfig {

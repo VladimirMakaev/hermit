@@ -1855,8 +1855,12 @@ impl GlobalState {
                 // This is a separate authoritative input from the scheduler
                 // replay above. Validate both when raw Config names both;
                 // never authorize one through an `.or(...)` of their paths.
-                let history =
-                    HistoryReader::read_for_replay(path, cfg.guest_ids).unwrap_or_else(|error| {
+                let history = HistoryReader::read_for_replay(
+                    path,
+                    cfg.guest_ids,
+                    crate::preemptions::config_rewrite_exclusives(cfg),
+                )
+                .unwrap_or_else(|error| {
                         if error
                             .chain()
                             .any(|cause| cause.is::<crate::preemptions::RecordAdmissionRefusal>())

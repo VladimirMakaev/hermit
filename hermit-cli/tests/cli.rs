@@ -69711,7 +69711,7 @@ fn namespace_only_keeps_ignoring_schedule_inputs() {
         // These same bytes require a provenance refusal for Chosen replay;
         // the positive below must exercise the direct-exec bypass instead.
         let refusal = fixture
-            .validate_replay_inputs("namespace-only fixture", chosen)
+            .validate_replay_inputs("namespace-only fixture", chosen, None)
             .unwrap_err()
             .to_string();
         assert!(refusal.contains("HERMIT_CHOSEN_JSON_INPUT_PROVENANCE:"));
