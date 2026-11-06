@@ -3435,7 +3435,9 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // (F1/F4): 217 + 3 = 220.
     // And property_snapshot::a_create_whose_parent_walk_fails_gets_linuxs_errno:
     // 220 + 1 = 221.
-    ("test.detcore_misc", 221),
+    // And property_snapshot::a_late_file_held_through_a_private_descriptor_table_is_refused:
+    // 221 + 1 = 222.
+    ("test.detcore_misc", 222),
     ("test.detcore_parallel", 5),
     // The previously unenrolled tests_time target contributes all 28 measured IDs.
     // Two seccomp-EFAULT failed-gettimeofday regressions retain all 28 prior
@@ -5553,7 +5555,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // And the same access-mode-3 case: 216 + 1 = 217.
     // And the same three alias/dirfd/mapping cases: 217 + 3 = 220.
     // And the same parent-walk errno case: 220 + 1 = 221.
-    ("test.detcore_misc_on_host", 221),
+    // And the same private-table case: 221 + 1 = 222.
+    ("test.detcore_misc_on_host", 222),
     ("test.detcore_parallel_on_host", 5),
     // The host twin selects the same announcement-order test
     // (https://github.com/rrnewton/hermit/issues/3463).

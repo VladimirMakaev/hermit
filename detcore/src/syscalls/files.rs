@@ -1427,6 +1427,11 @@ fn reopens_scheduler_managed_pipe(
 /// unavailable), in which case the lexical result stands unchanged. Also
 /// `None` under KVM, where `/proc/<pid>` does not name the guest (see
 /// [`crate::procfs_inode::tool_can_name_guest_descriptors`]).
+///
+/// `pid` names the descriptor table read. A process's ID names its
+/// leader's table, which a thread cloned without `CLONE_FILES` does not
+/// share; a check of a descriptor the calling thread holds passes that
+/// thread's own task ID ([`descriptor_table_task`]).
 fn resolved_open_path(
     backend: &reverie::BackendCapabilities,
     pid: i32,
@@ -1438,6 +1443,19 @@ fn resolved_open_path(
     let link = std::fs::read_link(format!("/proc/{pid}/fd/{fd}")).ok()?;
     // A deleted or anonymous target is not a stable object name.
     link.is_absolute().then_some(link)
+}
+
+/// The host task whose `/proc/<id>/fd` is the calling guest thread's own
+/// descriptor table: its thread ID (the host's, where the backend gives one
+/// beside its own), never its process's. A thread cloned with
+/// `CLONE_THREAD` but without `CLONE_FILES` has a table of its own, and
+/// `/proc/<pid>/fd`, its leader's, may hold another file at the same
+/// number, or none (`resolved_open_path`).
+fn descriptor_table_task<T: RecordOrReplay, G: Guest<Detcore<T>>>(guest: &G) -> i32 {
+    guest
+        .thread_state()
+        .physical_tid
+        .unwrap_or_else(|| guest.tid().as_raw())
 }
 
 /// What Detcore knows about a socket whose peer it classifies
@@ -6340,8 +6358,11 @@ impl<T: RecordOrReplay> Detcore<T> {
         // An object the capture never catalogued (a file the area gained
         // afterwards) is still in the live area if the object the kernel
         // resolved this descriptor to is: by its resolved path, or by its
-        // identity among the area's current entries.
-        let resolved = resolved_open_path(&self.cfg.backend, guest.pid().as_raw(), fd);
+        // identity among the area's current entries. The path is read from
+        // the calling thread's own table, where `fd` is: a deleted file
+        // reads as its area pathname with " (deleted)", which
+        // `resolved_property_area_name` takes.
+        let resolved = resolved_open_path(&self.cfg.backend, descriptor_table_task(guest), fd);
         match uncatalogued_area_name(snapshot, resolved.as_deref(), dev, ino) {
             Some(name) => LiveCheck::Live(format!(
                 "{name} is in the property area but not in its snapshot"
@@ -6382,7 +6403,8 @@ impl<T: RecordOrReplay> Detcore<T> {
             self.live_property_area_allowed(guest, &reason).await?;
             return Ok(());
         }
-        let resolved = resolved_open_path(&self.cfg.backend, guest.pid().as_raw(), fd);
+        // From the calling thread's own table, as `property_reached_live`.
+        let resolved = resolved_open_path(&self.cfg.backend, descriptor_table_task(guest), fd);
         if let Some(name) =
             uncatalogued_area_name(snapshot, resolved.as_deref(), stat.st_dev, stat.st_ino)
         {
