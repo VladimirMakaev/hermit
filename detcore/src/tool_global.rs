@@ -9545,6 +9545,12 @@ pub enum GlobalResponse {
     /// wait (inside `Granted`), so a thread arms before it runs guest code
     /// again (`crate::watch`). Unwrapped by `send_and_update_time`.
     WithWatchOrder(crate::watch::WatchOrder, Box<GlobalResponse>),
+    /// A `TraceSchedEvent`, `ResumeExec` or `StartNewThread` answer whose
+    /// timeslice (a start's first slice) a schedule replay ends where its
+    /// recording's timer stopped the thread, past its branch target
+    /// (`SchedEvent::instruction_offset`): the thread arms that timer
+    /// (`ThreadState::replay_instruction_offset`). Only around such an
+    /// answer, so a replay of a schedule without offsets answers as before.
     WithReplayInstructionOffset(crate::resources::InstructionOffset, Box<GlobalResponse>),
     RequestResources(ResumeStatus),
     ParkedRequest(ResourceReply),
@@ -11138,11 +11144,8 @@ where
             .thread_state_mut()
             .callback_history
             .install(checkpoints);
-    } else if matches!(resp.1, GlobalResponse::StartNewThread(..)) {
-        assert!(
-            !guest.thread_state().callback_history.is_active(),
-            "preserved callback activation matches coordinator startup"
-        );
+    } else {
+        check_start_without_callback_history(guest.thread_state(), &resp.1);
     }
     guest.thread_state_mut().last_grant_deadline = deadline;
     cap_timeslice_at_deadline(guest, deadline);
@@ -11689,11 +11692,45 @@ pub(crate) fn finish_thread_start<G, T>(
     // Restore only what this start grant actually carried: a saved None
     // must not erase the row-derived offset a history replay installs
     // during the reset (`next_timeslice`), with or without a first slice.
-    if let Some(offset) = start_offset {
+    // Before the first execve no slice is replayed, and its offset with it
+    // (`install_replayed_timeslice`): the reset's slice keeps no offset of
+    // the replayed one.
+    if let Some(offset) = start_offset
+        && guest.thread_state().past_global_first_execve
+    {
         guest.thread_state_mut().replay_instruction_offset = Some(offset);
     }
     crate::slice_boundary::grant::finish_start(guest.thread_state_mut(), reset)
         .unwrap_or_else(|error| crate::scheduler::exit_on_scheduler_refusal(&error));
+}
+
+/// Whether `response`, with any callback history unwrapped, answers a
+/// thread's start: `StartNewThread`, alone or with the instruction offset of
+/// its first slice (`GlobalResponse::WithReplayInstructionOffset`), which
+/// `thread_start_request` unwraps after `send_and_update_time`.
+fn is_start_answer(response: &GlobalResponse) -> bool {
+    match response {
+        GlobalResponse::StartNewThread(..) => true,
+        GlobalResponse::WithReplayInstructionOffset(_, answer) => {
+            matches!(**answer, GlobalResponse::StartNewThread(..))
+        }
+        _ => false,
+    }
+}
+
+/// A start answer without callback history (`is_start_answer`) finds none
+/// active in the thread: the coordinator activates it only by sending one
+/// (`GlobalResponse::WithCallbackHistory`).
+fn check_start_without_callback_history<T>(
+    thread: &crate::ThreadState<T>,
+    response: &GlobalResponse,
+) {
+    if is_start_answer(response) {
+        assert!(
+            !thread.callback_history.is_active(),
+            "preserved callback activation matches coordinator startup"
+        );
+    }
 }
 
 /// Keep only the clone pointer that requests an exit-time clear and wake.
@@ -12568,6 +12605,10 @@ impl std::fmt::Debug for SchedEventForLog<'_> {
             .field("end_time", &self.event.end_time);
         if self.event.stopless {
             s.field("stopless", &self.event.stopless);
+        }
+        // As `SchedEvent`'s own `Debug`: only an offset that is there.
+        if let Some(offset) = &self.event.instruction_offset {
+            s.field("instruction_offset", offset);
         }
         s.finish()
     }
@@ -14946,6 +14987,9 @@ mod tests {
     /// (`ThreadState::next_timeslice`), so `finish_thread_start` carries
     /// the start grant's offset across it: after the reset the thread's
     /// first slice still stops at the recorded instruction, not at its
+    /// branch target. Before the first execve no slice is replayed
+    /// (`install_replayed_timeslice`), and the offset is not restored
+    /// either: the reset's slice is not armed at the replayed slice's
     /// branch target.
     #[tokio::test]
     async fn a_start_grants_offset_survives_the_startup_reset() {
@@ -14968,7 +15012,13 @@ mod tests {
             private_memory: None,
         };
         super::finish_thread_start(&config, &mut guest, None, Some(slice));
-        assert_eq!(guest.thread.replay_instruction_offset, Some(offset));
+        assert_eq!(guest.thread.replay_instruction_offset, None);
+        let reset_end = guest.thread.end_of_timeslice;
+        assert_ne!(
+            reset_end,
+            Some(guest.thread.thread_logical_time.as_nanos() + slice),
+            "before the first execve the reset's slice stands"
+        );
 
         // Real schedule startup (past the first execve): the first slice's
         // duration is installed and its offset survives beside it.
@@ -15991,6 +16041,37 @@ mod tests {
             "SchedEvent { dettid: DetPid(3), op: Branch, count: 223, start_rip: None, end_rip: Some(<hostaddr 0x1234>), end_time: Some(LogicalTime(2230)) }"
         );
         assert_eq!(serde_json::to_string(&event).unwrap(), original);
+        // A bootstrap event's timer offset stays in its INFO line, as in
+        // the event's own `Debug`: two events that differ only there do not
+        // compare equal under `--verify-strict`.
+        let offset_event = event.clone().with_instruction_offset(Some(
+            detcore_model::schedule::InstructionOffset {
+                rcb_target: 220,
+                instructions: 3,
+            },
+        ));
+        assert_eq!(
+            format!(
+                "{:?}",
+                super::SchedEventForLog {
+                    event: &offset_event,
+                    command_bootstrap: false
+                }
+            ),
+            format!("{offset_event:?}")
+        );
+        let marked_offset = format!(
+            "{:?}",
+            super::SchedEventForLog {
+                event: &offset_event,
+                command_bootstrap: true
+            }
+        );
+        assert_eq!(
+            marked_offset,
+            "SchedEvent { dettid: DetPid(3), op: Branch, count: 223, start_rip: None, end_rip: Some(<hostaddr 0x1234>), end_time: Some(LogicalTime(2230)), instruction_offset: InstructionOffset { rcb_target: 220, instructions: 3 } }"
+        );
+        assert_ne!(marked_offset, marked);
     }
 
     #[test]
@@ -21287,6 +21368,52 @@ mod tests {
             assert_eq!(guest.thread.last_grant_deadline, None);
             assert_eq!(guest.thread.chaos_prng, generator);
             assert!(guest.requests.lock().unwrap().is_empty());
+        }
+    }
+
+    /// A start answer that carries its first slice's offset is still a start
+    /// answer to `send_and_update_time`, which checks that a start without
+    /// callback history finds none active in the thread; before, the
+    /// offset's wrapper hid the start from that check, so a thread with
+    /// callback history active passed it. Both forms are refused with
+    /// history active and pass without; another answer is not checked.
+    #[test]
+    fn a_start_answer_with_its_first_slices_offset_is_a_start_answer() {
+        let offset = crate::resources::InstructionOffset {
+            rcb_target: 120,
+            instructions: 6,
+        };
+        let start = GlobalResponse::StartNewThread(None, Some(LogicalTime::from_rcbs(83)));
+        let wrapped = GlobalResponse::WithReplayInstructionOffset(offset, Box::new(start.clone()));
+        let resume = GlobalResponse::ResumeExec(ResumeStatus::Normal, None);
+        let wrapped_resume =
+            GlobalResponse::WithReplayInstructionOffset(offset, Box::new(resume.clone()));
+        assert!(super::is_start_answer(&start));
+        assert!(super::is_start_answer(&wrapped));
+        assert!(!super::is_start_answer(&resume));
+        assert!(!super::is_start_answer(&wrapped_resume));
+
+        let config = Config::default();
+        let inactive = crate::ThreadState::new(DetTid::from_raw(3), &config, ());
+        let mut active = crate::ThreadState::new(DetTid::from_raw(3), &config, ());
+        active
+            .callback_history
+            .install(crate::preemptions::callback_history::Startup::default());
+        assert!(active.callback_history.is_active());
+        for response in [&start, &wrapped, &resume, &wrapped_resume] {
+            super::check_start_without_callback_history(&inactive, response);
+        }
+        for response in [&resume, &wrapped_resume] {
+            super::check_start_without_callback_history(&active, response);
+        }
+        for response in [&start, &wrapped] {
+            let refused = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                super::check_start_without_callback_history(&active, response)
+            }));
+            assert!(
+                refused.is_err(),
+                "{response:?} with callback history active"
+            );
         }
     }
 
