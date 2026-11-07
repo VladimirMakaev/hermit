@@ -3369,7 +3369,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // PR #4759's eight detcore units (uncapped mark, prefix, serde round-trip,
     // backstop, no-backstop-after-last-event, completed-slice stamp, slice-end
     // backstop, backstop-never-outlives; enumerated by nextest list): 3665 + 8 = 3673.
-    ("test.detcore_unit", 3673),
+    // And the_bounded_summary_carries_an_earned_uncapped_slices_mark: 3674.
+    ("test.detcore_unit", 3674),
     // tight_stack_openat::openat_succeeds_without_writable_stack_below_rsp
     // retains all 27 prior selected identities under the unchanged skip filters
     // (measured 28; https://github.com/rrnewton/hermit/issues/3328).
@@ -6088,7 +6089,8 @@ pub(super) const NEXTEST_EXPECTED_COUNTS: &[(&str, u64)] = &[
     // merge-queue recount after #5219: 3659.
     // The same six 2b-1 units: 3659 + 6 = 3665.
     // PR #4759's same eight detcore units: 3665 + 8 = 3673.
-    ("test.detcore_unit_on_host", 3673),
+    // And the same summary-mark unit: 3674.
+    ("test.detcore_unit_on_host", 3674),
     // Host variants select the same proc regressions and retain prior identities.
     // The host twin also selects the two clock_passthrough tests
     // (https://github.com/rrnewton/hermit/issues/1176).
