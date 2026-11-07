@@ -370,8 +370,9 @@ pub struct RunSummary {
     /// aarch64: of `exclusive_pairs`, those with any word in bytes the default
     /// code proof does not establish: outside `SHT_PROGBITS`, before its first
     /// mapping symbol, or in a section with missing or unsupported mapping
-    /// symbols. Unwind coverage alone proves nothing; `$d` data in a proved
-    /// section is not scanned. By guest path for files with unverified pairs.
+    /// symbols. Unwind coverage alone proves nothing; bytes valid mapping
+    /// symbols mark `$d` are never scanned, whatever the section type. By
+    /// guest path for files with unverified pairs.
     /// A function of the files' bytes, so it is in the INFO view. Empty elsewhere.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub exclusive_pairs_unverified: BTreeMap<String, u64>,
